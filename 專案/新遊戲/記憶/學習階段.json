@@ -881,6 +881,7 @@
     "sign_right",
     "sign_text",
     "signboard",
+    "slope",
     "slowfieldemitter",
     "spawn point",
     "spikes",
@@ -1052,6 +1053,7 @@
     "wall buttons",
     "wall text",
     "wall_sign",
+    "wardrobe",
     "weapon",
     "weapon bar",
     "weapon list",
@@ -1089,6 +1091,7 @@
     "wooden crate",
     "wooden crates",
     "wooden plank",
+    "wooden sign",
     "wooden table",
     "wooden walkway",
     "wooden_barrel",
@@ -1109,6 +1112,7 @@
     "workstation",
     "wunderwaffe003",
     "wunderwaffedg3",
+    "yellow ball",
     "yellow bar",
     "yellow beam",
     "yellow button",
@@ -1149,5 +1153,5 @@
     "zombie_icon"
   ],
   "查wiki次數": 0,
-  "更新": "09/22 21:38:49"
+  "更新": "09/23 00:07:48"
 }
