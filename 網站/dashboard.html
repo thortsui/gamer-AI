@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>動物醫院代理即時台</title>
+<style>
+:root{--bg:#0E1319;--surface:#161D26;--surface2:#1E2733;--ink:#E9EEF3;--ink2:#C5CED8;--muted:#95A1AF;--line:#2A3542;--accent:#F5C400;--accent-soft:#2E2A10;--block:#F0604C;--block-soft:#3A1E1A;--pass:#4CCB7E;--pass-soft:#163524;--think:#7FB7FF;--think-soft:#13263A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC",system-ui,"PingFang TC","Microsoft JhengHei",sans-serif;font-size:14px;line-height:1.55}
+.mono{font-family:"JetBrains Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:2}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.02em}
+.pill{font-family:"JetBrains Mono",Consolas,monospace;font-size:12px;padding:3px 9px;border-radius:999px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}
+.pill.ok{background:var(--pass-soft);color:var(--pass);border-color:transparent}
+.pill.bad{background:var(--block-soft);color:var(--block);border-color:transparent}
+.pill.acc{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px;padding:14px 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.card h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:500;display:flex;justify-content:space-between;align-items:center}
+.card .body{padding:12px 14px}
+#shot{display:block;width:100%;height:auto;background:#000}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.stat{background:var(--surface2);border-radius:6px;padding:9px 12px}
+.stat .n{font-family:"JetBrains Mono",Consolas,monospace;font-size:22px;font-weight:600;line-height:1.1}
+.stat .l{color:var(--muted);font-size:11.5px;margin-top:3px}
+.flow{list-style:none;margin:0;padding:0;max-height:560px;overflow-y:auto}
+.flow li{padding:9px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:64px 1fr;gap:10px}
+.flow li:first-child{background:var(--surface2)}
+.flow .t{font-family:"JetBrains Mono",Consolas,monospace;font-size:11.5px;color:var(--muted);padding-top:2px}
+.flow .m{font-size:11px;letter-spacing:.08em;color:var(--muted);margin-right:6px}
+.flow .see{color:var(--ink)}
+.flow .act{color:var(--ink2);font-size:13px;margin-top:2px}
+.flow .act b{color:var(--accent);font-weight:500}
+.flow .blk{color:var(--block);font-size:12.5px;margin-top:2px}
+.flow .note{color:var(--pass);font-size:12.5px;margin-top:2px}
+.flow li.think{border-left:3px solid var(--think);background:var(--think-soft)}
+.flow li.death{border-left:3px solid var(--block);background:var(--block-soft)}
+.flow li.rescue{border-left:3px solid var(--accent)}
+.flow li.pay .see::before{content:"🚫 付費視窗　";color:var(--block)}
+pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:"JetBrains Mono",Consolas,monospace;font-size:12.5px;line-height:1.55;color:var(--ink2);max-height:260px;overflow-y:auto}
+ul.plain{margin:0;padding-left:18px;color:var(--ink2);font-size:13px}
+ul.plain li{margin-bottom:3px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.muted{color:var(--muted);font-size:12px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>動物醫院代理即時台</h1>
+  <span class="pill" id="alive">連線中…</span>
+  <span class="pill acc" id="money">$ —</span>
+  <span class="pill" id="shift">輪班 —</span>
+  <span class="pill" id="best">🏆 最高輪班 — · 最高 $ —</span>
+  <span class="pill" id="idle">—</span>
+  <span class="muted" id="clock" style="margin-left:auto"></span>
+</header>
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2><span>它現在看到的畫面</span><span class="muted" id="shotts">每 1 秒更新</span></h2>
+      <img id="shot" src="/shot.jpg" alt="代理正在看的螢幕">
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2><span>最近 80 輪</span></h2>
+      <div class="body">
+        <div class="stats">
+          <div class="stat"><div class="n" id="s_dec">—</div><div class="l">決策輪</div></div>
+          <div class="stat"><div class="n" id="s_look">—</div><div class="l">看清楚輪</div></div>
+          <div class="stat"><div class="n" id="s_pay">—</div><div class="l">付費視窗（全部擋下）</div></div>
+          <div class="stat"><div class="n" id="s_blk">—</div><div class="l">擋掉的動作</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2><span>任務指示（使用者給的）</span></h2>
+      <div class="body"><pre id="instr"></pre></div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2><span>思考流程</span><span class="muted">最新在上・看到 → 做 → 擋 → 記</span></h2>
+      <ul class="flow" id="flow"></ul>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2><span>它自己擬的計畫（think）</span></h2>
+      <div class="body"><pre id="plan">（還沒有停下來思考過）</pre></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2><span>死亡檢討</span></h2>
+      <div class="body"><pre id="death">（還沒死過）</pre></div>
+    </div>
+    <div class="two" style="margin-top:14px">
+      <div class="card"><h2><span>玩法摘要（每 10 分鐘濃縮）</span></h2><div class="body"><ul class="plain" id="summary"></ul></div></div>
+      <div class="card"><h2><span>最新筆記</span></h2><div class="body"><ul class="plain" id="notes"></ul></div></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var shot=document.getElementById("shot");
+  function refreshShot(){var im=new Image();im.onload=function(){shot.src=im.src;document.getElementById("shotts").textContent="更新於 "+new Date().toLocaleTimeString("zh-TW",{hour12:false});};im.src="/shot.jpg?t="+Date.now();}
+  setInterval(refreshShot,1000);
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function describe(a){
+    if(!a||typeof a!=="object")return "";
+    var t=a.t;
+    if(t==="click")return "點「"+(a.g||"")+"」("+a.x+","+a.y+")";
+    if(t==="key")return "按 "+a.k+" "+(a.d||0.1)+"s";
+    if(t==="look")return "轉視角 "+a.dx+","+a.dy;
+    if(t==="scroll")return "滾輪 "+a.v;
+    if(t==="move")return "移滑鼠("+a.x+","+a.y+")";
+    if(t==="type")return "打字「"+(a.x||"")+"」";
+    if(t==="wait")return "等 "+a.d+"s";
+    if(t==="think")return "停下來想「"+(a.q||"")+"」";
+    if(t==="youtube")return "去 YouTube 查「"+(a.q||"")+"」";
+    return t||JSON.stringify(a);
+  }
+  function render(st){
+    var alive=document.getElementById("alive");
+    if(st.程序&&st.程序.length){alive.textContent="代理運作中 PID "+st.程序.join(",");alive.className="pill ok";}
+    else{alive.textContent="代理沒在跑";alive.className="pill bad";}
+    document.getElementById("money").textContent="$ "+(st.金幣==null?"—":st.金幣);
+    document.getElementById("shift").textContent="輪班 "+(st.輪班==null?"—":st.輪班);
+    var sc=st.成績||{};document.getElementById("best").textContent="🏆 最高輪班 "+(sc.最高輪班||"—")+" · 最高 $ "+(sc.最高金幣||"—")+" · 報告 "+(sc.輪班報告次數||0)+" 次";
+    var idle=document.getElementById("idle");idle.textContent=st.閒置秒==null?"—":("最後一輪 "+st.閒置秒+" 秒前");idle.className="pill"+(st.閒置秒>120?" bad":"");
+    document.getElementById("clock").textContent=st.時間;
+    var m=st.模式統計||{};
+    document.getElementById("s_dec").textContent=m["決策"]||0;
+    document.getElementById("s_look").textContent=m["看清楚"]||0;
+    document.getElementById("s_pay").textContent=st.付費視窗||0;
+    document.getElementById("s_blk").textContent=st.擋掉||0;
+    document.getElementById("instr").textContent=st.任務指示||"";
+    var rows=(st.最近||[]).slice().reverse(), html="";
+    rows.forEach(function(r){
+      var cls=[], mode=r.模式||"";
+      if(mode==="思考")cls.push("think");
+      if(mode==="死亡檢討")cls.push("death");
+      if(mode==="脫困走位"||mode==="強制離開重進")cls.push("rescue");
+      if(r.robux===1)cls.push("pay");
+      var see=r.看到||"";
+      if(mode==="思考")see="🤔 想：「"+(r.問題||"")+"」→ 計畫："+(r.計畫||"");
+      if(mode==="死亡檢討")see="💀 第 "+(r.次數||"")+" 次死亡檢討：死因「"+(r.死因||"")+"」錯誤「"+(r.錯誤||"")+"」下次「"+(r.避免||"")+"」";
+      if(mode==="脫困走位")see="🛟 程式端脫困走位";
+      if(mode==="強制離開重進")see="🚪 程式端強制離開重進";
+      var acts=(r.動作||[]).map(describe).filter(Boolean).join("、");
+      var blk=(r.擋掉||[]).map(function(b){return describe(b)+"（"+(b.原因||"")+"）";}).join("、");
+      var tim=(r.決策秒!=null?" · 決策 "+r.決策秒+"s":"")+(r.總秒!=null?" · 總 "+r.總秒+"s":"")+(r.秒!=null?" · "+r.秒+"s":"");
+      html+='<li class="'+cls.join(" ")+'"><div class="t">'+esc(r.時間)+'</div><div>'+
+        '<span class="m">'+esc(mode)+(r.差異!=null?" Δ"+r.差異:"")+esc(tim)+'</span><div class="see">'+esc(see)+'</div>'+
+        (acts?'<div class="act">做：<b>'+esc(acts)+'</b></div>':'')+
+        (blk?'<div class="blk">⛔ 擋掉：'+esc(blk)+'</div>':'')+
+        (r.筆記?'<div class="note">記：'+esc(r.筆記)+'</div>':'')+
+        '</div></li>';
+    });
+    document.getElementById("flow").innerHTML=html||'<li><div class="t">—</div><div>還沒有紀錄</div></li>';
+    document.getElementById("plan").textContent=(st.計畫||"").trim()||"（還沒有停下來思考過）";
+    document.getElementById("death").textContent=(st.死亡檢討||"").trim()||"（還沒死過）";
+    document.getElementById("summary").innerHTML=(st.玩法摘要||[]).map(function(x){return "<li>"+esc(x)+"</li>";}).join("")||"<li class='muted'>（尚未產生）</li>";
+    document.getElementById("notes").innerHTML=(st.筆記||[]).slice().reverse().map(function(x){return "<li>"+esc(x.replace(/^- /,""))+"</li>";}).join("");
+  }
+  function refreshState(){fetch("/api/state?t="+Date.now()).then(function(r){return r.json();}).then(render).catch(function(){document.getElementById("alive").textContent="儀表板伺服器沒回應";document.getElementById("alive").className="pill bad";});}
+  refreshState();setInterval(refreshState,3000);
+})();
+</script>
+</body>
+</html>

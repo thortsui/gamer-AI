@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>它在想什麼</title>
+<style>
+:root{--bg:#0D1117;--surface:#151B23;--surface2:#1D242D;--ink:#E8EDF2;--ink2:#C0C9D4;--muted:#8B96A3;--line:#252D38;
+ --see:#7FB7FF;--want:#F5C400;--did:#4CCB7E;--blk:#F0604C;--reflex:#C084FC;--note:#5FD3A8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC",system-ui,"PingFang TC","Microsoft JhengHei",sans-serif;font-size:14px;line-height:1.6}
+.mono{font-family:"JetBrains Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums}
+header{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);padding:10px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:17px;margin:0;font-weight:700}
+.pill{font-family:"JetBrains Mono",Consolas,monospace;font-size:12px;padding:3px 9px;border-radius:999px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}
+.pill.ok{background:#12301F;color:var(--did);border-color:transparent}
+.pill.bad{background:#3A1E1A;color:var(--blk);border-color:transparent}
+.pill.acc{background:#2E2A10;color:var(--want);border-color:transparent}
+.filters{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+button.f{background:var(--surface2);color:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12.5px;cursor:pointer;font-family:inherit}
+button.f[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+main{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:14px;padding:14px 18px;align-items:start}
+.sticky{position:sticky;top:62px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.card h2{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0;padding:9px 13px;border-bottom:1px solid var(--line);font-weight:500;display:flex;justify-content:space-between}
+#shot{display:block;width:100%;height:auto;background:#000}
+.rounds{display:grid;gap:10px}
+.round{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden}
+.round.new{border-color:var(--see)}
+.rhead{display:flex;align-items:center;gap:10px;padding:8px 13px;background:var(--surface2);font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.rhead .t{font-family:"JetBrains Mono",Consolas,monospace;color:var(--ink2)}
+.rhead .mode{padding:1px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);font-size:11.5px}
+.rhead .ms{margin-left:auto;font-family:"JetBrains Mono",Consolas,monospace}
+.body{padding:11px 13px;display:grid;gap:9px}
+.line{display:grid;grid-template-columns:76px 1fr;gap:10px;align-items:start}
+.k{font-size:11.5px;letter-spacing:.1em;color:var(--muted);padding-top:2px}
+.v{color:var(--ink)}
+.see .v{color:var(--see)}
+.want .v{color:var(--want)}
+.did .v{color:var(--did);font-weight:500}
+.blk .v{color:var(--blk)}
+.reflex .v{color:var(--reflex)}
+.note .v{color:var(--note)}
+.chip{display:inline-block;background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin:0 5px 5px 0;font-size:13px}
+.chip.did{border-color:#1E4B33;background:#12301F}
+.chip.blk{border-color:#4A2620;background:#3A1E1A}
+.chip.reflex{border-color:#3A2A52;background:#241B33}
+.round.think{border-left:3px solid var(--reflex)}
+.round.death{border-left:3px solid var(--blk)}
+.round.pay{border-left:3px solid var(--blk)}
+.round.rescue{border-left:3px solid var(--want)}
+.empty{color:var(--muted);padding:20px;text-align:center}
+.mini{font-size:12px;color:var(--muted)}
+pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:"JetBrains Mono",Consolas,monospace;font-size:12px;color:var(--ink2);max-height:200px;overflow:auto}
+@media (max-width:900px){main{grid-template-columns:1fr}.sticky{position:static}}
+</style>
+</head>
+<body>
+<header>
+  <h1>它在想什麼</h1>
+  <span class="pill" id="alive">連線中…</span>
+  <span class="pill acc" id="score">🏆 —</span>
+  <span class="pill" id="now">$ — · 輪班 —</span>
+  <div class="filters">
+    <button class="f" data-f="all" aria-pressed="true">全部</button>
+    <button class="f" data-f="act" aria-pressed="false">只看有動作</button>
+    <button class="f" data-f="blk" aria-pressed="false">只看被擋</button>
+    <button class="f" data-f="ev" aria-pressed="false">只看事件</button>
+    <button class="f" data-f="pause" aria-pressed="false">暫停更新</button>
+  </div>
+</header>
+<main>
+  <div class="sticky">
+    <div class="card">
+      <h2><span>它現在看到的畫面</span><span class="mini" id="shotts">每秒更新</span></h2>
+      <img id="shot" src="/shot.jpg" alt="代理正在看的畫面">
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2><span>它自己擬的計畫</span></h2>
+      <div style="padding:11px 13px"><pre id="plan">（還沒停下來思考過）</pre></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2><span>死亡檢討</span></h2>
+      <div style="padding:11px 13px"><pre id="death">（還沒死過）</pre></div>
+    </div>
+  </div>
+  <div>
+    <div class="card" style="margin-bottom:12px">
+      <h2><span>怎麼讀這一頁</span></h2>
+      <div style="padding:11px 13px" class="mini">
+        每張卡片是一輪。<b style="color:var(--see)">看到</b>＝模型對畫面的描述；
+        <b style="color:var(--want)">想做</b>＝它提出的動作；
+        <b style="color:var(--did)">實際做</b>＝通過安全檢查後真的送進遊戲的操作；
+        <b style="color:var(--blk)">被擋</b>＝程式攔下的動作與原因；
+        <b style="color:var(--reflex)">反射</b>＝它思考時程式每 0.4 秒替它重複的動作；
+        <b style="color:var(--note)">學到</b>＝寫進長期筆記的一句話。
+      </div>
+    </div>
+    <div class="rounds" id="rounds"><div class="empty">載入中…</div></div>
+  </div>
+</main>
+<script>
+(function(){
+  var paused=false, filter="all", seen={};
+  var shot=document.getElementById("shot");
+  setInterval(function(){ if(paused) return; var im=new Image(); im.onload=function(){shot.src=im.src;document.getElementById("shotts").textContent=new Date().toLocaleTimeString("zh-TW",{hour12:false});}; im.src="/shot.jpg?t="+Date.now(); },1000);
+  document.querySelectorAll("button.f").forEach(function(b){
+    b.addEventListener("click",function(){
+      if(b.dataset.f==="pause"){ paused=!paused; b.setAttribute("aria-pressed",paused); return; }
+      filter=b.dataset.f;
+      document.querySelectorAll("button.f").forEach(function(x){ if(x.dataset.f!=="pause") x.setAttribute("aria-pressed", x===b); });
+      render(last);
+    });
+  });
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function desc(a){
+    if(!a||typeof a!=="object") return "";
+    var t=a.t;
+    if(t==="click") return "點「"+(a.g||"")+"」";
+    if(t==="key") return "按 "+String(a.k).toUpperCase()+"（"+(a.d||0.1)+"秒）";
+    if(t==="look") return "轉視角 "+(a.dx>0?"右":a.dx<0?"左":"")+(a.dx?Math.abs(a.dx):"")+(a.dy?("、"+(a.dy>0?"往下":"往上")+Math.abs(a.dy)):"");
+    if(t==="scroll") return "滾輪 "+(a.v<0?"拉遠":"拉近")+Math.abs(a.v);
+    if(t==="move") return "移滑鼠";
+    if(t==="type") return "打字「"+(a.x||"")+"」";
+    if(t==="wait") return "等 "+a.d+" 秒";
+    if(t==="think") return "停下來想「"+(a.q||"")+"」";
+    if(t==="wiki") return "查攻略「"+(a.q||"")+"」";
+    if(t==="youtube") return "看影片「"+(a.q||"")+"」";
+    return a.t||JSON.stringify(a);
+  }
+  function row(cls,label,html){ return html? '<div class="line '+cls+'"><div class="k">'+label+'</div><div class="v">'+html+'</div></div>' : ''; }
+  var last=null;
+  function render(st){
+    if(!st) return; last=st;
+    var alive=document.getElementById("alive");
+    if(st.程序&&st.程序.length){alive.textContent="運作中 PID "+st.程序.join(",");alive.className="pill ok";}
+    else {alive.textContent="代理沒在跑";alive.className="pill bad";}
+    var sc=st.成績||{};
+    document.getElementById("score").textContent="🏆 最高輪班 "+(sc.最高輪班||"—")+" · 最高 $"+(sc.最高金幣||"—");
+    document.getElementById("now").textContent="$ "+(st.金幣==null?"—":st.金幣)+" · 輪班 "+(st.輪班==null?"—":st.輪班);
+    document.getElementById("plan").textContent=(st.計畫||"").trim()||"（還沒停下來思考過）";
+    document.getElementById("death").textContent=(st.死亡檢討||"").trim()||"（還沒死過）";
+    var rows=(st.最近||[]).slice().reverse(), out="";
+    rows.forEach(function(r){
+      var acts=r.動作||[], blk=r.擋掉||[], mode=r.模式||"";
+      var isEvent=["思考","死亡檢討","脫困走位","強制離開重進","wiki開始","youtube開始"].indexOf(mode)>=0;
+      if(filter==="act" && !acts.length) return;
+      if(filter==="blk" && !blk.length) return;
+      if(filter==="ev" && !isEvent && r.robux!==1) return;
+      var cls=[];
+      if(mode==="思考") cls.push("think");
+      if(mode==="死亡檢討") cls.push("death");
+      if(mode==="脫困走位"||mode==="強制離開重進") cls.push("rescue");
+      if(r.robux===1) cls.push("pay");
+      var id=(r.時間||"")+"|"+(r.看到||"").slice(0,10)+"|"+mode;
+      if(!seen[id]){ seen[id]=1; cls.push("new"); }
+      var see=r.看到||"";
+      if(mode==="思考") see="🤔 想：「"+(r.問題||"")+"」";
+      if(mode==="死亡檢討") see="💀 第 "+(r.次數||"")+" 次死亡";
+      if(mode==="脫困走位") see="🛟 程式端脫困走位（後退、側移、拉遠、回水平、前進）";
+      if(mode==="強制離開重進") see="🚪 程式端強制離開遊戲，稍後從首頁重進";
+      var want=acts.concat(blk).map(function(a){return '<span class="chip">'+esc(desc(a))+'</span>';}).join("");
+      var did=acts.map(function(a){return '<span class="chip did">'+esc(desc(a))+(a.確認?'　<span class="mini">'+esc(a.確認)+'</span>':'')+'</span>';}).join("");
+      var blocked=blk.map(function(a){return '<span class="chip blk">'+esc(desc(a))+'　<span class="mini">'+esc(a.原因||"")+'</span></span>';}).join("");
+      var reflex=r.反射? '<span class="chip reflex">'+esc(r.反射)+'　<span class="mini">思考時做了 '+(r.反射次數||0)+' 次</span></span>':'';
+      var ms=[];
+      if(r.差異!=null) ms.push("畫面變化 Δ"+r.差異);
+      if(r.決策秒!=null) ms.push("想 "+r.決策秒+"s");
+      if(r.總秒!=null) ms.push("總 "+r.總秒+"s");
+      if(r.秒!=null) ms.push(r.秒+"s");
+      if(r.prompt_tokens) ms.push(r.prompt_tokens+" tok");
+      out+='<div class="round '+cls.join(" ")+'">'+
+        '<div class="rhead"><span class="t">'+esc(r.時間)+'</span><span class="mode">'+esc(mode)+'</span>'+
+        (r.robux===1?'<span class="pill bad">🚫 付費視窗</span>':'')+
+        '<span class="ms">'+esc(ms.join(" · "))+'</span></div><div class="body">'+
+        row("see","看到",esc(see))+
+        (mode==="思考"?row("did","計畫",esc(r.計畫||"")):"")+
+        (mode==="死亡檢討"?row("blk","死因",esc(r.死因||"")+"　→　下次："+esc(r.避免||"")):"")+
+        row("want","想做",want)+
+        row("did","實際做",did)+
+        row("blk","被擋",blocked)+
+        row("reflex","反射",reflex)+
+        row("note","學到",r.筆記?esc(r.筆記):"")+
+        '</div></div>';
+    });
+    document.getElementById("rounds").innerHTML=out||'<div class="empty">這個篩選沒有資料</div>';
+  }
+  function tick(){ if(paused) return; fetch("/api/state?t="+Date.now()).then(function(r){return r.json();}).then(render).catch(function(){
+    var a=document.getElementById("alive"); a.textContent="伺服器沒回應"; a.className="pill bad"; }); }
+  tick(); setInterval(tick,3000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>跟它說話</title>
+<style>
+:root{--bg:#0D1117;--surface:#161D26;--surface2:#1E2733;--ink:#E9EEF3;--ink2:#C0C9D4;--muted:#8B96A3;--line:#252D38;--me:#2E6BE6;--it:#1E2733;--acc:#F5C400;--ok:#4CCB7E}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC",system-ui,"PingFang TC","Microsoft JhengHei",sans-serif;font-size:16px;line-height:1.6;display:flex;flex-direction:column}
+header{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);padding:10px 14px calc(10px);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:16px;margin:0;font-weight:700}
+.pill{font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:3px 9px;border-radius:999px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}
+.pill.ok{background:#12301F;color:var(--ok);border-color:transparent}
+.pill.bad{background:#3A1E1A;color:#F0604C;border-color:transparent}
+a.tab{margin-left:auto;font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);padding:4px 10px;border-radius:999px}
+#shotwrap{padding:10px 14px 0}
+#shot{width:100%;height:auto;border-radius:10px;border:1px solid var(--line);display:block;background:#000}
+#log{flex:1;overflow-y:auto;padding:12px 14px 4px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:88%;padding:9px 13px;border-radius:14px;white-space:pre-wrap;word-break:break-word;font-size:15.5px}
+.me{align-self:flex-end;background:var(--me);color:#fff;border-bottom-right-radius:4px}
+.it{align-self:flex-start;background:var(--it);border:1px solid var(--line);border-bottom-left-radius:4px}
+.sys{align-self:center;background:#2E2A10;color:var(--acc);font-size:13px;padding:5px 12px;border-radius:999px}
+.time{font-size:11px;color:var(--muted);margin-top:3px;font-family:ui-monospace,monospace}
+.quick{display:flex;gap:7px;overflow-x:auto;padding:8px 14px 0;-webkit-overflow-scrolling:touch}
+.quick button{white-space:nowrap;background:var(--surface2);color:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:6px 13px;font-size:13.5px;font-family:inherit}
+form{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:9px 12px calc(9px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:flex-end}
+textarea{flex:1;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-family:inherit;font-size:16px;resize:none;max-height:120px;line-height:1.45}
+button.send{background:var(--me);color:#fff;border:0;border-radius:12px;padding:11px 16px;font-size:15px;font-family:inherit;font-weight:600}
+button.send:disabled{opacity:.5}
+label.cmd{display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>跟它說話</h1>
+  <span class="pill" id="alive">…</span>
+  <span class="pill" id="score">🏆 —</span>
+  <a class="tab" href="/think">看它在想什麼</a>
+</header>
+<div id="shotwrap"><img id="shot" alt="它現在的畫面"></div>
+<div class="quick">
+  <button data-q="你現在在做什麼？">現在在做什麼</button>
+  <button data-q="你有做 Check In 嗎？為什麼沒有？">有做 Check In 嗎</button>
+  <button data-q="你現在卡住了嗎？打算怎麼辦？">卡住了嗎</button>
+  <button data-q="你賺了多少錢？最高輪班第幾？">賺多少錢</button>
+  <button data-q="你剛剛為什麼那樣做？">剛剛為什麼那樣做</button>
+  <button data-q="你接下來三步要做什麼？">接下來三步</button>
+</div>
+<div id="log"></div>
+<form id="f">
+  <textarea id="q" rows="1" placeholder="跟它說話…（打勾＝下指令，它下一輪照做）"></textarea>
+  <label class="cmd"><input type="checkbox" id="isCmd"> 指令</label>
+  <button class="send" id="send">送出</button>
+</form>
+<script>
+(function(){
+  var log=document.getElementById("log"), shot=document.getElementById("shot"), history=[];
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function add(cls,text,meta){
+    var d=document.createElement("div"); d.className="msg "+cls; d.textContent=text;
+    if(meta){var m=document.createElement("div"); m.className="time"; m.textContent=meta; d.appendChild(m);}
+    log.appendChild(d); log.scrollTop=log.scrollHeight; return d;
+  }
+  function sys(t){var d=document.createElement("div"); d.className="sys"; d.textContent=t; log.appendChild(d); log.scrollTop=log.scrollHeight;}
+  function refreshShot(){ var im=new Image(); im.onload=function(){shot.src=im.src;}; im.src="/shot.jpg?t="+Date.now(); }
+  refreshShot(); setInterval(refreshShot,2000);
+  function state(){ fetch("/api/state?t="+Date.now()).then(function(r){return r.json();}).then(function(s){
+    var a=document.getElementById("alive");
+    if(s.程序&&s.程序.length){a.textContent="它在玩";a.className="pill ok";} else {a.textContent="它沒在跑";a.className="pill bad";}
+    var sc=s.成績||{};
+    document.getElementById("score").textContent="🏆 輪班"+(sc.最高輪班||"—")+" · $"+(sc.最高金幣||"—")+" · 現在$"+(s.金幣==null?"—":s.金幣);
+  }).catch(function(){}); }
+  state(); setInterval(state,5000);
+  var q=document.getElementById("q"), f=document.getElementById("f"), send=document.getElementById("send"), isCmd=document.getElementById("isCmd");
+  q.addEventListener("input",function(){q.style.height="auto";q.style.height=Math.min(120,q.scrollHeight)+"px";});
+  document.querySelectorAll(".quick button").forEach(function(b){ b.addEventListener("click",function(){ q.value=b.dataset.q; f.dispatchEvent(new Event("submit")); }); });
+  f.addEventListener("submit",function(e){
+    e.preventDefault();
+    var text=q.value.trim(); if(!text) return;
+    q.value=""; q.style.height="auto"; send.disabled=true;
+    add("me",text);
+    var cmd=isCmd.checked;
+    var p=cmd? fetch("/api/instruct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:text})})
+                 .then(function(){sys("已寫進它的任務指示，下一輪就照做");
+                   return fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:"使用者剛剛交代：「"+text+"」。你會怎麼做？",history:history})});})
+             : fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:text,history:history})});
+    var waiting=add("it","…想中");
+    p.then(function(r){return r.json();}).then(function(d){
+      waiting.remove();
+      if(d.錯誤){ add("it","（出錯："+d.錯誤+"）"); }
+      else { add("it",d.答,d.秒+" 秒"); history.push({role:"user",content:text}); history.push({role:"assistant",content:d.答}); if(history.length>16) history=history.slice(-16); }
+      send.disabled=false; refreshShot();
+    }).catch(function(err){ waiting.remove(); add("it","（連不上："+err+"）"); send.disabled=false; });
+  });
+  sys("它會看著自己現在的畫面回答你。勾「指令」再送出，就會寫進它的任務指示。");
+})();
+</script>
+</body>
+</html>

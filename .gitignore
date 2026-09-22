@@ -1,0 +1,43 @@
+# 金鑰 / 密碼 / 個人設定，絕不進 git
+*.pem
+*.key
+id_*
+dgx_claude*
+.env
+設定.local.json
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 執行期產物
+logs/
+資料/
+*.log
+*.tmp
+stop.txt
+
+# 模型權重（太大，且可從官方或 train_eyes.py 重建）
+weights/
+*.pt
+
+# 手動備份、封存、改檔前的 .bak 副本
+_備份/
+_封存/
+*.bak
+*.bak_*
+
+# 代理跑出來的記憶／截圖／訓練資料（每天數百 MB，屬個人遊玩紀錄）
+# 只保留每個專案的 遊戲.json、提示/、工作流程/、大動作/ 這些「教他的東西」
+專案/*/記憶/
+專案/*/素材/
+
+# 網站快照
+網站/快照_*.html
+
+# 系統
+.DS_Store
+Thumbs.db
+desktop.ini
