@@ -1,0 +1,222 @@
+path: D:\Documents\ThorWorkSpace\gamer AI\專案\動物醫院\素材\資料集\20260915_2135
+train: images/train
+val: images/val
+names:
+  0: player
+  1: door
+  2: dialogue_box
+  3: button
+  4: person
+  5: floor
+  6: shelf
+  7: wall screen
+  8: printer
+  9: game menu button
+  10: black table
+  11: chair
+  12: bookshelf
+  13: glowing purple object
+  14: coffee machine
+  15: road_marking
+  16: glass partition
+  17: cat
+  18: package
+  19: floor vent
+  20: entrance
+  21: stamp
+  22: brick wall
+  23: ui面板
+  24: trash_can
+  25: bed
+  26: wooden wall
+  27: medical cabinet
+  28: text_prompt
+  29: wooden_structure
+  30: mouse
+  31: keyboard
+  32: poster
+  33: wall
+  34: street lamp
+  35: rabbit
+  36: tunnel
+  37: gate
+  38: tree
+  39: fence
+  40: 木製長椅
+  41: $83
+  42: 122
+  43: 36%
+  44: 6%
+  45: ambulance
+  46: animal hospital
+  47: animal hospital building
+  48: animal_hospital_building
+  49: animal_hospital_sign
+  50: atm
+  51: bandage
+  52: barrier
+  53: basketball_hoop
+  54: bench
+  55: box
+  56: building
+  57: buttons
+  58: cabinet
+  59: camera
+  60: carpet
+  61: cctv monitor 0.19
+  62: ceiling light
+  63: chain link fence
+  64: chain_link_fence
+  65: character
+  66: chat_icon
+  67: coin
+  68: coin_counter
+  69: coin_icon
+  70: counter
+  71: counter desk
+  72: crosswalk
+  73: cup
+  74: currency counter
+  75: currency_icon
+  76: desk
+  77: dialog_box
+  78: dialogue box
+  79: disconnect dialog
+  80: disconnect_dialog
+  81: document
+  82: door frame
+  83: door_frame
+  84: door_panel
+  85: elevator
+  86: elevator panel
+  87: fallen door panel
+  88: fire_effect
+  89: flashlight
+  90: friend list
+  91: glowing_zones
+  92: grass
+  93: green avatar
+  94: green sign
+  95: ground
+  96: ground item
+  97: ground_effect
+  98: ground_markings
+  99: gun
+  100: highway_sign
+  101: honey_jar
+  102: hospital
+  103: hospital building
+  104: hospital_building
+  105: interact_prompt
+  106: invite button
+  107: job button
+  108: journal button
+  109: ladder
+  110: laptop
+  111: leaderboard
+  112: locker
+  113: maple_syrup
+  114: medicine_shelf
+  115: menu
+  116: menu buttons
+  117: menu_button
+  118: menu_buttons
+  119: menu_panel
+  120: money
+  121: money_counter
+  122: monitor
+  123: no button
+  124: no_button
+  125: npc
+  126: nurse sign
+  127: ointment
+  128: phone
+  129: pink cat npc
+  130: pink_cat
+  131: pipe
+  132: plant
+  133: plate
+  134: play again button
+  135: player avatars
+  136: player character
+  137: player list
+  138: player_avatar
+  139: player_character
+  140: player_characters
+  141: player_list
+  142: player_name_tag
+  143: radio
+  144: railing
+  145: reception desk
+  146: reception_desk
+  147: reconnect dialog
+  148: recycle bin
+  149: redbull
+  150: road
+  151: road barrier
+  152: road_barrier
+  153: road_sign
+  154: sanity
+  155: screen
+  156: shelves
+  157: shop button
+  158: sign
+  159: signboard
+  160: spoon
+  161: sticky_notes
+  162: store_button
+  163: street light
+  164: street_lamp
+  165: street_lamps
+  166: street_light
+  167: streetlight
+  168: surveillance_camera
+  169: table
+  170: task text
+  171: text
+  172: text prompt
+  173: text_overlay
+  174: thortsui
+  175: timer
+  176: tool
+  177: traffic_light
+  178: trash can
+  179: trash_bin
+  180: trashcan
+  181: ui buttons
+  182: ui_button
+  183: ui_buttons
+  184: ui_menu
+  185: vending machine
+  186: vending_machine
+  187: vent
+  188: walkie-talkie
+  189: walkie_talkie
+  190: warning_icon
+  191: wheelchair
+  192: window
+  193: wooden sign
+  194: wooden_bench
+  195: wooden_cabinet
+  196: yes button
+  197: yes_button
+  198: 中央角色旁的黑底白字看板
+  199: 右上角的綠色加號圖示
+  200: 右下角紅色的玩家頭部
+  201: 右側草地上的樹木
+  202: 右側遠方人群
+  203: 圍牆後方草地
+  204: 左上角功能圖示
+  205: 左上角的綠色看板
+  206: 左上角的選單圖示
+  207: 左下角的貓頭圖示與數字122
+  208: 左下角的貓頭金幣圖示與數字122
+  209: 左下角金幣與貓頭圖示
+  210: 左側功能按鈕列
+  211: 左側垂直排列的藍色選單按鈕(商店、邀請、職業、日誌)
+  212: 救護車紅條
+  213: 木箱文字
+  214: 畫面中央倒地的黑紫色怪獸角色
+  215: 角色頭上文字
+  216: 遠景的木製長椅
+  217: 遠處的綠色路牌與鐵絲網圍籬

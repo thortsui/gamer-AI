@@ -1,0 +1,343 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+local_vision.py — 本機的「眼睛」：在這台筆電的 GPU 上，用開放詞彙偵測器每秒看好幾次畫面。
+
+分工：
+  DGX 上的大模型（Qwen3.8-Flash-Next）＝「大腦」，低頻、負責語意判斷與選技能（正常/異常、要做哪件事）
+  本機這顆 YOLO-World ＝「眼睛」，高頻（預設 5 fps），只回答「東西在畫面哪裡、多大」
+（2026-09-07 從 Grounding DINO 換過來；設 GAMER_VISION_BACKEND=dino 可切回舊的）
+  → 走到人旁邊、在正確的位置停下來這種事，靠眼睛的即時回饋閉環，不需要每一步都去問大腦。
+
+用法：
+    eyes = Eyes(bbox_fn=win.client_bbox)
+    eyes.start()
+    eyes.watch(["person", "counter desk"])      # 只偵測現在關心的東西（越少越快）
+    d = eyes.best("person")                     # {'cx':0.52,'cy':0.61,'w':0.18,'h':0.44,'score':0.61,'age':0.12}
+    eyes.stop()
+
+單獨執行可測速與看偵測結果：
+    python local_vision.py --labels "person,counter desk,door" --seconds 10
+"""
+import os
+import threading
+import time
+
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+import mss  # noqa: E402
+from PIL import Image  # noqa: E402
+
+# 2026-09-07 使用者指示改用 YOLO：YOLO-World 一樣是開放詞彙（可以直接吃 "coffee machine" 這種詞），
+# 但在這台 4060 上只要 ~50 ms（20 fps），比 Grounding DINO 的 220 ms 快四倍。
+BACKEND = os.environ.get("GAMER_VISION_BACKEND", "yolo")          # yolo | dino
+_TRAINED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights", "eyes_trained.pt")
+# 2026-09-15：他自己訓練過的眼睛（train_eyes.py 產生）優先；環境變數仍可強制指定
+MODEL_ID = os.environ.get("GAMER_VISION_MODEL") or (_TRAINED if os.path.exists(_TRAINED) else "yolov8s-world.pt")
+DINO_ID = "IDEA-Research/grounding-dino-tiny"
+
+# 遊戲裡常用的中文名 → 給偵測器的英文詞（Grounding DINO 吃英文短語）
+LABEL_MAP = {
+    "人": "a person",
+    "病人": "a person",
+    "櫃檯": "a counter desk",
+    "門": "a door",
+    "咖啡機": "a coffee machine",
+    "印表機": "a printer",
+    "電腦": "a computer monitor",
+    "螢幕": "a computer monitor",
+    "監視器": "a security camera monitor",
+    "按鈕": "a button",
+    "文件": "a paper document",
+    "椅子": "a chair",
+    "床": "a bed",
+    "箱子": "a box",
+    "箭頭": "a yellow arrow",
+}
+
+
+def to_en(label):
+    """中文標籤轉成偵測器吃的英文短語；本來就是英文就原樣用。"""
+    return LABEL_MAP.get(label, label)
+
+
+class Eyes:
+    """背景執行緒，持續對最新畫面做開放詞彙偵測。"""
+
+    def __init__(self, bbox_fn=None, fps=5.0, width=960, short_edge=480, threshold=0.30,
+                 text_threshold=0.25, device=None):
+        self.bbox_fn = bbox_fn
+        self.interval = 1.0 / max(0.5, fps)
+        self.width = width
+        self.short_edge = short_edge          # 丟進偵測器的短邊像素：480≈220ms、400≈200ms、800≈390ms
+        self.threshold = threshold
+        self.text_threshold = text_threshold
+        self.device = device or ("cuda" if _cuda_ok() else "cpu")
+        self.labels = []            # 目前關心的英文短語
+        self._text = ""
+        self._lock = threading.Lock()
+        self._dets = {}             # 英文短語 -> [det, ...]（分數高的在前）
+        self._stamp = 0.0
+        self._ms = []               # 最近的推論耗時
+        self._stop = threading.Event()
+        self._thread = None
+        self.model = None
+        self.proc = None
+        self.ready = threading.Event()
+        self.frame_size = (1, 1)
+
+    # ---------------- 載入與生命週期
+    def load(self):
+        if BACKEND == "yolo":
+            return self.load_yolo()
+        return self.load_dino()
+
+    def load_yolo(self):
+        from ultralytics import YOLO
+        t0 = time.time()
+        self.yolo = YOLO(MODEL_ID)
+        self._classes = []
+        print(f"[眼睛] YOLO-World {MODEL_ID} 載入完成（{time.time() - t0:.1f} 秒）")
+        self.ready.set()
+
+    def load_dino(self):
+        import torch
+        from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+        MODEL_ID_ = DINO_ID
+        t0 = time.time()
+        self.proc = AutoProcessor.from_pretrained(MODEL_ID_)
+        # 注意：Grounding DINO 的 deformable attention 在 fp16 會炸（grid_sample 要 float），一律用 fp32
+        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(MODEL_ID_, dtype=torch.float32)
+        self.model = self.model.to(self.device).eval()
+        self._torch = torch
+        print(f"[眼睛] {MODEL_ID_} 載入完成（{self.device}，{time.time() - t0:.1f} 秒）")
+        self.ready.set()
+
+    def start(self):
+        if self._thread:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def watch(self, labels):
+        """設定現在要盯的東西（中文或英文都可以）。換技能時呼叫，清單越短越快。"""
+        en = []
+        for l in labels:
+            e = to_en(l)
+            if e not in en:
+                en.append(e)
+        with self._lock:
+            if en != self.labels:
+                self.labels = en
+                self._text = ". ".join(en) + "."
+                self._dets = {}
+
+    # ---------------- 主迴圈
+    def _grab(self):
+        box = self.bbox_fn() if self.bbox_fn else None
+        with (getattr(mss, "MSS", None) or mss.mss)() as sct:
+            shot = sct.grab(box or sct.monitors[1])
+            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        self.frame_size = img.size
+        if img.width != self.width:
+            img = img.resize((self.width, int(self.width * img.height / img.width)), Image.BILINEAR)
+        # 暗處（黑走廊）不提亮的話什麼都偵測不到
+        try:
+            import numpy as np
+            from PIL import ImageOps, ImageEnhance
+            mean = float(np.asarray(img.convert("L"), dtype=np.float32).mean())
+            if mean < 45:
+                img = ImageOps.autocontrast(img, cutoff=1)
+                img = ImageEnhance.Brightness(img).enhance(min(3.0, 60.0 / max(8.0, mean)))
+        except Exception:  # noqa: BLE001
+            pass
+        return img
+
+    def _loop(self):
+        try:
+            self.load()
+        except Exception as e:  # noqa: BLE001
+            print(f"[眼睛] 載入失敗，之後的技能只能靠大腦看畫面：{type(e).__name__}: {e}")
+            return
+        while not self._stop.is_set():
+            t0 = time.time()
+            with self._lock:
+                text = self._text
+            if not text:
+                time.sleep(0.1)
+                continue
+            try:
+                img = self._grab()
+                dets = self._detect(img, text)
+                with self._lock:
+                    self._dets = dets
+                    self._stamp = time.time()
+            except Exception as e:  # noqa: BLE001
+                if time.time() - getattr(self, "_err_at", 0) > 30:
+                    self._err_at = time.time()
+                    print(f"[眼睛] 偵測失敗：{type(e).__name__}: {e}（之後 30 秒內不再重複印）")
+                time.sleep(1.0)
+            dt = time.time() - t0
+            self._ms.append(dt * 1000)
+            self._ms = self._ms[-40:]
+            time.sleep(max(0.0, self.interval - dt))
+
+    def _detect(self, img, text):
+        if BACKEND == "yolo":
+            return self._detect_yolo(img)
+        return self._detect_dino(img, text)
+
+    def _detect_yolo(self, img):
+        """YOLO-World：用我們指定的詞當類別，直接回框。"""
+        with self._lock:
+            labels = list(self.labels)
+        if not labels:
+            return {}
+        if labels != getattr(self, "_classes", None):
+            # 換類別時 CLIP 是在 CPU 上算文字特徵，如果模型已經在 GPU 上就會炸
+            # 「tensors on cuda:0 and cpu」。所以換之前先把模型搬回 CPU，換完再搬上 GPU。
+            try:
+                if self.device == "cuda":
+                    self.yolo.model.to("cpu")
+                self.yolo.set_classes([l.replace("a ", "", 1) if l.startswith("a ") else l for l in labels])
+            finally:
+                if self.device == "cuda":
+                    self.yolo.model.to("cuda")
+            self._classes = labels
+        r = self.yolo.predict(img, imgsz=self.short_edge, conf=self.threshold,
+                              verbose=False, device=0 if self.device == "cuda" else "cpu")[0]
+        dets = {}
+        W, H = img.width, img.height
+        names = r.names
+        # 2026-09-15：微調過的權重（eyes_trained.pt）在 set_classes 換更多詞之後，
+        # r.names 還是訓練時那 22 類，第 23 個詞回來就 KeyError → 整個眼睛失明。
+        # set_classes 的順序就是 labels 的順序，直接用我們自己的詞表取名字。
+        cur = [l.replace("a ", "", 1) if l.startswith("a ") else l for l in labels]
+        for box, cls, conf in zip(r.boxes.xyxy.tolist(), r.boxes.cls.tolist(), r.boxes.conf.tolist()):
+            x0, y0, x1, y1 = box
+            ci = int(cls)
+            lab = cur[ci] if ci < len(cur) else str(names.get(ci, ci) if hasattr(names, "get") else ci)
+            d = {"cx": (x0 + x1) / 2 / W, "cy": (y0 + y1) / 2 / H,
+                 "w": (x1 - x0) / W, "h": (y1 - y0) / H, "score": round(float(conf), 3)}
+            d["area"] = round(d["w"] * d["h"], 4)
+            dets.setdefault(lab, []).append(d)
+        for v in dets.values():
+            v.sort(key=lambda d: -d["score"])
+        return dets
+
+    def _detect_dino(self, img, text):
+        torch = self._torch
+        inputs = self.proc(images=img, text=text, return_tensors="pt",
+                           size={"shortest_edge": self.short_edge,
+                                 "longest_edge": int(self.short_edge * 5 / 3)}).to(self.device)
+        with torch.no_grad():
+            out = self.model(**inputs)
+        res = self.proc.post_process_grounded_object_detection(
+            out, inputs["input_ids"], threshold=self.threshold,
+            text_threshold=self.text_threshold, target_sizes=[(img.height, img.width)])[0]
+        labels = res.get("text_labels", res.get("labels"))
+        dets = {}
+        W, H = img.width, img.height
+        for score, lab, box in zip(res["scores"].tolist(), labels, res["boxes"].tolist()):
+            x0, y0, x1, y1 = box
+            d = {"cx": (x0 + x1) / 2 / W, "cy": (y0 + y1) / 2 / H,
+                 "w": (x1 - x0) / W, "h": (y1 - y0) / H, "score": round(float(score), 3)}
+            d["area"] = round(d["w"] * d["h"], 4)
+            dets.setdefault(str(lab), []).append(d)
+        for v in dets.values():
+            v.sort(key=lambda d: -d["score"])
+        return dets
+
+    # ---------------- 查詢
+    def latest(self):
+        with self._lock:
+            return dict(self._dets), self._stamp
+
+    @staticmethod
+    def is_self(d):
+        """第三人稱視角下，玩家自己的角色永遠在畫面中央偏下而且很大 → 不能當成目標。"""
+        return abs(d["cx"] - 0.5) < 0.16 and d["cy"] > 0.45 and d["h"] > 0.30
+
+    def best(self, label, max_age=1.5, min_score=None, skip_self=True):
+        """回傳分數最高的一個目標（含 age 秒數）；沒看到回 None。
+
+        skip_self=True 會跳過畫面正中央那個很大的目標（那是玩家自己的角色）。"""
+        en = to_en(label)
+        with self._lock:
+            dets, stamp = self._dets, self._stamp
+        if not stamp or time.time() - stamp > max_age:
+            return None
+        cand = []
+        for k, v in dets.items():
+            if en in k or k in en:      # 偵測器有時回 "person" 有時回 "a person"
+                cand.extend(v)
+        if not cand:
+            return None
+        if skip_self:
+            filtered = [c for c in cand if not self.is_self(c)]
+            cand = filtered or []
+        if not cand:
+            return None
+        cand.sort(key=lambda d: -d["score"])
+        d = dict(cand[0])
+        if min_score and d["score"] < min_score:
+            return None
+        d["age"] = round(time.time() - stamp, 2)
+        return d
+
+    def seen(self, label, **kw):
+        return self.best(label, **kw) is not None
+
+    def fps(self):
+        return (1000.0 / (sum(self._ms) / len(self._ms))) if self._ms else 0.0
+
+    def stats(self):
+        if not self._ms:
+            return "眼睛還沒開始"
+        ms = sorted(self._ms)
+        return f"眼睛 {self.fps():.1f} fps（中位 {ms[len(ms)//2]:.0f} ms）盯著：{'、'.join(self.labels)}"
+
+
+def _cuda_ok():
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def main():
+    import argparse
+    import sys
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--labels", default="person,counter desk,door,coffee machine")
+    ap.add_argument("--seconds", type=float, default=10.0)
+    ap.add_argument("--fps", type=float, default=5.0)
+    a = ap.parse_args()
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from play_agent import RobloxWindow
+        win = RobloxWindow()
+        bbox_fn = win.client_bbox
+        print("Roblox 視窗：", win.client_bbox())
+    except Exception:  # noqa: BLE001
+        bbox_fn = None
+    eyes = Eyes(bbox_fn=bbox_fn, fps=a.fps)
+    eyes.watch([s.strip() for s in a.labels.split(",") if s.strip()])
+    eyes.start()
+    t_end = time.time() + a.seconds
+    while time.time() < t_end:
+        time.sleep(1.0)
+        dets, stamp = eyes.latest()
+        line = " | ".join(f"{k}×{len(v)} 最佳({v[0]['cx']:.2f},{v[0]['cy']:.2f}) h={v[0]['h']:.2f} {v[0]['score']:.2f}"
+                          for k, v in dets.items() if v)
+        print(f"{eyes.stats()}\n   {line or '（什麼都沒看到）'}")
+    eyes.stop()
+
+
+if __name__ == "__main__":
+    main()

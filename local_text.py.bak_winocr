@@ -1,0 +1,128 @@
+# -*- coding: utf-8 -*-
+"""本機文字眼睛：背景執行緒持續把畫面上的字讀出來（PP-OCR / rapidocr onnxruntime）。
+
+為什麼要獨立一顆：
+YOLO 認得「東西」，認不得「字」。但這款遊戲最關鍵的線索幾乎都是字——
+按鈕上寫什麼、便條寫什麼、門牌幾號、有沒有出現 Press E、輪班第幾班、選單上哪個是關閉。
+以前這些字他只能從壓縮過的截圖用猜的，錯得很兇（把大廳看板當 UI、把「出口」兩個字當成死亡畫面）。
+
+跑在背景，每 1.2 秒讀一次，主迴圈永遠不用等它。
+實測 1280x720 全螢幕約 0.45 秒／次（第一次載模型 1.5 秒）。
+"""
+import threading
+import time
+
+import mss
+from PIL import Image
+
+_OCR = None
+
+
+def _engine():
+    global _OCR
+    if _OCR is None:
+        from rapidocr_onnxruntime import RapidOCR
+        _OCR = RapidOCR()
+    return _OCR
+
+
+class TextEyes:
+    """背景 OCR。latest() 回傳 (lines, stamp)；每一行是 dict(t 文字, x, y 都是 0~1, s 信心)。"""
+
+    # 2026-09-18 使用者：「按鈕上的字讀不到」的實測結論（同一張畫面掃各種解析度）：
+    #     960 寬 0.88s → 2 行（讀不到任何按鈕）
+    #    1280 寬 1.10s → 3 行（開始遊戲＝「朋始游戴」0.59）
+    #  ★ 1536 寬 1.34s → 5 行（開始遊戲＋踩踏板搭乘都讀到）  ← 最好
+    #    1920 寬 2.01s → 4 行（**反而讀不到開始遊戲**）
+    #    2400 寬 2.45s → 5 行（讀到但慢一倍）
+    # 原因：PP-OCR 的偵測器用 limit_type=min（短邊不足 736 才放大），
+    # 畫面太大反而不會放大、字在模型眼裡就變小；太小則細節不夠。1536 是這台機器的甜蜜點。
+    # 所以不是「不要縮」，是**縮到 1536 這個尺寸**（原本寫死 1280 讀不到按鈕）。
+    MAX_W = 2048
+
+    def __init__(self, bbox_fn=None, interval=1.2, width=1536, min_score=0.45):
+        self.bbox_fn = bbox_fn
+        self.interval = max(0.4, float(interval))
+        self.width = width
+        self.min_score = min_score
+        self._lock = threading.Lock()
+        self._lines = []
+        self._stamp = 0.0
+        self._ms = []
+        self._stop = threading.Event()
+        self._thread = None
+        self.ready = threading.Event()
+
+    def start(self):
+        if self._thread:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="TextEyes")
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def latest(self):
+        with self._lock:
+            return list(self._lines), self._stamp
+
+    def ms(self):
+        return sum(self._ms[-10:]) / max(1, len(self._ms[-10:]))
+
+    def _grab(self):
+        box = self.bbox_fn() if self.bbox_fn else None
+        with (getattr(mss, "MSS", None) or mss.mss)() as sct:
+            shot = sct.grab(box or sct.monitors[1])
+            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        cap = min(self.width or self.MAX_W, self.MAX_W)
+        if img.width != cap:            # 一律縮放到甜蜜點（太大要縮、太小要放大，兩邊都會影響偵測）
+            img = img.resize((cap, int(cap * img.height / img.width)), Image.LANCZOS)
+        return img
+
+    def _loop(self):
+        import numpy as np
+        try:
+            _engine()
+        except Exception as e:  # noqa: BLE001
+            print(f"[文字] OCR 載入失敗，畫面上的字這一輪起讀不到：{e}")
+            return
+        print("[文字] 本機 OCR 就緒（rapidocr onnxruntime）")
+        self.ready.set()
+        while not self._stop.is_set():
+            t0 = time.time()
+            try:
+                im = self._grab()
+                W, H = im.size
+                res, _ = _engine()(np.asarray(im))
+                lines = []
+                for box, txt, score in (res or []):
+                    try:
+                        sc = float(score)
+                    except (TypeError, ValueError):
+                        sc = 0.0
+                    txt = str(txt).strip()
+                    if not txt or sc < self.min_score:
+                        continue
+                    xs = [p[0] for p in box]
+                    ys = [p[1] for p in box]
+                    lines.append({"t": txt[:60], "s": round(sc, 2),
+                                  "x": round(sum(xs) / 4 / W, 3),
+                                  "y": round(sum(ys) / 4 / H, 3),
+                                  "h": round((max(ys) - min(ys)) / H, 3),
+                                  # 2026-09-17 使用者：要把**文字所在的框**也給他，
+                                  # 這樣「開始遊戲」這種按鈕就有明確的中心與大小，不必猜座標。
+                                  "w": round((max(xs) - min(xs)) / W, 3),
+                                  "x0": round(min(xs) / W, 3), "y0": round(min(ys) / H, 3),
+                                  "x1": round(max(xs) / W, 3), "y1": round(max(ys) / H, 3)})
+                lines.sort(key=lambda d: (d["y"], d["x"]))
+                with self._lock:
+                    self._lines = lines
+                    self._stamp = time.time()
+                self._ms.append((time.time() - t0) * 1000)
+                self._ms = self._ms[-30:]
+            except Exception as e:  # noqa: BLE001
+                if time.time() - getattr(self, "_err_at", 0) > 30:
+                    self._err_at = time.time()
+                    print(f"[文字] 這一次讀字失敗：{e}（之後 30 秒內不再重複印）")
+                time.sleep(1.0)
+            time.sleep(max(0.05, self.interval - (time.time() - t0)))

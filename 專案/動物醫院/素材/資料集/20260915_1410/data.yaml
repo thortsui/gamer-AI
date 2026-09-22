@@ -1,0 +1,32 @@
+path: D:\Documents\ThorWorkSpace\gamer AI\專案\動物醫院\素材\資料集\20260915_1410
+train: images/train
+val: images/val
+names:
+  0: person
+  1: window
+  2: sign
+  3: box
+  4: chair
+  5: wall
+  6: cabinet
+  7: computer monitor
+  8: printer
+  9: cctv monitor
+  10: counter desk
+  11: camera
+  12: shelf
+  13: glowing purple object
+  14: coffee machine
+  15: cup
+  16: elevator
+  17: door
+  18: cat
+  19: dog
+  20: table
+  21: entrance
+  22: pin碼輸入點圖示
+  23: 中央時間02:07
+  24: 右上角導覽文字
+  25: 右下角天氣面板
+  26: 左上角導覽文字
+  27: 底部股票數據面板

@@ -1,0 +1,182 @@
+# wiki 研究（2026-09-07 18:20，由 DGX 上的模型自行搜尋整理，耗時 143 秒）
+
+## 查詢
+- Animal Anomaly Roblox wiki treatment process
+- Animal Anomaly Roblox anomaly types guide
+- Animal Anomaly Roblox sanity management tips
+- Animal Anomaly Roblox free coins methods
+- Animal Anomaly Roblox shift report payout calculation
+- Animal Anomaly Roblox journal button location
+
+## 攻略摘要
+我透過四層檢查（視窗、拍照、CCTV、文件）篩選異常，確認異常立即關快門，正常病患對症下藥。理智低於三分之二時主動喝咖啡，避免黑暗與注視天花板。遇到火災用滅火器，死亡儀式用咖啡熄燭，Skinwalker用電擊器。Solo模式重複Shift 1固定前兩病人流程快速刷幣，優先購買永久升級與理智恢復品。團隊合作時明確分工，即時回報異常，確保理智穩定以獲取最高收益。
+
+## 筆記
+- 檢查流程：視窗、拍照、CCTV、文件四層核對，缺一不可。
+- 異常處理：確認異常立即關閉快門(Shutter)，Stalker例外需拍照。
+- 理智管理：低於66%主動喝咖啡，低於33%出現幻覺需謹慎。
+- 治療流程：先確認無異常，再移至治療區對症下藥（如草藥、眼藥）。
+- 事件應對：火災用滅火器，死亡儀式用咖啡熄燭，幽靈用電擊器。
+- 職業選擇：外科醫生增理智速度，護士增食物回復，依需求配置。
+- 刷幣技巧：Solo模式重複Shift 1，固定前兩病人流程快速結算。
+- 商店策略：優先購買永久升級與理智恢復品，消耗品不繼承。
+- 團隊分工：明確接待、治療、防禦角色，即時回報異常避免重複。
+- 危險處理：Skinwalker需電擊或槍械，Headbanger給咖啡驅逐。
+- 環境管理：待在明亮區減少理智流失，避開黑暗走廊與天花板注視。
+- 失敗條件：理智歸零或醫院內3次病人死亡即結束回合。
+- 日誌任務：主動互動異常條目（如直視Stalker）可獲動物幣。
+- 道具使用：咖啡短效緊急，食物長效大量，鎮靜藥低於25%使用。
+- 版本注意：無官方代碼，僅參考官方頁面，避免依賴外掛資訊。
+
+## 還不確定
+- 特定異常（如Bed Monster）的具體觸發條件與解鎖細節是否隨版本變動？
+- 多人模式下，隊友誤操作導致理智歸零的懲罰機制是否有團隊分攤？
+- Barney獎勵的第二台咖啡機具體解鎖條件與獲取方式是否明確？
+
+## 原始事實
+- 核心循環：接待病人、篩檢異常、診斷治療、應對事件、結算評分。
+- 異常偵測三法：肉眼外觀、拍照檢查、監控攝影機觀察。
+- 肉眼異常：歪臉、三眼、怪臉、凝視、空洞臉、抽搐。
+- 拍照異常：照片內容不符（眼耳嘴）或靜態雜訊，看照扣理智。
+- 監控異常：黑眼、斷訊等8種僅在CCTV出現，修相機扣理智。
+- 放行異常後果：觸發死亡儀式、怪物生成或Mimic攻擊。
+- 理智歸零即死亡，需嚴格管理理智數值以生存。
+- 遊戲支援單人至四人合作，角色靈感來自動物森友誼。
+- 玩家需篩選異常動物，治療正常患者並生存
+- 檢查患者外觀、照片與CCTV以識別異常
+- 管理理智值，理智過低會導致危險
+- 使用正確醫療用品治療特定病症
+- 職業如護士、醫生、外科醫生提供不同增益
+- 外科醫生治療時增加理智與速度
+- 秘密特工職業附帶槍械與掃描器
+- 遊戲無官方代碼，硬幣可解鎖大部分職業
+- Counter anomalies: Close shutters (except Stalker: take photo).
+- CCTV anomalies: Close shutters if camera shows distortion.
+- Photo anomalies: Close shutters if polaroid is static/wrong.
+- Hazard: Stalker - Do not look; drains Sanity.
+- Hazard: Head Banger - Give coffee, ask to leave.
+- Hazard: Slime/Fire - Use fire extinguisher.
+- Hazard: Death rituals - Extinguish candles with coffee.
+- Hazard: Skinwalker/Ghosts - Use taser or gun.
+- 理智是壓力系統，錯誤判斷會增加難度
+- 預防優先：篩選可疑訪客，拒絕危險入院
+- 團隊溝通：即時回報異常，勿靜默操作
+- 恢復策略：使用恢復道具並放慢節奏
+- 驗證來源：僅參考官方頁面與實測數據
+- 避免依賴：勿用恢復道具掩蓋重複失誤
+- 動態更新：版本變動後需重新核對指南
+- 拒絕作弊：避免使用外掛或虛假獎勵資訊
+- 理智歸零即結束班次，非血量系統，需主動管理。
+- 咖啡快速回少量理智，食物耗時長但回復量大。
+- 待在明亮區域可減少理智被動流失，避開黑暗走廊。
+- 醫生職業減少遭遇戰理智流失，護士增加食物回復量。
+- 理智低於三分之一時出現視覺噪點與假異常提示。
+- 理智低於三分之二時應主動喝咖啡，勿等危機再補。
+- 緊急事件與收容異常會大幅扣除全隊理智。
+- 長班次應保留食物給後半段，避免前期過度消耗。
+- 理智歸零會導致任務失敗，需穩定管理。
+- 咖啡可恢復理智，建議在壓力前使用。
+- 避免長時間處於火災或敵人壓力環境。
+- 事件後需暫停並恢復理智再繼續。
+- Barney獎勵的第二台咖啡機提升深層生存。
+- Psychologist職業加倍理智增減，風險高。
+- Skinwalker是偽裝敵人，需優先處理。
+- 多人合作時分工明確，避免重複處理事件。
+- 理智低於30%產生幻覺，低於15%遮蔽真實異常
+- 理智流失源：注視異常、黑暗區域、驚嚇事件
+- 咖啡：短效理智提升+加速，適合緊急穿越黑暗
+- 鎮靜藥：單次完全恢復理智，低於25%時使用
+- 抗精神病藥：減緩理智衰減，建議Shift 4前預載
+- 眼藥水：鎮壓多眼團塊，每次使用耗理智，每班限一次
+- 輪換房間每30-60秒重置靜態理智流失
+- 避免注視天花板以防多眼團塊消耗理智
+- Solo模式重複第一班最穩定，避免隊友干擾
+- 預先拿取草藥(Herbal Medicine)與眼藥水(Eye Drops)
+- 第一位病人固定去1號房，分析後給草藥
+- 第二位病人固定為眼部問題，直接給眼藥水
+- 完成兩病人後等待醫生通知領取5枚硬幣
+- 每次循環約3分鐘，退出重開即可重複刷錢
+- 此法專為新手快速累積硬幣解鎖新職業
+- 不適合追求高班次或處理複雜異常現象
+- 重複快速完成Shift 1可穩定獲取動物幣
+- 熟記病症對應物品可縮短治療時間
+- 購買額外報到窗口升級提升效率
+- 多人合作可挑戰更高Shift獲更多獎勵
+- AFK需預留未檢查病患並備滅火器
+- 使用自動點擊器防止AFK斷線
+- 忽略NPC對話與非必要活動加速流程
+- 優先購買永久升級而非臨時道具
+- 穩定完成班次比高風險操作更能累積金幣
+- 優先確保異常現象被成功預防以獲得獎勵
+- 早期穩定運作比後期高風險操作收益更高
+- 選擇醫生轉外科等職業提升診斷與穩定性
+- 理智穩定性直接影響金幣獲取效率
+- 選擇可重複且無恐慌的短路線進行刷幣
+- 避免因病人遺漏或長時間空閒導致收益下降
+- 基礎職業強度不足時需先優化職業配置
+- 治療流程：先確認異常，再將正常病患移至治療區對症下藥。
+- 異常檢查分四層：視窗、照片、CCTV、文件，需綜合判斷。
+- 理智管理：等待照片完全顯影，避免將不確定證據誤判。
+- 職業選擇：依單人/團隊需求分配接待、治療、防禦角色。
+- 貨幣獲取：透過完成病患流程賺取 Animal Coins，無固定公式。
+- 特殊事件：準備房間並優先處理危重病患以應對救護車事件。
+- 儀式任務：找出並移除所有儀式蠟燭以完成死亡儀式事件。
+- 無有效代碼：目前無官方兌換系統或可用代碼，勿浪費時間。
+- 流程：報到、拍照、分配房間、分析樣本、對症下藥、監控理智、處理異常、查看報告。
+- 治療：先分析DNA或X光讀取病症文字，再對照治療表選擇對應藥物（如草藥、急救包）。
+- 理智：工作壓力隨時間累積，異常事件（如影子相機、高個怪物）會大幅扣減理智。
+- 應對異常：遇到高個怪物需斷開視線，發現偽裝者保持距離，優先確保生存。
+- 失敗條件：醫院內發生3次病人死亡將直接結束遊戲回合。
+- 商店策略：限時開放，優先購買理智恢復品（巧克力、咖啡）及加速機器升級。
+- 報告結算：結束時查看現金、職業經驗與評分，用於評估收益與改進操作效率。
+- 工具使用：利用相機、照片和電擊器保持警惕，緊急時切換至生存模式應對攻擊。
+- Shift結束結算錢：治療病人數、拒絕異常數、存活理智決定 payout
+- 異常處理：檢查後關閉快門(Shutter)拒絕，誤收會變 Skinwalker 追殺
+- 治療流程：右翼 Room 1-5 DNA，左翼 Room 6 X-Ray，7 心臟，8 手術
+- 理智管理：驚嚇/敵人/忽視病人扣理智，喝咖啡(Coffee)或醫生治療回理智
+- 死亡機制：理智歸零或 Skinwalker 殺員工即全隊失敗，無難度折扣
+- 商店策略：Shift 間買咖啡、急救包、相機升級、治療藥品，消耗品不繼承
+- 異常偵測：需結合 CCTV、拍照、文件、聽覺檢查，漏檢會導致異常遊走
+- 事件干擾：隨機發生火災、死亡儀式、救護車等，需優先處理緊急狀況
+- 異常檢查需結合視窗、照片、CCTV及文件核對
+- 治療需將十種基本症狀與對應物品進行匹配
+- 理智管理關鍵在於等待照片完全顯影再判斷
+- 死亡儀式事件需找出並移除所有儀式蠟燭
+- 救護車事件需清理房間並優先處理危重病患
+- 動物幣獲取依賴完成病患流程，無固定公式
+- 團隊分工包含接待、治療、移動及防禦角色
+- 新手應先完成病患循環以熟悉基礎操作
+- 日誌位於大廳Classes選單下方，記錄異常、NPC與成就
+- 完成日誌條目可獲得動物幣，用於解鎖新職業
+- 異常條目需主動互動，如讓幽靈扣理智或直視跟蹤者
+- 史萊姆伯特需被完全吞食，床怪需餵楓糖或被抓住
+- NPC條目需完成劇情，Barney有兩種結局需分別觸發
+- Liz任務需精準拍照指定病人，錯誤即失敗且不再出現
+- Rathhew隱藏結局需移除5號房海報並開啟保險庫
+- 理智不足時可飲咖啡、薄荷茶或吃巧克力快速恢復
+- Massive Eyes：無視警告直視天花板巨眼，或使用眼藥水解除。
+- Ghost：等待病患死亡後幽靈出現，讓其降低理智以解鎖。
+- Stalker：當其出現時直接注視即可記錄異常。
+- Mimic：成功逃脫其攻擊或拯救隊友即可解鎖。
+- Hider：故意讓其抓住角色以記錄異常。
+- Death Ritual：使用眼藥水熄滅燃燒的蠟燭以完成事件。
+- Headbanger：給予咖啡以解鎖該異常。
+- Bed Monster：餵食楓糖漿或讓其抓住角色以解鎖。
+
+## 來源
+- Animal Hospital (Anomaly) Guide (2026) — Anomalies, Treatments ... — https://bloxguidesgg.com/games/animal-hospital
+- Animal Hospital Wiki — Anomalies, Classes & Guides — https://animalhospitalwiki.wiki/
+- Animal Hospital (Anomaly) — All Anomaly Types, Tells & Fixes — https://spottheanomaly.wiki/animal-hospital-anomaly
+- Animal Hospital Anomaly Sanity Guide — https://animal-hospital-anomaly.wiki/sanity/
+- Animal Hospital Anomaly Roblox Sanity Guide - How It Works — https://animalhospitalanomal.wiki/guides/sanity-guide
+- Sanity Management in Animal Hospital - Roblox Guide — https://animalhospitalanomaly.com/guides/sanity-management/
+- Sanity Management Guide | Animal Hospital Wiki — https://animalhospitalanomaly.org/guides/sanity-management/
+- Animal Hospital Anomaly Roblox Best Method to Farm Coins Fast — https://roonby.com/2026/06/17/animal-hospital-anomaly-roblox-best-method-to-farm-coins-fast/
+- Best Animal Coin Farming Guide in Animal Hospital (Fast, AFK, and Solo ... — https://roonby.com/2026/07/10/best-animal-coin-farming-guide-in-animal-hospital-fast-afk-and-solo-methods/
+- How to Get Coins Fast in Animal Hospital | Animal Hospital (Anomaly) — https://animalhospitalrobloxgame.com/how-to-get-coins-fast
+- Animal Hospital (Anomaly) Guide & Shift Tools — https://animalhospitalanomaly.online/
+- Animal Hospital Roblox Shift Guide - Patients, Items & Reports | gcz.gg — https://gcz.gg/en/games/animal-hospital/shift-guide
+- Animal Hospital Shifts — Complete Progression Guide — https://animalhospital.wiki/shifts/
+- Animal Hospital (Anomaly) Guides — https://animalhospitalanomaly.online/guides/
+- Animal Hospital Journal Guide - Every Anomaly, NPC, and Achievement ... — https://ffbooyah.com/2026/07/27/animal-hospital-journal-guide-every-anomaly-npc-and-achievement-explained/
+- Animal Hospital Journal Guide (2026) - How to Complete Every Anomaly ... — https://roonby.com/2026/07/28/animal-hospital-journal-guide-2026-how-to-complete-every-anomaly-npc-and-achievement/
