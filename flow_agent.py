@@ -4640,7 +4640,7 @@ class FlowAgent(ProcedureMixin, Agent):
 
 只輸出 JSON：
 {{"cause":"死因(<=40字)","mistake":"錯誤決定(<=40字)","avoid":"下次怎麼避免(<=60字)",
- "改善":"下次具體要換掉哪個動作(<=60字)",
+ "改善":"寫成「開局第 N 秒：做 X」(<=60字，N 從錄影裡找出來，不要寫「小心一點」)",
  "記憶":"要記住的那一句(<=50字，沒有就留空)",
  "分類":"基礎技藝 或 遊戲記憶 或 不記",
  "檔":"遊戲記憶要放哪個分類檔(<=8字，例如 地圖／怪物／UI)",
@@ -4876,15 +4876,26 @@ class FlowAgent(ProcedureMixin, Agent):
         n = getattr(self, "death_count", 1)
         print(f"   💀 第 {n} 次死亡，請他自己檢討、訂改善、並決定這條記到哪裡")
         content = []
-        shots = self.replay_shots()
+        # 2026-09-23 使用者（學習的知識）：先錄影再檢討——回放要從**進場那一秒**開始攤，
+        # 每張標「開局第 N 秒」，改善要寫成「開局第 N 秒：做 X」，下次在那一秒改做法。
+        born = getattr(self, "_enter_at", 0) or 0
+        life = (time.time() - born) if born else None
+        secs = 40.0 if life is None else max(40.0, min(118.0, life + 3.0))
+        shots = self.replay_shots(secs)
         if shots:
-            print(f"   🎞 附上死前 {shots[0][0]:.0f} 秒的回放 {len(shots)} 張")
+            print(f"   🎞 附上回放 {len(shots)} 張（涵蓋死前 {shots[0][0]:.0f} 秒"
+                  + (f"，這條命活了 {life:.0f} 秒" if life is not None else "") + "）")
             for ago, uri in shots:
-                content.append({"type": "text", "text": f"【死前 {ago:.0f} 秒】"})
+                if life is not None:
+                    at = max(0.0, life - ago)
+                    content.append({"type": "text", "text": f"【開局第 {at:.0f} 秒｜死前 {ago:.0f} 秒】"})
+                else:
+                    content.append({"type": "text", "text": f"【死前 {ago:.0f} 秒】"})
                 content.append({"type": "image_url", "image_url": {"url": uri}})
             content.append({"type": "text", "text":
-                            "上面是**死前這段時間的回放**（每張都標了死前幾秒）。當下太快看不清楚沒關係，"
-                            "現在一張一張看：是什麼東西靠近你、你的狀態什麼時候開始掉、你當時在做什麼。"})
+                            "上面是**這條命從進場開始的錄影**（每張標了「開局第幾秒」與「死前幾秒」）。"
+                            "從第一張往下看，不要只看最後一張：**第幾秒**出現了讓你死的東西？那一秒你在做什麼？"
+                            "改善要寫成「開局第 N 秒：做 X」，下次到那一秒就照做。"})
         content += self.short_mem_content()
         _j = self.step_journal_text()
         if _j:
@@ -4948,7 +4959,9 @@ class FlowAgent(ProcedureMixin, Agent):
         self.add_note(f"（死亡檢討 #{n}）死因：{cause}；改善：{fix or avoid}")
         try:
             with open(os.path.join(self.dir, "死亡檢討.md"), "a", encoding="utf-8") as f:
-                f.write(f"## 第 {n} 次 {datetime.now().strftime('%m/%d %H:%M')}" + NL
+                _life = getattr(self, "_last_life", None)
+                f.write(f"## 第 {n} 次 {datetime.now().strftime('%m/%d %H:%M')}"
+                        + (f"（這條命活了 {_life:.0f} 秒）" if _life else "") + NL
                         + f"- 死因：{cause}" + NL
                         + f"- 錯誤決定：{mistake}" + NL
                         + f"- 下次避免：{avoid}" + NL
