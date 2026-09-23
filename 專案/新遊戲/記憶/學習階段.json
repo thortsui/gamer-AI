@@ -29,6 +29,7 @@
     "01:07",
     "01:11",
     "01:16",
+    "01:25",
     "01:31",
     "01:36",
     "01:38",
@@ -207,6 +208,7 @@
     "chat_button",
     "chat_icon",
     "chat_window",
+    "citvillian",
     "clock17",
     "close button",
     "coin",
@@ -287,6 +289,7 @@
     "display_shelf",
     "display_stand",
     "distant_structure",
+    "dome",
     "door",
     "door_frame",
     "down",
@@ -438,6 +441,7 @@
     "green statue",
     "green zombie",
     "green_block",
+    "green_blocky_character",
     "green_board",
     "green_box",
     "green_button",
@@ -1221,5 +1225,5 @@
     "zombie_icon"
   ],
   "查wiki次數": 0,
-  "更新": "09/23 11:02:49"
+  "更新": "09/23 11:30:56"
 }

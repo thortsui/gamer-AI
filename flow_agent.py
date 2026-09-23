@@ -4629,6 +4629,8 @@ class FlowAgent(ProcedureMixin, Agent):
 這次要多回答兩件事：
 1. **改善**：下次從重生到同樣的地方，你**具體**要換掉哪一個動作？寫成你真的做得到的一兩句
    （像「重生後先按 w 走 2 秒再轉頭」那種程度，不是「更小心」這種空話）。
+   ⚖ 寫之前先對【指令等級表】：改善是第 3 級，跟第 0～2 級抵觸就會被退件
+   （例如高階說「卡住可以離開重進、離開確認視窗按 enter」，你就不能訂「彈窗點繼續不點離開」）。
 2. **這條教訓要記到哪裡**——你自己分類：
    - 「基礎技藝」＝換一隻遊戲也成立的操作技巧（走位、視角、點 UI、判斷卡住…）。
      這類會被放進跨遊戲候選，等你在**第二隻遊戲**也遇到同一件事，才會升級成基本知識。
@@ -4672,11 +4674,126 @@ class FlowAgent(ProcedureMixin, Agent):
             return
         self.improve = (getattr(self, "improve", []) + [{
             "次": n, "時間": datetime.now().strftime("%m/%d %H:%M"), "做法": body}])[-20:]
+        self.save_improve()
+
+    def save_improve(self):
         try:
             with open(os.path.join(self.dir, self.IMPROVE_FILE), "w", encoding="utf-8") as f:
-                json.dump(self.improve, f, ensure_ascii=False, indent=1)
+                json.dump(getattr(self, "improve", []), f, ensure_ascii=False, indent=1)
         except OSError:
             pass
+
+    # ---------------- 指令等級表（2026-09-23 使用者定）：高階規則優先，抵觸的低階規則刪掉
+    # 表在 核心/共用/01_指令等級表.md（第 0 級鐵律、第 1 級使用者強制指令、第 2 級文件、第 3 級他自己訂的）。
+    # 他自己訂的規則（扣分檢討規則、死後改善）進來時先對表；抵觸就退件。開機與表更新時整批重審，抵觸的刪掉。
+    LEVEL_FILE = os.path.join(HERE, "核心", "共用", "01_指令等級表.md")
+    AUDIT_ASK = """下面是【指令等級表】（第 0 級最高、第 3 級最低）和一串「他自己訂的規則」（全部是第 3 級）。
+逐條判斷：這條第 3 級規則有沒有跟第 0～2 級的任何一條**抵觸**？
+抵觸的判定要嚴：**只有「照著這條做，在某個具體情況下必然違反高階規則」才算**。
+例：高階說「卡住就離開重進，離開確認視窗出現時按 enter 或點離開」，而這條說「看到繼續/離開/重生只准 esc」
+或「彈窗點繼續不點離開」——照做就永遠離不開，這是抵觸。
+不算抵觸：只是講不同的事；只是更細的做法；只是比高階更保守但沒擋住高階（例如高階說可以做 A，這條說做 A 之前先做 B）；
+用詞相似但情況不同（「按 E 復活」是免費的隊友救援，不是花錢的自我復活）。拿不準就不算。
+每一條抵觸都要附「確定」欄：true＝你能講出具體情況下它會擋住哪一條高階規則；false＝只是感覺像。
+只輸出 JSON：{{"抵觸":[{{"編號":1,"高階規則":"抵觸到的那一條（原句 20 字內）","理由":"<=30字","確定":true}}]}}；沒有就 {{"抵觸":[]}}
+
+【指令等級表】
+{table}
+
+【他自己訂的規則】
+{rules}"""
+
+    def level_table_text(self):
+        try:
+            with open(self.LEVEL_FILE, encoding="utf-8") as f:
+                t = f.read()
+            if t.startswith("---"):
+                t = t.split("---", 2)[-1]
+            return t.strip()
+        except OSError:
+            return ""
+
+    def rule_audit(self, rules, why=""):
+        """rules: [(來源, 鍵, 文字), ...] → {index: (抵觸到的高階規則, 理由)}。
+        用模型判斷（整批用中想、單條用快思），只收「確定」的；拿不準就不刪。"""
+        table = self.level_table_text()
+        if not table or not rules:
+            return {}
+        listed = NL.join(f"{i + 1}. （{src}）{txt}" for i, (src, _k, txt) in enumerate(rules))
+        # 實測（09/23）：中想 95 秒還常常想不完；快思 6 秒但偶爾誤判（把免費的按 E 復活當成付費復活）。
+        # 所以用快思問三次、三次都說「確定抵觸」才算——刪錯規則比漏刪嚴重。
+        votes = {}
+        n_runs = 3
+        for _ in range(n_runs):
+            try:
+                raw, _, _, _ = stream_json(self.endpoint, self.model,
+                                           "你是規則審核員：只判斷低階規則有沒有抵觸高階規則，不加意見。",
+                                           self.AUDIT_ASK.format(table=table, rules=listed),
+                                           1200, time.time() + 60.0, 0.3, effort=快思)
+            except Exception as e:  # noqa: BLE001
+                print(f"   ⚖ 規則審核失敗（{why}）：{e}")
+                return {}
+            o = parse_json_loose(raw) or {}
+            for h in (o.get("抵觸") or []):
+                try:
+                    i = int(h.get("編號")) - 1
+                except (TypeError, ValueError):
+                    continue
+                sure = h.get("確定", False)
+                sure = sure if isinstance(sure, bool) else str(sure).lower() in ("true", "1", "是")
+                if 0 <= i < len(rules) and sure:
+                    c, _hi, _r = votes.get(i, (0, "", ""))
+                    votes[i] = (c + 1, str(h.get("高階規則", "")).strip()[:40], str(h.get("理由", "")).strip()[:40])
+        return {i: (hi, r) for i, (c, hi, r) in votes.items() if c >= n_runs}
+
+    def _audit_log(self, lines):
+        try:
+            with open(os.path.join(self.dir, "規則審核.md"), "a", encoding="utf-8") as f:
+                f.write(NL.join(lines) + NL)
+        except OSError:
+            pass
+
+    def audit_own_rules(self, why="開機"):
+        """把他自己訂的規則整批對等級表，抵觸的刪掉並記到 記憶/規則審核.md。"""
+        rules = [("扣分檢討·" + k, k, v.get("規則", "")) for k, v in (getattr(self, "lessons", {}) or {}).items()
+                 if v.get("規則")]
+        rules += [(f"第{r.get('次')}次死後改善", r, r.get("做法", ""))
+                  for r in (getattr(self, "improve", []) or []) if r.get("做法")]
+        if not rules:
+            return 0
+        bad = self.rule_audit(rules, why)
+        if not bad:
+            print(f"   ⚖ 規則審核（{why}）：{len(rules)} 條都沒抵觸等級表")
+            return 0
+        stamp = datetime.now().strftime("%m/%d %H:%M")
+        lines, gone = [], []
+        for i, (hi, reason) in bad.items():
+            src, key, txt = rules[i]
+            if src.startswith("扣分檢討·"):
+                self.lessons.pop(key, None)
+            else:
+                self.improve = [r for r in self.improve if r is not key]
+            lines.append(f"- {stamp}（{why}）刪掉「{txt}」（{src}）——抵觸「{hi}」：{reason}")
+            gone.append(f"「{txt}」（抵觸：{hi}）")
+            print(f"   ⚖ 抵觸高階規則，刪掉：{txt}　← {hi}（{reason}）")
+        self.save_lessons()
+        self.save_improve()
+        self._audit_log(lines)
+        self.lesson_hint = (getattr(self, "lesson_hint", "") or "") + (
+            "⚖ **規則審核**：你自己訂的這幾條跟【指令等級表】的高階規則抵觸，已經作廢、刪掉了："
+            + "；".join(gone) + "。以後照高階的做。" + NL)
+        return len(bad)
+
+    def level_tick(self):
+        """等級表檔案改了（使用者加了新指令）就整批重審一次。"""
+        try:
+            m = os.path.getmtime(self.LEVEL_FILE)
+        except OSError:
+            return
+        if m != getattr(self, "_level_mtime", None):
+            first = getattr(self, "_level_mtime", None) is None
+            self._level_mtime = m
+            self.audit_own_rules("開機" if first else "等級表更新")
 
     def improve_text(self, n=3):
         rows = list(getattr(self, "improve", []))[-n:]
@@ -4816,7 +4933,16 @@ class FlowAgent(ProcedureMixin, Agent):
         except Exception as e:  # noqa: BLE001
             print(f"   記教訓失敗：{e}")
         if fix:
-            self.add_improve(fix, n)
+            bad = self.rule_audit([(f"第{n}次死後改善", None, fix)], "死後改善")
+            if bad:
+                hi, reason = bad[0]
+                self._audit_log([f"- {datetime.now():%m/%d %H:%M}（死後改善退件）「{fix}」（第{n}次死亡）——抵觸「{hi}」：{reason}"])
+                print(f"   ⚖ 死後改善抵觸高階規則，退件：{fix}　← {hi}（{reason}）")
+                self.lesson_hint = (getattr(self, "lesson_hint", "") or "") + (
+                    f"⚖ 你第 {n} 次死後訂的改善「{fix}」跟【指令等級表】的高階規則抵觸（{hi}：{reason}），**不收**。" + NL)
+                fix = ""
+            else:
+                self.add_improve(fix, n)
         self.death_note = (f"第 {n} 次死亡：死因「{cause}」；錯誤「{mistake}」；"
                            f"下次「{avoid}」；改善「{fix}」")
         self.add_note(f"（死亡檢討 #{n}）死因：{cause}；改善：{fix or avoid}")
@@ -7302,6 +7428,7 @@ class FlowAgent(ProcedureMixin, Agent):
         self.tick("反射")
         try:
             self.scene_tick()              # 2026-09-21：場景換了就先做基礎確認
+            self.level_tick()              # 2026-09-23：等級表（開機一次；表改了就重審他自己的規則）
         except Exception as e:  # noqa: BLE001
             print(f"   場景比對失敗：{e}")
         try:
@@ -10338,7 +10465,11 @@ class FlowAgent(ProcedureMixin, Agent):
 　好：「按 w 之前一定先在同一個動作裡填 g，寫出我要去的東西」
 　壞：「我會更小心」「下次注意目的地」——這種規則沒辦法檢查，等於沒訂。
 
-只輸出 JSON：{{"為什麼":"(<=50字)","當時該怎麼做":"(<=50字)","規則":"(<=40字，具體可檢查)"}}"""
+⚖ **訂之前先對【指令等級表】**（系統提示最前面那一份）：你訂的規則是第 3 級，
+跟第 0～2 級任何一條抵觸就會被退件（例如高階說「卡住可以離開重進」，你就不能訂「看到離開視窗只准 esc」）。
+先問自己「照這條做，會不會擋住上面某一條？」——會就換一條不打架的。
+
+只輸出 JSON：{{"為什麼":"(<=50字)","當時該怎麼做":"(<=50字)","規則":"(<=40字，具體可檢查，不抵觸等級表)"}}"""
 
     WIN_ASK = """【回推時間】你剛才成功了：**{kind}**（+{n} 分）。現在**不趕時間**。
 
@@ -10622,6 +10753,15 @@ class FlowAgent(ProcedureMixin, Agent):
                                     f"（「{prev['規則']}」）。**同一條規則重訂沒有意義**——"
                                     f"它已經證明沒用了。要嘛照它做，要嘛想一條做法完全不同的。" + NL)
                 return
+        # 2026-09-23 使用者定的等級表：他訂的規則（第 3 級）抵觸第 0～2 級就退件
+        bad = self.rule_audit([("扣分檢討·" + kind, kind, rule)], "新規則")
+        if bad:
+            hi, reason = bad[0]
+            self._audit_log([f"- {datetime.now():%m/%d %H:%M}（新規則退件）「{rule}」（扣分檢討·{kind}）——抵觸「{hi}」：{reason}"])
+            print(f"   ⚖ 新規則抵觸高階規則，退件：{rule}　← {hi}（{reason}）")
+            self.lesson_hint = (f"⚖ 你為「{kind}」訂的規則「{rule}」跟【指令等級表】的高階規則抵觸"
+                                f"（{hi}：{reason}），**不收**。高階規則優先，重訂一條不打架的。" + NL)
+            return
         self.lessons[kind] = {
             "規則": rule,
             "為什麼": str(d.get("為什麼", ""))[:60],
