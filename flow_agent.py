@@ -8319,10 +8319,8 @@ class FlowAgent(ProcedureMixin, Agent):
             self.history.append(f"[{stamp}] 你死了，位置推算已歸零，地圖上的舊座標不準了，要重新記")
             self.death_count = getattr(self, "death_count", 0) + 1
             try:
-                try:
-                    self.punish("死掉", "死一次要重跑整條路，進度幾乎全丟。")
-                except Exception:  # noqa: BLE001
-                    pass
+                # 2026-09-23 使用者：死亡不扣分（只檢討）。原本 −10（09/19 前 −150）。
+                print("   💀 你死了（不扣分，使用者 09/23 定；只做死亡檢討）")
                 self.death_review()          # 會寫進 死亡檢討.md 並更新 self.death_note
                 if getattr(self, "death_note", ""):
                     self.add_note(f"（死亡檢討）{self.death_note[:60]}")
@@ -9561,7 +9559,7 @@ class FlowAgent(ProcedureMixin, Agent):
         "碰到花錢的東西": 300,
         # 2026-09-19 使用者：**死亡的扣分降到 10**。死一次的真實代價是「要重跑一遍」，
         # 那本來就夠痛了；扣 150 只會讓他怕死到不敢進關卡、寧可待在大廳。
-        "死掉": 10,
+        "死掉": 0,             # 2026-09-23 使用者：死亡不扣分（程式也不再呼叫 punish("死掉")，只留死亡檢討）
         # 2026-09-19 使用者：**退出遊戲的扣分要降下來**。原本 120 分讓他不敢退，
         # 結果寧可對著一面牆耗一小時（那樣扣得更多）。退出重進本來就是他該用的解法。
         "沒事退出遊戲": 20,
