@@ -595,6 +595,7 @@
     "light_beam",
     "light_column",
     "light_cube",
+    "light_fixture",
     "light_panel",
     "light_patch",
     "light_ring",
@@ -1247,5 +1248,5 @@
     "zombie_icon"
   ],
   "查wiki次數": 0,
-  "更新": "09/23 16:10:32"
+  "更新": "09/23 16:17:31"
 }
