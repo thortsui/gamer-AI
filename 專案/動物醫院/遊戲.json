@@ -1,43 +1,30 @@
 {
-  "全名": "Animal Anomaly",
+  "全名": "",
   "作者": "",
   "places": {
-    "78515283254292": "戶外大廳",
-    "104522435597696": "醫院裡（上班中）"
+    "78515283254292": "大廳",
+    "104522435597696": "另一個場景"
   },
   "大廳place": 78515283254292,
   "詞彙": [
     "wall",
-    "cabinet",
-    "shelf",
+    "door",
+    "window",
     "table",
     "chair",
     "box",
-    "glowing purple object",
+    "shelf",
     "person",
-    "cat",
-    "dog",
-    "rabbit",
-    "counter desk",
-    "door",
-    "window",
-    "printer",
-    "coffee machine",
-    "computer monitor",
-    "camera",
-    "photo",
-    "cctv monitor",
-    "stamp",
-    "entrance",
-    "elevator",
-    "sign"
+    "sign",
+    "stairs",
+    "button"
   ],
   "模組": {
-    "櫃檯": true,
-    "輪班計畫": true,
-    "報到課程": true,
-    "理智": true,
-    "學習課程": true,
-    "任務樹": true
+    "櫃檯": false,
+    "輪班計畫": false,
+    "報到課程": false,
+    "理智": false,
+    "學習課程": false,
+    "任務樹": false
   }
 }
