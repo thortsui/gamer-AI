@@ -9585,6 +9585,9 @@ class FlowAgent(ProcedureMixin, Agent):
         "一直待在原地": 25,
         "面壁": 8, "空按E": 10, "卡在選單": 1,
         "大幅度轉頭": 1, "鏡頭頂到天花板": 15, "鏡頭頂到地板": 15,
+        # 2026-09-24 使用者：避免他甩視角，用懲罰讓他自己避免。
+        # 上下大幅轉（|dy|≥150）之後 60 秒內又往反方向大幅轉＝來回甩。
+        "上下來回甩視角": 20,
         # 2026-09-13 使用者：都不做事（不移動、不互動、也不轉視角）＝ −100
         "重複同一個動作": 1, "原地空轉": 100, "esc連按": 1,
         # 2026-09-21 使用者：切成幾步就要在幾輪內做完，超過就扣分。
@@ -10391,6 +10394,25 @@ class FlowAgent(ProcedureMixin, Agent):
                         break
                 except (TypeError, ValueError):
                     pass
+        # 2026-09-24 使用者：上下來回甩視角要扣分，讓他自己避免。
+        for a in acts:
+            if a.get("t") != "look":
+                continue
+            try:
+                dy = float(a.get("dy", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if abs(dy) < 150:
+                continue
+            last = getattr(self, "_last_big_dy", None)
+            now = time.time()
+            self._last_big_dy = (dy, now)
+            if last and now - last[1] < 60 and (last[0] > 0) != (dy > 0):
+                self.punish("上下來回甩視角",
+                            f"{int(now - last[1])} 秒前你才上下大轉 dy {last[0]:+.0f}，"
+                            f"這一輪又往反方向大轉 dy {dy:+.0f}——來回甩，鏡頭一直停不下來。"
+                            f"大轉一次之後，先看畫面和水平儀確認轉到哪裡了，再決定下一步。")
+                break
         # 使用者 09/12：抬頭／低頭要用**畫面看出來的**判斷，不要用累積的轉動角度
         # （角度是推算的、會漂；眼睛框到的東西在畫面哪裡才是事實）。
         try:
