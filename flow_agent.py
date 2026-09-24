@@ -10910,7 +10910,9 @@ class FlowAgent(ProcedureMixin, Agent):
                     still, steps = 0, steps + 1
             totals.append(steps * self.CALIB_STEP)
         v_total = sum(totals) / len(totals)
-        self.raw_look(0, -v_total / 2); time.sleep(0.4)          # 回到大約水平（現在在底端）
+        # 2026-09-24 修：第二趟是 dy 負的（往上）掃，掃完停在**頂端**看天花板，
+        # 以前這裡寫 -v_total/2 又往上推 → 鏡頭對著天花板、水平儀卻在這裡歸零成「完全水平」。
+        self.raw_look(0, v_total / 2); time.sleep(0.4)           # 從頂端往下半程＝回到大約水平
         dy_per_deg = round(v_total / 178.0, 2) if v_total else None
 
         # 水平：轉到畫面回到起點
