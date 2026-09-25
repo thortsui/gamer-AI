@@ -1551,6 +1551,20 @@ class Agent:
         except Exception:  # noqa: BLE001
             return
         dx, dy = int(dx), int(dy)
+        # 2026-09-25 使用者：「完全阻止他上下動頭看看」——遊戲.json 開「禁止上下轉頭」就把 dy 全部歸零。
+        # 所有轉視角（他的 look、aim、程式自己的修正）都走這裡，擋在這裡最乾淨；左右照常。
+        if dy and (getattr(self, "gcfg", None) or {}).get("禁止上下轉頭"):
+            if time.time() - getattr(self, "_dy_block_at", 0) > 60:
+                self._dy_block_at = time.time()
+                print(f"   ⛔ 上下轉頭已被使用者關掉：dy {dy:+d} → 0（只轉左右）")
+                try:
+                    self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 使用者把上下轉頭關掉了："
+                                        f"你送的 dy 一律變 0，只有左右（dx）會轉。")
+                except Exception:  # noqa: BLE001
+                    pass
+            dy = 0
+            if not dx:
+                return
         # ══ 2026-09-14 撤銷：dy 的符號本來就是對的 ══
         # 這天稍早我用 ORB 量「送 dy 之後畫面往哪移」，量到 5/5 相反、一致度 100%，
         # 就在這裡把 dy 反號了。**那個測量是錯的**：

@@ -1482,6 +1482,27 @@ class FlowAgent(ProcedureMixin, Agent):
             out.append(a)
         return out
 
+    JOB_WORDS = ("職業", "護士", "醫生", "實習", "警衛", "清潔", "Job", "job", "Nurse", "Doctor", "Intern")
+
+    def guard_job(self, actions):
+        """2026-09-25 使用者：「要阻止他換職業」。遊戲.json 開「禁止換職業」時，
+        標籤或要點的字跟職業有關的 click／點字，一律擋掉。"""
+        if not self.gcfg.get("禁止換職業"):
+            return actions
+        out = []
+        for a in actions:
+            t = a.get("t")
+            txt = str(a.get("g") or "") if t == "click" else (
+                str(a.get("字") or "") + str(a.get("g") or "") if t in ("點字", "點文字") else "")
+            if txt and any(w in txt for w in self.JOB_WORDS):
+                self.stat["擋換職業"] = self.stat.get("擋換職業", 0) + 1
+                print(f"   ⛔ 擋掉換職業：{t}「{txt[:20]}」")
+                self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 使用者不准你換職業，"
+                                    f"點職業／護士／實習生那類按鈕已經擋掉；維持現在的職業去做事。")
+                continue
+            out.append(a)
+        return out
+
     def guard_esc(self, actions):
         """擋掉連按 esc：esc 是開關，關掉之後再按等於又打開，他會永遠出不來。
 
@@ -8244,7 +8265,7 @@ class FlowAgent(ProcedureMixin, Agent):
             else:
                 rest.append(a)
         self._busy = True
-        rest = self.guard_hold(self.guard_leave(self.guard_esc(self.guard_pay_click(self.clamp_aim(rest)))))
+        rest = self.guard_hold(self.guard_leave(self.guard_esc(self.guard_job(self.guard_pay_click(self.clamp_aim(rest))))))
         pre_click = self.grab_still(320)
         self.execute(rest)
         self.check_click(rest, pre_click)
