@@ -7950,6 +7950,16 @@ class FlowAgent(ProcedureMixin, Agent):
                 except Exception as e:  # noqa: BLE001
                     print(f"   訓練請求失敗：{e}")
                 actions.remove(a)
+            elif a.get("t") == "水平歸零":
+                # 2026-09-26 使用者：他要知道怎麼修回水平、確保水平儀正確，每次登入優先調好。
+                # 他自己看畫面確認已經水平之後，用這個把水平儀的上下讀數歸零（方位不動）。
+                self.pitch_deg = 0.0
+                self.pitch = 0
+                self.pitch_hi = self.pitch_lo = 0.0
+                print("   🧭 他確認畫面水平 → 水平儀上下歸零（方位不動）")
+                self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 你確認畫面是水平的，"
+                                    f"水平儀上下已歸零；之後的抬頭／低頭度數都從這裡算。")
+                actions.remove(a)
             elif a.get("t") == "量刻度":
                 try:
                     self.calibrate_axes("他自己要求")
