@@ -131,10 +131,12 @@ def main():
     print("組驗證集…"); val_ds = ChatDS(val_rows, tok, args.max_len)
     pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
 
+    # transformers 5 拿掉了 warmup_ratio，自己換算成步數（3%）
+    total_steps = max(1, int(math.ceil(len(train_ds) / args.grad_accum) * args.epochs))
     targs = TrainingArguments(
         output_dir=os.path.join(args.out, "ckpt"), num_train_epochs=args.epochs, learning_rate=args.lr,
         per_device_train_batch_size=1, per_device_eval_batch_size=1, gradient_accumulation_steps=args.grad_accum,
-        lr_scheduler_type="cosine", warmup_ratio=0.03, weight_decay=0.0, bf16=True,
+        lr_scheduler_type="cosine", warmup_steps=max(1, int(total_steps * 0.03)), weight_decay=0.0, bf16=True,
         logging_steps=10, eval_strategy="steps", eval_steps=200, save_strategy="steps", save_steps=200,
         save_total_limit=2, report_to=[], seed=args.seed, dataloader_num_workers=2,
         remove_unused_columns=False, group_by_length=True,
