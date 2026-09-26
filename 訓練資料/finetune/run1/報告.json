@@ -1,0 +1,44 @@
+{
+ "args": {
+  "model": "Qwen/Qwen3.8-27B",
+  "data": "/data",
+  "out": "/out/run1",
+  "classes": "A_qa,B,C,E,F",
+  "repeat": "A_qa=2,B=4",
+  "epochs": 2.0,
+  "lr": 0.0001,
+  "r": 16,
+  "alpha": 32,
+  "max_len": 3072,
+  "grad_accum": 16,
+  "seed": 7,
+  "sample": 0
+ },
+ "val": {
+  "A_qa": {
+   "val_loss": 2.3151,
+   "ppl": 10.13,
+   "n": 89
+  },
+  "B": {
+   "val_loss": 0.0767,
+   "ppl": 1.08,
+   "n": 17
+  },
+  "C": {
+   "val_loss": 0.1655,
+   "ppl": 1.18,
+   "n": 200
+  },
+  "E": {
+   "val_loss": 0.0,
+   "ppl": 1.0,
+   "n": 60
+  },
+  "F": {
+   "val_loss": 1.3685,
+   "ppl": 3.93,
+   "n": 200
+  }
+ }
+}
