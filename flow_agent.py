@@ -6663,6 +6663,7 @@ class FlowAgent(ProcedureMixin, Agent):
 
         `最新提示.txt` 永遠是最後一輪；每 100 輪另外存一份 `提示存檔/` 當歷史。
         """
+        self._panel_text = text          # 2026-09-26：留給 log_panel 存整輪面板（fine-tune 要完整輸入）
         try:
             sysp = self.sys_prompt()
             body = ("===== system（這一輪載入的提示模組："
@@ -6679,6 +6680,35 @@ class FlowAgent(ProcedureMixin, Agent):
                     fh.write(body)
         except OSError:
             pass
+
+    def log_panel(self, mode, content_use, raw):
+        """2026-09-26 使用者要做 fine-tune：把每一輪真正送進模型的 user 面板＋模型原始輸出存下來。
+
+        以前只有 最新提示.txt（只留最後一輪）與每 100 輪一份存檔，成功軌跡的輸入只剩反射那句「看到」，
+        訓練輸入跟實戰差太多。現在每輪一筆，寫進 記憶/面板/YYYY-MM-DD.jsonl.gz（gzip 追加，一天約幾 MB）。
+        圖片不存（截圖已在 畫面/ 與 標註/），system 前綴固定、存 hash 就好。
+        """
+        try:
+            import gzip
+            import hashlib
+            texts = [c.get("text", "") for c in content_use if isinstance(c, dict) and c.get("type") == "text"]
+            sysp = self.sys_prompt(mode)
+            rec = {"時間": datetime.now().strftime("%H:%M:%S"), "輪": self.stat.get("輪數", 0),
+                   "模式": str(mode), "流程": str(getattr(self, "flow", "")),
+                   "區": str(getattr(self, "cur_zone", "") or ""), "任務": getattr(self, "cur_task", "") or "",
+                   "反射看到": getattr(self, "_seen_reflex", "") or "",
+                   "system_hash": hashlib.md5(sysp.encode("utf-8")).hexdigest()[:12],
+                   "system_len": len(sysp), "user": NL.join(texts), "輸出": raw or ""}
+            d = os.path.join(self.dir, "面板")
+            os.makedirs(d, exist_ok=True)
+            with gzip.open(os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl.gz"), "ab") as fh:
+                fh.write((json.dumps(rec, ensure_ascii=False) + NL).encode("utf-8"))
+            if not getattr(self, "_sys_dumped", False):
+                self._sys_dumped = True
+                with open(os.path.join(d, f"system_{rec['system_hash']}.txt"), "w", encoding="utf-8") as fh:
+                    fh.write(sysp)
+        except Exception as e:  # noqa: BLE001
+            print(f"   面板存檔失敗：{e}")
 
     def instr_text(self):
         """使用者寫在 任務指示.txt 的交代。
@@ -7699,6 +7729,7 @@ class FlowAgent(ProcedureMixin, Agent):
                                           tokens_use, time.time() + dl, 0.2,
                                           effort=mode)
         self.tick("快思")
+        self.log_panel(mode, content_use, raw)
         o = parse_json_loose(raw) or {}
         if not (o.get("a") or []):
             # 提示很長、又只有 5 秒，模型有時會來不及輸出動作 → 用精簡版重問一次
