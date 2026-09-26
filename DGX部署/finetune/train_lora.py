@@ -133,7 +133,7 @@ def main():
 
     # transformers 5 拿掉了 warmup_ratio，自己換算成步數（3%）
     total_steps = max(1, int(math.ceil(len(train_ds) / args.grad_accum) * args.epochs))
-    targs = TrainingArguments(
+    kw = dict(
         output_dir=os.path.join(args.out, "ckpt"), num_train_epochs=args.epochs, learning_rate=args.lr,
         per_device_train_batch_size=1, per_device_eval_batch_size=1, gradient_accumulation_steps=args.grad_accum,
         lr_scheduler_type="cosine", warmup_steps=max(1, int(total_steps * 0.03)), weight_decay=0.0, bf16=True,
@@ -141,6 +141,13 @@ def main():
         save_total_limit=2, report_to=[], seed=args.seed, dataloader_num_workers=2,
         remove_unused_columns=False, group_by_length=True,
     )
+    # transformers 5 拿掉了一些參數（warmup_ratio、group_by_length…），不支援的直接略過，別為了一個參數重載 7 分鐘權重
+    import inspect
+    ok = set(inspect.signature(TrainingArguments.__init__).parameters)
+    dropped = [k for k in kw if k not in ok]
+    if dropped:
+        print(f"（這版 transformers 不認得 {dropped}，略過）")
+    targs = TrainingArguments(**{k: v for k, v in kw.items() if k in ok})
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds, eval_dataset=val_ds,
                       data_collator=lambda b: collate(b, pad_id))
     t0 = time.time()
