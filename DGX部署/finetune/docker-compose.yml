@@ -1,0 +1,36 @@
+# gamer AI fine-tune：Qwen3.8-27B + LoRA（SFT）
+#   docker compose build
+#   docker compose run --rm train                      # 用 .env 的預設參數訓練
+#   docker compose run --rm train python /app/train_lora.py --epochs 1 --classes A_qa,B   # 自訂
+#   docker compose run --rm merge                      # 把 LoRA 合併成完整 bf16 權重（給 vLLM 服務用）
+# ⚠ 訓練時要把 Qwen3.8-Flash-Next（8888）停掉，兩個一起放不進 119 GiB。
+services:
+  train:
+    build: .
+    image: gamer-ai-finetune:latest
+    runtime: nvidia
+    ipc: host
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - BASE_MODEL=${BASE_MODEL:-Qwen/Qwen3.8-27B}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    volumes:
+      - ${HF_HOME:-/home/ethan/.cache/huggingface}:/root/.cache/huggingface
+      - ./data:/data
+      - ./out:/out
+    command: >
+      python /app/train_lora.py --model ${BASE_MODEL:-Qwen/Qwen3.8-27B} --data /data --out /out/${RUN_NAME:-run1}
+      --classes ${CLASSES:-A_qa,B,C,E,F} --epochs ${EPOCHS:-2} --lr ${LR:-1e-4} --r ${LORA_R:-16}
+      --max-len ${MAX_LEN:-3072} --grad-accum ${GRAD_ACCUM:-16} --repeat ${REPEAT:-A_qa=2,B=4}
+  merge:
+    image: gamer-ai-finetune:latest
+    runtime: nvidia
+    ipc: host
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+    volumes:
+      - ${HF_HOME:-/home/ethan/.cache/huggingface}:/root/.cache/huggingface
+      - ./out:/out
+    command: python /app/merge_lora.py --model ${BASE_MODEL:-Qwen/Qwen3.8-27B} --adapter /out/${RUN_NAME:-run1}/adapter --out /out/${RUN_NAME:-run1}/merged
