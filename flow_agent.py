@@ -7689,7 +7689,8 @@ class FlowAgent(ProcedureMixin, Agent):
             print("   🧠 上一輪反射喊了換快思 → 這一輪用會思考的那一層")
         if mode == 快思 and not self.macro_steps() and self.macro_name():
             print(f"   🧠 「{self.macro_name()}」還沒有細步驟 → 這一輪請快思把它切開")
-        dl = self.deadline if mode == 快思 else min(self.deadline, 20.0)
+        # 2026-09-27：反射的 20 秒上限改成參數（微調 27B 比 Flash-Next 慢很多，20 秒答不完就變「沒動作」）
+        dl = self.deadline if mode == 快思 else min(self.deadline, float(getattr(self.args, "reflex_deadline", 20.0) or 20.0))
         self.stat["快思輪" if mode == 快思 else "反射輪"] =             self.stat.get("快思輪" if mode == 快思 else "反射輪", 0) + 1
         # 2026-09-19 使用者更正：**反射輪要減少的是「思考量」，不是「提示」。**
         # 原本反射輪只送一份精簡提示（為了省 10 秒讀面板），代價是他那 3/4 的輪次
@@ -11122,6 +11123,7 @@ def main():
     # 實測 10 秒時 83 輪有 82 輪講不完＝每輪固定浪費 10 秒再花 3.5 秒用反射補救。
     # 現在改成：多數輪次直接用反射（2~4 秒出動作），每 N 輪才用一次會思考的快思。
     ap.add_argument("--deadline", type=float, default=30.0)
+    ap.add_argument("--reflex-deadline", type=float, default=20.0, help="反射輪最多等模型幾秒（慢的大腦要放寬）")
     ap.add_argument("--think-every", type=int, default=4,
                     help="每幾輪用一次快思（會思考），其他輪用反射。1＝每輪都思考")
     ap.add_argument("--short-mem", type=int, default=4,

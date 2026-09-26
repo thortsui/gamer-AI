@@ -75,11 +75,19 @@ def main():
         if mode.startswith("流程:") and "動作" in r:
             m["輪數"] += 1
             m["秒"] += float(r.get("秒") or 0)
-            act = str(r.get("動作", ""))
-            if re.search(r"轉視角 0,-?\d+", act) and not re.search(r"轉視角 -?[1-9]\d*,", act):
-                m["純上下"] += 1
-            if act.strip() in ("沒動作", ""):
-                m["沒動作"] += 1
+            acts = r.get("動作") or []
+            if isinstance(acts, list):
+                looks = [a for a in acts if isinstance(a, dict) and a.get("t") == "look"]
+                if looks and all(not a.get("dx") and a.get("dy") for a in looks) and len(looks) == len(acts):
+                    m["純上下"] += 1
+                if not acts:
+                    m["沒動作"] += 1
+            else:
+                act = str(acts)
+                if re.search(r"轉視角 0,-?\d+", act) and not re.search(r"轉視角 -?[1-9]\d*,", act):
+                    m["純上下"] += 1
+                if act.strip() in ("沒動作", ""):
+                    m["沒動作"] += 1
             seen = str(r.get("看到", ""))
             if "斷線" in seen or "連線中斷" in seen:
                 m["斷線"] += 1

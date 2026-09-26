@@ -68,10 +68,15 @@ if (-not $rbx) {
     Say "🎮 Roblox 已在跑（PID $($rbx.Id)），視窗請保持最大化、電腦不要鎖定"
 }
 
+# 慢的大腦（例如微調 27B）要放寬時限：設環境變數 GAMER_DEADLINE／GAMER_REFLEX_DEADLINE（秒）
+$extra = @()
+if ($env:GAMER_DEADLINE) { $extra += @('--deadline', $env:GAMER_DEADLINE) }
+if ($env:GAMER_REFLEX_DEADLINE) { $extra += @('--reflex-deadline', $env:GAMER_REFLEX_DEADLINE) }
+if ($extra.Count) { Say ("⏱ 時限參數：{0}" -f ($extra -join ' ')) }
 # 5. 啟動代理（眼睛 YOLO-World、文字 OCR 都是代理裡的執行緒，會一起起來）
 $out = Join-Path $MEM "stdout.log"; $err = Join-Path $MEM "stderr.log"
 $proc = Start-Process -FilePath $PY -WorkingDirectory $ROOT -WindowStyle Hidden -PassThru `
-    -ArgumentList '-u','flow_agent.py','--game',$Game,'--hours',$hours `
+    -ArgumentList (@('-u','flow_agent.py','--game',$Game,'--hours',$hours) + $extra) `
     -RedirectStandardOutput $out -RedirectStandardError $err
 Say "🚀 代理已啟動 PID $($proc.Id)（隱藏視窗，輸出在 專案\$Game\記憶\stdout.log）"
 
