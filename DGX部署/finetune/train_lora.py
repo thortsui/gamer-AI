@@ -45,7 +45,10 @@ class ChatDS(Dataset):
         n_trunc = 0
         for r in rows:
             msgs = r["messages"]
-            prompt = tok.apply_chat_template(msgs[:-1], tokenize=False, add_generation_prompt=True)
+            # enable_thinking=False：Qwen3.5 的模板會在 assistant 開頭放空的 <think></think>，
+            # 答案直接接在後面；代理實戰的反射／快思也是關思考送的，兩邊一致。
+            prompt = tok.apply_chat_template(msgs[:-1], tokenize=False, add_generation_prompt=True,
+                                             enable_thinking=False)
             full = prompt + msgs[-1]["content"] + tok.eos_token
             p_ids = tok(prompt, add_special_tokens=False)["input_ids"]
             f_ids = tok(full, add_special_tokens=False)["input_ids"]
@@ -163,7 +166,8 @@ def main():
         for cls in ("A_qa", "B"):
             rows = load_rows(args.data, [cls], "val", {})[:8]
             for r in rows:
-                prompt = tok.apply_chat_template(r["messages"][:-1], tokenize=False, add_generation_prompt=True)
+                prompt = tok.apply_chat_template(r["messages"][:-1], tokenize=False, add_generation_prompt=True,
+                                                 enable_thinking=False)
                 ids = tok(prompt, return_tensors="pt").to("cuda")
                 with torch.no_grad():
                     out = model.generate(**ids, max_new_tokens=160, do_sample=False)
