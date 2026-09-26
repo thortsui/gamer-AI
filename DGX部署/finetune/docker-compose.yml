@@ -23,6 +23,33 @@ services:
       python /app/train_lora.py --model ${BASE_MODEL:-Qwen/Qwen3.8-27B} --data /data --out /out/${RUN_NAME:-run1}
       --classes ${CLASSES:-A_qa,B,C,E,F} --epochs ${EPOCHS:-2} --lr ${LR:-1e-4} --r ${LORA_R:-16}
       --max-len ${MAX_LEN:-3072} --grad-accum ${GRAD_ACCUM:-16} --repeat ${REPEAT:-A_qa=2,B=4}
+  # 拿合併後的權重當 gamer AI 的大腦（跟 Flash-Next 互斥：開這個前先 stop.sh 那個）
+  #   docker compose up -d serve      # 佔 8888，代理不用改設定；served name 用 gamer-27b-ft-<run>
+  #   docker compose down serve
+  serve:
+    image: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
+    container_name: vllm-gamer-27b-ft
+    runtime: nvidia
+    ipc: host
+    shm_size: "16g"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    ports:
+      - "8888:8000"
+    volumes:
+      - ./out:/out
+      - ${HF_HOME:-/home/ethan/.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - VLLM_NO_USAGE_STATS=1
+      - HF_HUB_OFFLINE=1
+    command: >
+      vllm serve /out/${RUN_NAME:-run1}/merged --host 0.0.0.0 --port 8000
+      --served-model-name gamer-27b-ft-${RUN_NAME:-run1} --tensor-parallel-size 1
+      --dtype bfloat16 --kv-cache-dtype fp8 --gpu-memory-utilization ${SERVE_GPU_UTIL:-0.78}
+      --max-model-len ${SERVE_MAX_LEN:-65536} --max-num-seqs 4 --max-num-batched-tokens 8192
+      --limit-mm-per-prompt '{"image":8}' --enable-prefix-caching --enable-chunked-prefill
+      --reasoning-parser qwen3 --trust-remote-code
   merge:
     image: gamer-ai-finetune:latest
     runtime: nvidia
