@@ -50,6 +50,22 @@ services:
       --max-model-len ${SERVE_MAX_LEN:-65536} --max-num-seqs 4 --max-num-batched-tokens 8192
       --limit-mm-per-prompt '{"image":8}' --enable-prefix-caching --enable-chunked-prefill
       --reasoning-parser qwen3 --trust-remote-code
+  # NVFP4 壓縮（要 GPU、約 60 GB；跟服務中的大腦放不下同一台，等他收工再跑）
+  #   docker compose build quant && docker compose run --rm quant
+  quant:
+    build:
+      context: .
+      dockerfile: Dockerfile.quant
+    image: gamer-ai-quant:latest
+    runtime: nvidia
+    ipc: host
+    environment:
+      - HF_HUB_OFFLINE=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    volumes:
+      - ./data:/data
+      - ./out:/out
+    command: python /app/quant_nvfp4.py --model /out/${RUN_NAME:-run1}/merged --out /out/${RUN_NAME:-run1}/nvfp4 --calib /data --n-calib ${N_CALIB:-256}
   merge:
     image: gamer-ai-finetune:latest
     runtime: nvidia

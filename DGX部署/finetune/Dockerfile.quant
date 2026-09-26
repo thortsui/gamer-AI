@@ -1,0 +1,5 @@
+# gamer AI 壓縮環境：訓練映像 ＋ NVIDIA ModelOpt（NVFP4 PTQ）
+FROM gamer-ai-finetune:latest
+RUN pip install -U "nvidia-modelopt[torch]" && python -c "import modelopt, modelopt.torch.quantization as mtq; print('modelopt', modelopt.__version__, 'NVFP4' in dir(mtq) or hasattr(mtq, 'NVFP4_DEFAULT_CFG'))"
+COPY quant_nvfp4.py /app/
+CMD ["python", "/app/quant_nvfp4.py", "--help"]
