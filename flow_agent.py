@@ -1507,7 +1507,36 @@ class FlowAgent(ProcedureMixin, Agent):
                 + "- 認得出是記過的地點 → 寫那個名字（程式會把你的座標校正到那裡）。" + NL
                 + '- 不在任何記過的地點 → 寫 **"新:你取的名字"**（例如 "新:大廳南邊的門"），程式會把現在的位置記起來。' + NL
                 + "- 沒寫的話程式會多問你一次，只是白費時間。" + NL
-                + "你記過的地點：" + ("、".join(names[:40]) if names else "（還沒有，第一輪就寫一個新的）"))
+                + "你記過的地點：" + ("、".join(names[:40]) if names else "（還沒有，第一輪就寫一個新的）") + NL
+                + self.map_nav_text())
+
+    def map_nav_text(self):
+        """2026-09-27 使用者：「他能用地圖判斷該如何移動」——把最近幾個地點的方向與距離直接放在規則區，
+        反射輪也看得到；要去哪就照方向走，或讓程式帶他走。"""
+        import math
+        places = getattr(self, "map", {}) or {}
+        yaw = getattr(self, "yaw", 0.0)
+        rows = ["**用地圖決定怎麼走**：要去哪裡，先看它在你的哪個方向、幾秒的路，再動——"
+                '轉到那個方向走過去，或直接送 {"t":"走到記過的","name":"地點名"} 讓程式幫你轉向、走那麼多秒。'
+                "不知道要去哪，就去離你最近、還沒探索過的方向，走到之後記一個新地點。"]
+        items = []
+        for nm, (x, y) in places.items():
+            vx, vy = x - self.pos[0], y - self.pos[1]
+            dist = math.hypot(vx, vy)
+            if dist < 0.3:
+                continue
+            ang = (math.degrees(math.atan2(vx, vy)) - yaw + 540) % 360 - 180
+            a = abs(ang)
+            side = ("正前方" if a <= 20 else ("右前方" if ang > 0 else "左前方") if a <= 70 else
+                    ("正右邊" if ang > 0 else "正左邊") if a <= 110 else
+                    ("右後方" if ang > 0 else "左後方") if a <= 160 else "正後方")
+            items.append((dist, f"　{nm}：{side} {a:.0f}°、約 {dist:.1f} 秒"))
+        items.sort()
+        if items:
+            rows += [r[1] for r in items[:5]]
+        else:
+            rows.append("　（記過的地點都跟你在同一個位置，或還沒有——先走動再記，地點才分得開）")
+        return NL.join(rows)
 
     def enforce_map(self, o, uri):
         """每輪檢查他有沒有說「我在」；沒說就用反射重問一次。回傳這輪用了哪一種（校正／新增／重問後…／沒答）。"""
