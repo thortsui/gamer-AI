@@ -1546,7 +1546,67 @@ class FlowAgent(ProcedureMixin, Agent):
                 + "- 沒寫的話程式會多問你一次，只是白費時間。" + NL
                 + "你記過的地點：" + ("、".join(names[:40]) if names else "（還沒有，第一輪就寫一個新的）") + NL
                 + ((getattr(self, "map_mismatch", "") or "") + NL if getattr(self, "map_mismatch", "") else "")
+                + ((getattr(self, "vision_note", "") or "") + NL if getattr(self, "vision_note", "") else "")
                 + self.map_nav_text())
+
+    def yolo_sig(self, n=4):
+        """現在眼睛框到的東西（排除自己），取最明顯的幾個：[[詞, cx, h], ...]——當地點的視覺特徵。"""
+        dets, stamp = self.eyes.latest()
+        if not stamp or time.time() - stamp > 2.5:
+            return []
+        rows = []
+        for lab, v in (dets or {}).items():
+            for d in v[:1]:
+                if self.eyes.is_self(d) or d.get("score", 0) < 0.22:
+                    continue
+                rows.append([lab, round(d["cx"], 2), round(d["h"], 2), d.get("score", 0)])
+        rows.sort(key=lambda r: -(r[2] * r[3]))
+        return [r[:3] for r in rows[:n]]
+
+    def remember_sig(self, nm):
+        sig = self.yolo_sig()
+        if sig:
+            self.map_sig = getattr(self, "map_sig", {}) or {}
+            self.map_sig[nm] = sig
+
+    VISION_CHECK_EVERY = 6
+
+    def vision_check(self):
+        """2026-09-27 使用者：「他要用視覺定期檢查是不是對的，並且配合 YOLO 畫地圖和移動」。
+        每 6 輪拿現在 YOLO 看到的東西，跟同場景各地點記下的視覺特徵比對：
+        最像的地點夠像 → 把位置校正過去（視覺比推算準）；跟他說的「我在」不一樣 → 提醒他，並記成問題。"""
+        if not self.gcfg.get("強制腦內地圖") or self.stat.get("輪數", 0) % self.VISION_CHECK_EVERY:
+            return ""
+        now = {r[0]: r for r in self.yolo_sig(6)}
+        if not now:
+            self.vision_note = "👁 視覺檢查：眼睛現在框不到東西（對著牆、地板或天花板？），先轉到看得到東西的方向。"
+            return self.vision_note
+        best, best_sc = None, 0.0
+        for nm, sig in (getattr(self, "map_sig", {}) or {}).items():
+            if nm not in self.map or not self.same_scene(nm):
+                continue
+            sc = 0.0
+            for lab, cx, h in sig:
+                if lab in now:
+                    sc += 1.0 - min(1.0, abs(now[lab][1] - cx) + abs(now[lab][2] - h))
+            if sc > best_sc:
+                best, best_sc = nm, sc
+        said = (getattr(self, "_map_used", "") or "").split("在:")[-1].split("｜")[0] if "在:" in (getattr(self, "_map_used", "") or "") else ""
+        self.stat["視覺檢查"] = self.stat.get("視覺檢查", 0) + 1
+        if best and best_sc >= 1.2:
+            ox, oy = self.pos
+            self.pos = [float(self.map[best][0]), float(self.map[best][1])]
+            msg = f"👁 視覺檢查：你看到的東西（{'、'.join(now)}）最像「{best}」（相似 {best_sc:.1f}），位置已照畫面校正"
+            if said and said != best:
+                msg += f"——你剛才說在「{said}」，兩個對不上，以畫面為準"
+                self.record_problem(f"腦內地圖對不上畫面：說在「{said}」，畫面像「{best}」", source="視覺檢查")
+            print(f"   👁🗺 {msg}（{ox:+.1f},{oy:+.1f}）→（{self.pos[0]:+.1f},{self.pos[1]:+.1f}）")
+            self.vision_note = msg
+        else:
+            self.vision_note = (f"👁 視覺檢查：你看到的東西（{'、'.join(now)}）跟記過的地點都不像——"
+                                "可能是新地方，到了就用「我在」記一個新地點（程式會順便記下這裡看得到的東西）。")
+            print(f"   👁🗺 視覺檢查：看到 {list(now)}，沒有像的地點")
+        return self.vision_note
 
     def same_scene(self, nm):
         """這個地點跟我現在是不是同一個場景（Roblox place）。沒標記的舊地點當作未知＝不帶路。"""
@@ -1635,6 +1695,8 @@ class FlowAgent(ProcedureMixin, Agent):
         if nm in self.map:
             x, y = self.map[nm]
             d = math.hypot(x - self.pos[0], y - self.pos[1])
+            if d <= 3.0 and nm not in (getattr(self, "map_sig", {}) or {}):
+                self.remember_sig(nm)
             if d <= 3.0 and nm not in (getattr(self, "map_scene", {}) or {}):
                 self.map_scene = getattr(self, "map_scene", {}) or {}
                 self.map_scene[nm] = self.current_place()      # 舊地點補標場景（他確認人就在那附近）
@@ -1655,8 +1717,10 @@ class FlowAgent(ProcedureMixin, Agent):
         self.map[nm] = (round(self.pos[0], 2), round(self.pos[1], 2))
         self.map_scene = getattr(self, "map_scene", {}) or {}
         self.map_scene[nm] = self.current_place()
+        self.remember_sig(nm)
         self.save_map()
-        print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})（場景 {self.map_scene[nm]}）")
+        print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})（場景 {self.map_scene[nm]}，"
+              f"看得到 {[r[0] for r in self.map_sig.get(nm, [])]}）")
         return how + "新增:" + nm
 
     def guard_job(self, actions):
@@ -2801,12 +2865,11 @@ class FlowAgent(ProcedureMixin, Agent):
             return False
         x, y, kind = tgt
         # 看得到就用眼睛走：視覺閉環比航位推算準得多（推算會漂，方位會忽左忽右）
-        for lab in ("coffee machine", "counter desk", "computer monitor", "printer", "cup"):
+        # 2026-09-27：改用這個地點自己記下的視覺特徵（原本寫死咖啡機、櫃檯這些遊戲詞）
+        for lab, _cx, _h in (getattr(self, "map_sig", {}) or {}).get(nm, []):
             d = self.eyes.best(lab, max_age=2.0)
-            if d and d["score"] >= 0.25 and (nm in lab or lab in nm or
-                                             ("咖啡" in nm and "coffee" in lab) or
-                                             ("電腦" in nm and "computer" in lab)):
-                print(f"   👁 「{nm}」現在看得到（{lab}）→ 改用眼睛閉環走過去，比照地圖準")
+            if d and d["score"] >= 0.25 and not self.eyes.is_self(d):
+                print(f"   👁 「{nm}」的特徵「{lab}」現在看得到 → 用眼睛閉環走過去（比地圖推算準）")
                 self.goto_target(lab, budget=6.0)
                 self.note_progress("看著目標走過去")
                 return True
@@ -3959,9 +4022,11 @@ class FlowAgent(ProcedureMixin, Agent):
             self.trail_pts = [tuple(x) for x in d.get("走過的路", [])][-4000:]
             self.wall_pts = [tuple(x) for x in d.get("撞牆點", [])][-1500:]
             self.map_scene = {k: v for k, v in (d.get("場景") or {}).items()}
+            self.map_sig = {k: v for k, v in (d.get("視覺") or {}).items()}
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
         self.map_scene = getattr(self, "map_scene", {}) or {}
+        self.map_sig = getattr(self, "map_sig", {}) or {}
         self.pos = [0.0, 0.0]
         self.yaw = 0.0
         print(f"[地圖] 他自己記過 {len(self.map)} 個地方：{'、'.join(self.map) or '（還沒有）'}")
@@ -3973,6 +4038,7 @@ class FlowAgent(ProcedureMixin, Agent):
                            "走過的路": [[round(x, 1), round(y, 1)] for x, y in self.trail_pts[-4000:]],
                            "撞牆點": [[round(x, 1), round(y, 1)] for x, y in self.wall_pts[-1500:]],
                            "場景": {k: v for k, v in (getattr(self, "map_scene", {}) or {}).items() if k in self.map},
+                           "視覺": {k: v for k, v in (getattr(self, "map_sig", {}) or {}).items() if k in self.map},
                            "更新": datetime.now().strftime("%m/%d %H:%M:%S")},
                           f, ensure_ascii=False, indent=2)
         except OSError:
@@ -8008,6 +8074,7 @@ class FlowAgent(ProcedureMixin, Agent):
             self.note_zone(o.get("區") or o.get("zone"))
             self._map_used = self.enforce_map(o, uri)
             self._last_think = str(o.get("想") or o.get("why") or "")
+            self.vision_check()
         except Exception as e:  # noqa: BLE001
             print(f"   記區失敗：{e}")
         tk = str(o.get("task") or "").strip()[:20]
