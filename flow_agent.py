@@ -1484,6 +1484,19 @@ class FlowAgent(ProcedureMixin, Agent):
 
     JOB_WORDS = ("職業", "護士", "醫生", "實習", "警衛", "清潔", "Job", "job", "Nurse", "Doctor", "Intern")
 
+    def ban_text(self):
+        """2026-09-27 使用者：「禁止的東西他有知道嗎？用 prompt 去約束操作」——
+        遊戲.json 裡開著的禁令，每輪放在面板最前面先告訴他，不要等他做了才被擋。"""
+        rows = []
+        if self.gcfg.get("禁止換職業"):
+            rows.append("- **不准換職業**：不要點「職業」那顆按鈕，也不要點護士／醫生／實習生那類選項；"
+                        "維持現在的職業去做事。點了程式會直接擋掉，只是白費一輪。")
+        if self.gcfg.get("禁止上下轉頭"):
+            rows.append("- **不准上下轉頭**：dy 一律無效，只有左右（dx）會轉。")
+        if not rows:
+            return ""
+        return "【使用者禁止的事（程式會擋，做了只是浪費一輪）】" + NL + NL.join(rows)
+
     def guard_job(self, actions):
         """2026-09-25 使用者：「要阻止他換職業」。遊戲.json 開「禁止換職業」時，
         標籤或要點的字跟職業有關的 click／點字，一律擋掉。"""
@@ -5946,7 +5959,7 @@ class FlowAgent(ProcedureMixin, Agent):
         砍掉的是那些長篇教學與計分說明（那些慢想的時候再讀）。
         情況跟現在這一步對不上，就喊換快思，不要自己亂改計畫。
         """
-        parts = [self.repeat_alarm(), self.last_step_text(), self.basic_check_text(),
+        parts = [self.ban_text(), self.repeat_alarm(), self.last_step_text(), self.basic_check_text(),
                  getattr(self, "check_hint", ""), self.check_text(),
                  getattr(self, "budget_hint", ""),
                  getattr(self, "click_effect_hint", ""), self.macro_window_text(),
@@ -7634,6 +7647,9 @@ class FlowAgent(ProcedureMixin, Agent):
         _need = self.basic_check_text()
         if _need:
             text = _need + NL + text          # 場景剛換 → 放更前面
+        _ban = self.ban_text()
+        if _ban:
+            text = _ban + NL + NL + text      # 使用者的禁令放最前面（2026-09-27）
         _budh = getattr(self, "budget_hint", "")
         if _budh:
             text = _budh + NL + text
