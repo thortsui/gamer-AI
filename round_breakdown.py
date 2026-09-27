@@ -85,6 +85,8 @@ def main():
               Counter(("重問後" if str(r.get("腦內地圖", "")).startswith("重問後") else "")
                       + (str(r.get("腦內地圖", "")).replace("重問後", "").split(":")[0] or "（空）")
                       for r in rounds if "腦內地圖" in r)),
+          "**要去（地圖帶路）**：" + (lambda c: "、".join(f"{k} {v}" for k, v in c.most_common(8)) or "（沒有）")(
+              Counter(str(r.get("腦內地圖", "")).split("要去:")[1] for r in rounds if "要去:" in str(r.get("腦內地圖", "")))),
           f"**反射**：{stage_n['反射']}/{n} 輪都有跑；他喊「換快思」{tools['換快思']} 次。",
           f"**登記（報到成功）**：這段最後累計 {max([int(r.get('登記') or 0) for r in rounds] or [0])} 次。"]
     pp = os.path.join(HERE, "專案", args.game, "記憶", "遇到的問題.jsonl")

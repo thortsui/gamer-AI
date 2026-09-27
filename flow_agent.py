@@ -1531,7 +1531,10 @@ class FlowAgent(ProcedureMixin, Agent):
             return ""
         names = list((getattr(self, "map", {}) or {}).keys())
         return ("【腦內地圖：每一輪都要用（使用者規定）】" + NL
-                + '每一輪的 JSON 都要多一個欄位 **"我在":"地點名"**——你現在站在腦內地圖上的哪裡。' + NL
+                + '每一輪的 JSON 都要多兩個欄位：**"我在":"地點名"**（你現在在哪）、**"要去":"地點名"**（你要去哪）。' + NL
+                + "**你不用想怎麼走**——「要去」寫的是地圖上有的地點，程式會用地圖算出方向和距離，直接帶你走過去"
+                + "（這一輪你自己的走路、轉頭動作會被取代）。不需要移動就寫 \"要去\":\"這裡\"，照你自己的動作做（點東西、按 E…）。" + NL
+                + "要去的地方地圖上還沒有，就寫 \"這裡\"，自己走過去，到了用「我在」記成新地點。" + NL
                 + "- 認得出是記過的地點 → 寫那個名字（程式會把你的座標校正到那裡）。" + NL
                 + '- 不在任何記過的地點 → 寫 **"新:你取的名字"**（例如 "新:大廳南邊的門"），程式會把現在的位置記起來。' + NL
                 + "- 沒寫的話程式會多問你一次，只是白費時間。" + NL
@@ -1568,21 +1571,34 @@ class FlowAgent(ProcedureMixin, Agent):
         return NL.join(rows)
 
     def enforce_map(self, o, uri):
+        r = self._enforce_map(o, uri)
+        dest = str(o.get("要去") or "").strip()
+        if self.gcfg.get("強制腦內地圖") and dest and dest not in ("這裡", "原地", "不動") and dest in (self.map or {}):
+            self._goto_place = dest
+        return r + (f"｜要去:{dest}" if dest else "")
+
+    def _enforce_map(self, o, uri):
         """每輪檢查他有沒有說「我在」；沒說就用反射重問一次。回傳這輪用了哪一種（校正／新增／重問後…／沒答）。"""
         if not self.gcfg.get("強制腦內地圖"):
             return ""
+        self._goto_place = ""
         here = str(o.get("我在") or "").strip()
         how = ""
         if not here:
             names = list((getattr(self, "map", {}) or {}).keys())
-            q = ("只回答一件事：你現在站在腦內地圖的哪裡？" + NL
+            q = ("只回答兩件事：你現在站在腦內地圖的哪裡？要去哪裡？" + NL
                  + "記過的地點：" + ("、".join(names[:40]) if names else "（還沒有）") + NL
-                 + '認得就寫那個名字；不在任何記過的地點就寫 "新:你取的名字"。只輸出 JSON：{"我在":"..."}')
+                 + '我在：認得就寫那個名字；不在任何記過的地點就寫 "新:你取的名字"。'
+                 + '要去：地圖上的地點名；不需要移動或要去的地方還沒記過就寫 "這裡"。'
+                 + '只輸出 JSON：{"我在":"...","要去":"..."}')
             try:
                 raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(反射),
                                            [{"type": "image_url", "image_url": {"url": uri}},
                                             {"type": "text", "text": q}], 80, time.time() + 20.0, 0.2, effort=反射)
-                here = str((parse_json_loose(raw) or {}).get("我在") or "").strip()
+                _ans = parse_json_loose(raw) or {}
+                here = str(_ans.get("我在") or "").strip()
+                if not str(o.get("要去") or "").strip():
+                    o["要去"] = str(_ans.get("要去") or "").strip()
             except Exception as e:  # noqa: BLE001
                 print(f"   地圖重問失敗：{e}")
             self.tick("地圖重問")
@@ -8070,6 +8086,21 @@ class FlowAgent(ProcedureMixin, Agent):
         actions = o.get("a") if isinstance(o.get("a"), list) else []
         self._asked = [str(a.get("t")) for a in actions if isinstance(a, dict)]   # 2026-09-27：他這輪要了哪些工具（擋掉／轉換之前）
         # 記位置／忘記位置：由他自己決定要記哪裡、叫什麼名字
+        # 2026-09-27 使用者：「他不需要想怎麼走，只需要知道他在哪、要去哪，剩下直接用地圖計算」
+        _dest = getattr(self, "_goto_place", "")
+        if _dest:
+            self._goto_place = ""
+            moves = [a for a in actions if isinstance(a, dict) and (
+                (a.get("t") == "key" and str(a.get("k", "")).lower() in ("w", "a", "s", "d"))
+                or (a.get("t") == "look" and a.get("dx")))]
+            for a in moves:
+                actions.remove(a)
+            print(f"   🗺➡ 他說要去「{_dest}」→ 用地圖算路線帶他走（拿掉他自己的 {len(moves)} 個移動動作）")
+            try:
+                self.goto_remembered(_dest, why="他說要去")
+                self.stat["地圖帶路"] = self.stat.get("地圖帶路", 0) + 1
+            except Exception as e:  # noqa: BLE001
+                print(f"   地圖帶路失敗：{e}")
         for a in list(actions):
             if not isinstance(a, dict):
                 continue
