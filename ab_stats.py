@@ -80,7 +80,7 @@ def main():
                 looks = [a for a in acts if isinstance(a, dict) and a.get("t") == "look"]
                 if looks and all(not a.get("dx") and a.get("dy") for a in looks) and len(looks) == len(acts):
                     m["純上下"] += 1
-                if not acts:
+                if not acts and not r.get("地圖帶路"):
                     m["沒動作"] += 1
             else:
                 act = str(acts)

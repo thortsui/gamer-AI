@@ -818,6 +818,12 @@ class FlowAgent(ProcedureMixin, Agent):
 
     def record_problem(self, problem, tried="", cause="", source="他自己"):
         """寫一筆到 記憶/遇到的問題.jsonl／.md（他自己記的，或程式在他沒一次做完時代記）。"""
+        # 同一個大動作一直超支會每 3 輪觸發一次檢討；程式代記的同一件事 5 分鐘內只記一次
+        key = (source, self.macro_name() or self.flow)
+        if source != "他自己" and time.time() - getattr(self, "_prob_last", {}).get(key, 0) < 300:
+            return
+        self._prob_last = getattr(self, "_prob_last", {})
+        self._prob_last[key] = time.time()
         try:
             rec = {"時間": datetime.now().strftime("%m/%d %H:%M:%S"), "輪": self.stat.get("輪數", 0),
                    "問題": str(problem)[:200], "原因": str(cause)[:200], "試過": str(tried)[:200],
@@ -1529,7 +1535,7 @@ class FlowAgent(ProcedureMixin, Agent):
         """2026-09-27 使用者：「腦內地圖 學習時強制每次使用，讓他知道場地佈局和他在哪」。"""
         if not self.gcfg.get("強制腦內地圖"):
             return ""
-        names = list((getattr(self, "map", {}) or {}).keys())
+        names = [k for k in (getattr(self, "map", {}) or {}) if self.same_scene(k)]
         return ("【腦內地圖：每一輪都要用（使用者規定）】" + NL
                 + '每一輪的 JSON 都要多兩個欄位：**"我在":"地點名"**（你現在在哪）、**"要去":"地點名"**（你要去哪）。' + NL
                 + "**你不用想怎麼走**——「要去」寫的是地圖上有的地點，程式會用地圖算出方向和距離，直接帶你走過去"
@@ -1542,6 +1548,12 @@ class FlowAgent(ProcedureMixin, Agent):
                 + ((getattr(self, "map_mismatch", "") or "") + NL if getattr(self, "map_mismatch", "") else "")
                 + self.map_nav_text())
 
+    def same_scene(self, nm):
+        """這個地點跟我現在是不是同一個場景（Roblox place）。沒標記的舊地點當作未知＝不帶路。"""
+        tag = (getattr(self, "map_scene", {}) or {}).get(nm)
+        cur = self.current_place()
+        return tag is not None and cur is not None and tag == cur
+
     def map_nav_text(self):
         """2026-09-27 使用者：「他能用地圖判斷該如何移動」——把最近幾個地點的方向與距離直接放在規則區，
         反射輪也看得到；要去哪就照方向走，或讓程式帶他走。"""
@@ -1553,6 +1565,8 @@ class FlowAgent(ProcedureMixin, Agent):
                 "不知道要去哪，就去離你最近、還沒探索過的方向，走到之後記一個新地點。"]
         items = []
         for nm, (x, y) in places.items():
+            if not self.same_scene(nm):
+                continue                        # 別的場景（例如大廳 vs 醫院裡）的地點不列，座標不相干
             vx, vy = x - self.pos[0], y - self.pos[1]
             dist = math.hypot(vx, vy)
             if dist < 0.3:
@@ -1574,7 +1588,10 @@ class FlowAgent(ProcedureMixin, Agent):
         r = self._enforce_map(o, uri)
         dest = str(o.get("要去") or "").strip()
         if self.gcfg.get("強制腦內地圖") and dest and dest not in ("這裡", "原地", "不動") and dest in (self.map or {}):
-            self._goto_place = dest
+            if not self.same_scene(dest):
+                print(f"   🗺✋ 「{dest}」不在你現在這個場景（或沒標場景），不帶路")
+            else:
+                self._goto_place = dest
         return r + (f"｜要去:{dest}" if dest else "")
 
     def _enforce_map(self, o, uri):
@@ -1618,6 +1635,10 @@ class FlowAgent(ProcedureMixin, Agent):
         if nm in self.map:
             x, y = self.map[nm]
             d = math.hypot(x - self.pos[0], y - self.pos[1])
+            if d <= 3.0 and nm not in (getattr(self, "map_scene", {}) or {}):
+                self.map_scene = getattr(self, "map_scene", {}) or {}
+                self.map_scene[nm] = self.current_place()      # 舊地點補標場景（他確認人就在那附近）
+                self.save_map()
             if d > 3.0:
                 self.map_mismatch = (f"⚠ 你說你在「{nm}」，但腦內地圖推算你離它約 {d:.1f} 秒的路。"
                                      f"如果你確定就在那裡，送 {{\"t\":\"我在\",\"name\":\"{nm}\"}} 校正座標；"
@@ -1632,8 +1653,10 @@ class FlowAgent(ProcedureMixin, Agent):
             print(f"   🗺 [地圖] 他說在新地點「{nm}」，但這裡已經有「{near[0]}」，不重複記")
             return how + "在:" + near[0]
         self.map[nm] = (round(self.pos[0], 2), round(self.pos[1], 2))
+        self.map_scene = getattr(self, "map_scene", {}) or {}
+        self.map_scene[nm] = self.current_place()
         self.save_map()
-        print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})")
+        print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})（場景 {self.map_scene[nm]}）")
         return how + "新增:" + nm
 
     def guard_job(self, actions):
@@ -3935,8 +3958,10 @@ class FlowAgent(ProcedureMixin, Agent):
             self.map = {k: (float(v[0]), float(v[1])) for k, v in d.get("地點", {}).items()}
             self.trail_pts = [tuple(x) for x in d.get("走過的路", [])][-4000:]
             self.wall_pts = [tuple(x) for x in d.get("撞牆點", [])][-1500:]
+            self.map_scene = {k: v for k, v in (d.get("場景") or {}).items()}
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
+        self.map_scene = getattr(self, "map_scene", {}) or {}
         self.pos = [0.0, 0.0]
         self.yaw = 0.0
         print(f"[地圖] 他自己記過 {len(self.map)} 個地方：{'、'.join(self.map) or '（還沒有）'}")
@@ -3947,6 +3972,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 json.dump({"地點": {k: [round(v[0], 2), round(v[1], 2)] for k, v in self.map.items()},
                            "走過的路": [[round(x, 1), round(y, 1)] for x, y in self.trail_pts[-4000:]],
                            "撞牆點": [[round(x, 1), round(y, 1)] for x, y in self.wall_pts[-1500:]],
+                           "場景": {k: v for k, v in (getattr(self, "map_scene", {}) or {}).items() if k in self.map},
                            "更新": datetime.now().strftime("%m/%d %H:%M:%S")},
                           f, ensure_ascii=False, indent=2)
         except OSError:
@@ -8088,8 +8114,16 @@ class FlowAgent(ProcedureMixin, Agent):
         # 記位置／忘記位置：由他自己決定要記哪裡、叫什麼名字
         # 2026-09-27 使用者：「他不需要想怎麼走，只需要知道他在哪、要去哪，剩下直接用地圖計算」
         _dest = getattr(self, "_goto_place", "")
+        self._routed = ""
+        try:
+            if _dest and self.ui_open_hint():
+                print(f"   🗺✋ 畫面被面板蓋著，這輪不帶路去「{_dest}」")
+                _dest = ""
+        except Exception:  # noqa: BLE001
+            pass
         if _dest:
             self._goto_place = ""
+            self._routed = _dest
             moves = [a for a in actions if isinstance(a, dict) and (
                 (a.get("t") == "key" and str(a.get("k", "")).lower() in ("w", "a", "s", "d"))
                 or (a.get("t") == "look" and a.get("dx")))]
@@ -8762,6 +8796,7 @@ class FlowAgent(ProcedureMixin, Agent):
                   # 2026-09-27 使用者：拆解每一步各花幾秒、用了幾個工具、有沒有用子代理（反射／快思／慢想這幾層模型呼叫）
                   "耗時": dict(tk), "要的工具": list(getattr(self, "_asked", []) or []),
                   "腦內地圖": getattr(self, "_map_used", ""),
+                  "地圖帶路": getattr(self, "_routed", ""),
                   "模型": getattr(self, "model", "")})
         # 畫面長時間沒有變化＝卡住了，也要交報告
         d_now = frame_diff(before, self.grab_still(320))
@@ -10773,6 +10808,8 @@ class FlowAgent(ProcedureMixin, Agent):
         if getattr(self, "_model_silent", False):
             self._model_silent = False          # 模型沒講完的輪次不罰（見 cycle 裡的說明）
             return
+        if getattr(self, "_routed", ""):
+            return                              # 2026-09-27：程式照地圖帶他走了，這輪不是空轉
         if not real:
             self.punish("原地空轉", "這一輪你沒有做任何會改變畫面的事。")
         else:
