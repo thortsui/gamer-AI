@@ -8007,6 +8007,7 @@ class FlowAgent(ProcedureMixin, Agent):
         try:
             self.note_zone(o.get("區") or o.get("zone"))
             self._map_used = self.enforce_map(o, uri)
+            self._last_think = str(o.get("想") or o.get("why") or "")
         except Exception as e:  # noqa: BLE001
             print(f"   記區失敗：{e}")
         tk = str(o.get("task") or "").strip()[:20]
@@ -10810,13 +10811,15 @@ class FlowAgent(ProcedureMixin, Agent):
             return
         if getattr(self, "_routed", ""):
             return                              # 2026-09-27：程式照地圖帶他走了，這輪不是空轉
-        if not real:
-            self.punish("原地空轉", "這一輪你沒有做任何會改變畫面的事。")
-        else:
-            eff = any(a.get("t") != "look" or int(a.get("dx", 0) or 0) or int(a.get("dy", 0) or 0)
-                      for a in real)
-            if not eff:
-                self.punish("原地空轉", "你這一輪只送了一個等於零的轉視角，什麼都沒發生。")
+        # 2026-09-27 使用者更正：「原地空轉不是指不做移動，是指什麼都沒有做——沒有去完成任務才屬於原地空轉」。
+        # 所以：他這輪有要任何動作／工具（點字沒找到、寫步驟、記知識、基礎確認、換快思…都算在做事），
+        # 或是有理由地等（站在框框等人數、等傳送、等載入），都不算空轉。什麼都沒要、也不是在等，才算。
+        asked = list(getattr(self, "_asked", []) or [])
+        think = getattr(self, "_last_think", "") or ""
+        waiting = any(t in ("wait", "等") for t in asked) or any(
+            w in think for w in ("等", "傳送", "載入", "配對", "人數", "倒數", "排隊"))
+        if not asked and not waiting:
+            self.punish("原地空轉", "這一輪你什麼都沒做，也不是在等任何事——沒有往任務前進。")
         # UI 蓋著還不處理＝卡在選單
         try:
             if self.ui_open_hint():
