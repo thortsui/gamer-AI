@@ -6061,7 +6061,7 @@ class FlowAgent(ProcedureMixin, Agent):
         砍掉的是那些長篇教學與計分說明（那些慢想的時候再讀）。
         情況跟現在這一步對不上，就喊換快思，不要自己亂改計畫。
         """
-        parts = [self.ban_text(), self.repeat_alarm(), self.last_step_text(), self.basic_check_text(),
+        parts = [self.ban_text(), self.follow_text(), self.repeat_alarm(), self.last_step_text(), self.basic_check_text(),
                  getattr(self, "check_hint", ""), self.check_text(),
                  getattr(self, "budget_hint", ""),
                  getattr(self, "click_effect_hint", ""), self.macro_window_text(),
@@ -6435,6 +6435,64 @@ class FlowAgent(ProcedureMixin, Agent):
         if getattr(self, "lock_target", ""):
             print(f"   🔓 停止盯住「{self.lock_target}」（{why}）")
         self.lock_target = ""
+
+    # ---------------- 追蹤（2026-09-27 使用者：「讓 YOLO 持續追蹤某個東西，用它的大小確認距離與方向是否正確」）
+    def start_follow(self, target):
+        """只量不動：每輪量那樣東西在畫面哪裡、多大，跟上一輪比，告訴他距離與方向有沒有對。"""
+        target = (target or "").strip()
+        if not target:
+            return
+        self.follow_target, self.follow_hist = target, []
+        try:
+            if target not in self.watching:
+                self.eyes.watch(self.watching + [target])
+                self.watching = list(self.eyes.labels)
+        except Exception as e:  # noqa: BLE001
+            print(f"   追蹤加詞失敗：{e}")
+        print(f"   👁 開始追蹤「{target}」（YOLO 持續標記，每輪回報大小與方向）")
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 開始追蹤「{target}」")
+
+    def follow_sample(self):
+        """每輪開頭量一次，並記下上一輪做了什麼動作（對照用）。"""
+        t = getattr(self, "follow_target", "")
+        if not t:
+            return
+        d = self.eyes.best(t, max_age=1.5)
+        rec = {"時間": time.time(), "動作": getattr(self, "_last_summ", "") or "",
+               "cx": round(d["cx"], 3) if d else None, "h": round(d["h"], 3) if d else None,
+               "yaw": round(getattr(self, "yaw", 0.0) % 360, 1)}
+        self.follow_hist = (getattr(self, "follow_hist", []) + [rec])[-8:]
+
+    def follow_text(self):
+        t = getattr(self, "follow_target", "")
+        if not t:
+            return ""
+        h = getattr(self, "follow_hist", []) or []
+        rows = [f"【追蹤中：{t}】（YOLO 每輪量一次；大小＝框的高度，越大越近；位置 0.5＝正中央）"]
+        if not h or h[-1]["h"] is None:
+            rows.append("　這一輪**看不到它**——它可能在畫面外、被擋住，或你轉離了方向。先左右轉找回來。")
+        else:
+            cur = h[-1]
+            off = cur["cx"] - 0.5
+            side = "正中央" if abs(off) < 0.06 else (f"偏右 {abs(off):.2f}" if off > 0 else f"偏左 {abs(off):.2f}")
+            rows.append(f"　現在：位置 {cur['cx']:.2f}（{side}）、大小 {cur['h']:.2f}")
+            prev = next((x for x in reversed(h[:-1]) if x["h"]), None)
+            if prev:
+                ratio = cur["h"] / max(prev["h"], 1e-3)
+                if ratio > 1.08:
+                    dist = f"變大 {ratio:.2f} 倍＝**離它更近了**（距離大約剩原本的 {100 / ratio:.0f}%）"
+                elif ratio < 0.92:
+                    dist = f"變小到 {ratio:.2f} 倍＝**離它更遠了**——走錯方向或被推開"
+                else:
+                    dist = "大小幾乎沒變＝距離沒變（沒走動，或被擋住）"
+                drift = cur["cx"] - prev["cx"]
+                dirn = ("方向維持住了" if abs(drift) < 0.05 else
+                        f"它往{'右' if drift > 0 else '左'}跑了 {abs(drift):.2f}＝你的方向偏{'左' if drift > 0 else '右'}了")
+                rows.append(f"　跟上一輪比（你上一輪做了：{cur['動作'] or '—'}）：{dist}；{dirn}")
+            seq = "、".join(f"{x['h']:.2f}" if x["h"] else "看不到" for x in h[-6:])
+            rows.append(f"　最近幾輪大小：{seq}")
+        rows.append('　不用了就送 {"t":"停止追蹤"}；要它幫你轉鏡頭對準，用 鎖定。')
+        return NL.join(rows)
 
     def lock_text(self):
         t = getattr(self, "lock_target", "")
@@ -7749,6 +7807,10 @@ class FlowAgent(ProcedureMixin, Agent):
         _need = self.basic_check_text()
         if _need:
             text = _need + NL + text          # 場景剛換 → 放更前面
+        self.follow_sample()
+        _fol = self.follow_text()
+        if _fol:
+            text = _fol + NL + NL + text
         _ban = self.ban_text()
         if _ban:
             text = _ban + NL + NL + text      # 使用者的禁令放最前面（2026-09-27）
@@ -7990,6 +8052,13 @@ class FlowAgent(ProcedureMixin, Agent):
                 continue
             if a.get("t") == "鎖定":
                 self.start_lock(str(a.get("target") or ""))
+                actions.remove(a)
+            elif a.get("t") == "追蹤":
+                self.start_follow(str(a.get("target") or a.get("name") or ""))
+                actions.remove(a)
+            elif a.get("t") in ("停止追蹤", "解除追蹤"):
+                print(f"   👁 停止追蹤「{getattr(self, 'follow_target', '')}」")
+                self.follow_target, self.follow_hist = "", []
                 actions.remove(a)
             elif a.get("t") == "解除鎖定":
                 self.stop_lock("他自己解除")
@@ -8641,6 +8710,7 @@ class FlowAgent(ProcedureMixin, Agent):
         except Exception:  # noqa: BLE001
             pass
         self.history.append(f"[{stamp}] {self.flow} 第{self.step}步｜看到：{seen} → {summ}")
+        self._last_summ = summ
         self.history = self.history[-30:]
         self.tick("其他")
         print(f"[{stamp}] {self.flow} 第{self.step}步 {round(time.time() - t0, 1)}s｜{seen} → {summ}")
