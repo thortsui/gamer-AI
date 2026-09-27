@@ -72,6 +72,7 @@ if (-not $rbx) {
 $extra = @()
 if ($env:GAMER_DEADLINE) { $extra += @('--deadline', $env:GAMER_DEADLINE) }
 if ($env:GAMER_REFLEX_DEADLINE) { $extra += @('--reflex-deadline', $env:GAMER_REFLEX_DEADLINE) }
+if ($env:GAMER_MAP) { $extra += @('--map', $env:GAMER_MAP) }   # on＝程式每輪畫俯視地圖給他看
 if ($extra.Count) { Say ("⏱ 時限參數：{0}" -f ($extra -join ' ')) }
 # 5. 啟動代理（眼睛 YOLO-World、文字 OCR 都是代理裡的執行緒，會一起起來）
 $out = Join-Path $MEM "stdout.log"; $err = Join-Path $MEM "stderr.log"

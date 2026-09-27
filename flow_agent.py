@@ -1513,6 +1513,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 + '- 不在任何記過的地點 → 寫 **"新:你取的名字"**（例如 "新:大廳南邊的門"），程式會把現在的位置記起來。' + NL
                 + "- 沒寫的話程式會多問你一次，只是白費時間。" + NL
                 + "你記過的地點：" + ("、".join(names[:40]) if names else "（還沒有，第一輪就寫一個新的）") + NL
+                + ((getattr(self, "map_mismatch", "") or "") + NL if getattr(self, "map_mismatch", "") else "")
                 + self.map_nav_text())
 
     def map_nav_text(self):
@@ -1568,25 +1569,32 @@ class FlowAgent(ProcedureMixin, Agent):
             self.stat["地圖沒答"] = self.stat.get("地圖沒答", 0) + 1
             print("   🗺⚠ 這輪沒說自己在腦內地圖的哪裡（重問也沒答）")
             return "沒答"
+        # 2026-09-27 13:20 修：每輪的「我在」**只當標籤，不拉座標**。
+        # 之前每輪都把座標拉到他說的地點 → 地點都在 (0,0) → 他一走就被拉回原點 → 新地點又記在 (0,0)，整張地圖疊成一點。
+        # 要校正座標，他自己送 {"t":"我在","name":...}（那個動作還是會拉）。
+        import math
         if here.startswith(("新:", "新：")):
-            nm = here.split(":", 1)[-1].split("：", 1)[-1].strip()[:12]
-            if nm and nm not in self.map:
-                self.map[nm] = (round(self.pos[0], 2), round(self.pos[1], 2))
-                self.save_map()
-                print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})")
-                return how + "新增:" + nm
-            here = nm
-        if here in self.map:
-            ox, oy = self.pos
-            self.pos = [float(self.map[here][0]), float(self.map[here][1])]
-            if abs(ox - self.pos[0]) + abs(oy - self.pos[1]) > 0.5:
-                print(f"   🧭 [地圖] 他說在「{here}」→ 座標 ({ox:+.1f},{oy:+.1f}) → ({self.pos[0]:+.1f},{self.pos[1]:+.1f})")
-            return how + "在:" + here
-        # 說了一個地圖上沒有的名字 → 當新地點記
+            here = here.split(":", 1)[-1].split("：", 1)[-1].strip()
         nm = here[:12]
+        if nm in self.map:
+            x, y = self.map[nm]
+            d = math.hypot(x - self.pos[0], y - self.pos[1])
+            if d > 3.0:
+                self.map_mismatch = (f"⚠ 你說你在「{nm}」，但腦內地圖推算你離它約 {d:.1f} 秒的路。"
+                                     f"如果你確定就在那裡，送 {{\"t\":\"我在\",\"name\":\"{nm}\"}} 校正座標；"
+                                     f"不確定就記一個新地點。")
+                print(f"   🗺⚠ [地圖] 他說在「{nm}」，推算離那裡 {d:.1f}（沒拉座標）")
+            else:
+                self.map_mismatch = ""
+            return how + "在:" + nm
+        # 新地點：附近 1.5 以內已經有地點就不重複記（避免疊點）
+        near = [k for k, (x, y) in self.map.items() if math.hypot(x - self.pos[0], y - self.pos[1]) < 1.5]
+        if near:
+            print(f"   🗺 [地圖] 他說在新地點「{nm}」，但這裡已經有「{near[0]}」，不重複記")
+            return how + "在:" + near[0]
         self.map[nm] = (round(self.pos[0], 2), round(self.pos[1], 2))
         self.save_map()
-        print(f"   🗺 [地圖] 他說在「{nm}」（地圖上沒有）→ 記成新地點")
+        print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})")
         return how + "新增:" + nm
 
     def guard_job(self, actions):
@@ -4048,6 +4056,8 @@ class FlowAgent(ProcedureMixin, Agent):
                     f"回想你是怎麼從那裡走過來的、經過哪些東西，自己想清楚往哪轉、走多久。"
                     if g else "還沒設下一個目標（用 設目標 挑一個，方位要自己判斷）")
         g = getattr(self, "goal", "")
+        if isinstance(g, dict):          # 2026-09-27：goal 後來改成 dict（任務目標），地圖路線只認地點名
+            g = str(g.get("地點") or g.get("目標") or "")
         if not g or g not in getattr(self, "map", {}):
             return "還沒設下一個目標（用 設目標 從地圖挑一個）"
         gx, gy = self.map[g]
