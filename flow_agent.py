@@ -1050,6 +1050,11 @@ class FlowAgent(ProcedureMixin, Agent):
             # 以前用水平的 ppp 換算，少算一半——「一口氣送 600 回水平」其實是從天花板直接掃到地板。
             try:
                 self.dy_per_deg = float((d.get("垂直") or {}).get("每度dy") or 0) or None
+                # 2026-09-27：09/27 12:11 量到全程 dy 50（每度 0.28）→ 程式叫他「抬頭 15 度送 dy +4」，
+                # 送了等於沒送、水平儀又以為修好了，他就一直停在天花板。合理範圍外一律不採用，退回 09/14 實測的 3.37。
+                if self.dy_per_deg and not (1.5 <= self.dy_per_deg <= 25):
+                    print(f"   ⚠ 視角校準.json 的垂直每度 dy {self.dy_per_deg} 不合理（全程 dy {178 * self.dy_per_deg:.0f}），改用 3.37")
+                    self.dy_per_deg = 3.37
             except (TypeError, ValueError, AttributeError):
                 self.dy_per_deg = None
             if getattr(self, "dx_per_deg", None):
@@ -8231,6 +8236,7 @@ class FlowAgent(ProcedureMixin, Agent):
                     print(f"   寫步驟失敗：{e}")
                 actions.remove(a)
             elif a.get("t") in ("這步做完", "步驟完成"):
+                self._step_done_round = self.stat.get("輪數", 0)   # 2026-09-27：照工作流程有進度時少排慢想
                 try:
                     self.macro_step_done(a)
                 except Exception as e:  # noqa: BLE001
@@ -8738,7 +8744,15 @@ class FlowAgent(ProcedureMixin, Agent):
                 self.set_goal()
             except Exception as e:  # noqa: BLE001
                 print(f"   訂目標失敗：{e}")
-        if (self.stat.get("輪數", 0) % self.SLOW_EVERY == 0) or getattr(self, "_slow_due", False):
+        _periodic = self.stat.get("輪數", 0) % self.SLOW_EVERY == 0
+        # 2026-09-27 使用者：學會的事拆成工作流程，快思照著走就知道上下步驟，**減少慢想**。
+        # 現在的大動作有細步驟、而且最近 SLOW_EVERY 輪內有「這步做完」＝他正照流程往前走 → 例行慢想跳過；
+        # 卡住（_slow_due）時照樣慢想。
+        if _periodic and self.macro_steps() and                 self.stat.get("輪數", 0) - getattr(self, "_step_done_round", -999) <= self.SLOW_EVERY:
+            _periodic = False
+            self.stat["慢想跳過"] = self.stat.get("慢想跳過", 0) + 1
+            print("   🐢⏭ 照工作流程有進度，這次例行慢想跳過")
+        if _periodic or getattr(self, "_slow_due", False):
             self._slow_due = False
             try:
                 self.slow_think()
@@ -11107,6 +11121,10 @@ class FlowAgent(ProcedureMixin, Agent):
         # 以前這裡寫 -v_total/2 又往上推 → 鏡頭對著天花板、水平儀卻在這裡歸零成「完全水平」。
         self.raw_look(0, v_total / 2); time.sleep(0.4)           # 從頂端往下半程＝回到大約水平
         dy_per_deg = round(v_total / 178.0, 2) if v_total else None
+        if dy_per_deg and not (1.5 <= dy_per_deg <= 25):
+            # 2026-09-27：第三人稱或單調畫面會讓「畫面沒變就停」提早停，量到全程 dy 50 這種假值；不存、沿用舊的
+            print(f"   ⚠ 垂直全程 dy {v_total:.0f} 不合理（每度 {dy_per_deg}），這次垂直刻度不採用")
+            dy_per_deg = None
 
         # 水平：轉到畫面回到起點
         start = grab(); best = (1e9, 0); hist = []
