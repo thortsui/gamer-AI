@@ -820,7 +820,7 @@ class FlowAgent(ProcedureMixin, Agent):
         """寫一筆到 記憶/遇到的問題.jsonl／.md（他自己記的，或程式在他沒一次做完時代記）。"""
         # 同一個大動作一直超支會每 3 輪觸發一次檢討；程式代記的同一件事 5 分鐘內只記一次
         key = (source, self.macro_name() or self.flow)
-        if source != "他自己" and time.time() - getattr(self, "_prob_last", {}).get(key, 0) < 300:
+        if source not in ("他自己", "死亡檢討") and time.time() - getattr(self, "_prob_last", {}).get(key, 0) < 300:
             return
         self._prob_last = getattr(self, "_prob_last", {})
         self._prob_last[key] = time.time()
@@ -5173,7 +5173,10 @@ class FlowAgent(ProcedureMixin, Agent):
             trace=self.trace_text(40.0, end=getattr(self, "last_death", None)),
             history=NL.join(self.history[-25:]),
             improve=self.improve_text(5) or "（還沒訂過）")
-        content.append({"type": "text", "text": "【死時的視角】" + self.view_state() + NL + ask})
+        content.append({"type": "text", "text": "【死時的視角】" + self.view_state() + NL + ask + NL
+                        + "（2026-09-28 使用者要求）另外**一定要**多給兩個欄位："
+                        + '"錯誤類型":["從這份清單挑一到三個：沒互動到、走不到、地圖不對、看錯畫面、被面板擋住、不知道下一步、狀態沒顧（血量／體力之類）、太慢、方向錯、其他"],'
+                        + '"為什麼是這類":"一句話，指出回放裡哪一秒看得出來"。'})
         raw, _, _, _ = stream_json(self.endpoint, self.model,
                                    "你是正在玩 Roblox 遊戲的玩家，只輸出 JSON。",
                                    content, 2600, time.time() + 240.0, 0.1, effort=慢想)
@@ -5204,7 +5207,13 @@ class FlowAgent(ProcedureMixin, Agent):
         why = str(o.get("為什麼分這類") or o.get("why") or "")[:60]
         if not (cause or avoid or fix):
             print("   ⚠ 死亡檢討沒拿到內容（模型沒講完），這次不記")
+            self.record_problem(f"第{n}次死亡／遊戲結束，檢討沒拿到內容", source="死亡檢討")
             return
+        # 2026-09-28 使用者：死亡後要檢討為什麼、可能是什麼錯誤（沒互動到、走不到、地圖不對…）→ 記成問題
+        et = o.get("錯誤類型") or o.get("error_type") or []
+        et = "、".join(str(x) for x in (et if isinstance(et, list) else [et]) if x) or "（沒分類）"
+        self.record_problem(f"第{n}次死亡／遊戲結束［{et}］：{cause}",
+                            tried=mistake, cause=str(o.get("為什麼是這類") or "")[:120], source="死亡檢討")
         where = ""
         try:
             where = self.remember_lesson(lesson, kind, fname, why, src=f"第{n}次死亡")
@@ -10594,7 +10603,7 @@ class FlowAgent(ProcedureMixin, Agent):
     BASIC_WORDS = ("走路", "走一步", "移動", "前進", "後退", "轉頭", "轉視角", "看", "觀察",
                    "按鍵", "跳", "站", "對準", "瞄準", "開門", "關門", "撿", "打開選單",
                    "walk", "move", "turn", "look", "jump", "press")
-    FATAL_WORDS = ("死", "失敗", "被抓", "理智歸零", "歸零", "被殺", "淘汰", "出局",
+    FATAL_WORDS = ("死", "失敗", "被抓", "理智歸零", "歸零", "被殺", "淘汰", "出局", "遊戲結束",
                    "game over", "die", "death", "fail")
 
     def load_tasks(self):

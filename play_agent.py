@@ -401,6 +401,14 @@ EFFORT_DEEP = 慢想          # 舊名字留著，指向慢想
 def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
                 temperature=0.2, effort=快思):
     think, eff, temp, topp = THINK_MODES.get(effort, THINK_MODES[快思])
+    # 2026-09-28：微調 27B 的服務一次最多 8 張圖（--limit-mm-per-prompt），死亡檢討＝回放 8 張＋短期記憶縮圖 → 400。
+    # 超過就從最舊的圖開始丟（連同緊貼在它前面的時間標籤），留最近的；上限可用環境變數 GAMER_MAX_IMAGES 改。
+    if isinstance(content, list):
+        cap = int(os.environ.get("GAMER_MAX_IMAGES", "8") or 8)
+        idx = [i for i, c in enumerate(content) if isinstance(c, dict) and c.get("type") == "image_url"]
+        if len(idx) > cap:
+            drop = set(idx[:len(idx) - cap])
+            content = [c for i, c in enumerate(content) if i not in drop]
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": system_text}, {"role": "user", "content": content}],
