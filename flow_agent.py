@@ -811,6 +811,29 @@ class FlowAgent(ProcedureMixin, Agent):
         print(f"   📋 {self.stuck_note}")
         self.log({"時間": datetime.now().strftime("%H:%M:%S"), "模式": "卡住檢討",
                   "原因": cause, "錯誤": mistake, "避免": avoid})
+        # 2026-09-27 使用者：「如果一次沒有完成他目前要完成的任務，就算要記錄問題」
+        # 卡住檢討的觸發（步數超支、5 分鐘沒進展、重複沒效…）都代表這一次沒做完 → 用他自己的檢討寫成一筆問題。
+        self.record_problem(f"沒一次做完：{self.macro_name() or self.flow}（{why[:60]}）",
+                            tried=mistake, cause=cause, source="卡住檢討")
+
+    def record_problem(self, problem, tried="", cause="", source="他自己"):
+        """寫一筆到 記憶/遇到的問題.jsonl／.md（他自己記的，或程式在他沒一次做完時代記）。"""
+        try:
+            rec = {"時間": datetime.now().strftime("%m/%d %H:%M:%S"), "輪": self.stat.get("輪數", 0),
+                   "問題": str(problem)[:200], "原因": str(cause)[:200], "試過": str(tried)[:200],
+                   "在做什麼": f"{self.flow} 第{self.step}步", "大動作": self.macro_name() or "",
+                   "區": str(getattr(self, "cur_zone", "") or ""), "任務": getattr(self, "cur_task", "") or "",
+                   "位置": [round(v, 1) for v in (getattr(self, "pos", None) or [0, 0])],
+                   "來源": source, "模型": getattr(self, "model", "")}
+            with open(os.path.join(self.dir, "遇到的問題.jsonl"), "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + NL)
+            with open(os.path.join(self.dir, "遇到的問題.md"), "a", encoding="utf-8") as fh:
+                fh.write(f"- {rec['時間']}｜［{source}］{rec['在做什麼']}｜{rec['問題']}"
+                         + (f"｜原因：{rec['原因']}" if rec["原因"] else "")
+                         + (f"｜試過：{rec['試過']}" if rec["試過"] else "") + NL)
+            print(f"   🆘 記下問題（{source}）：{rec['問題'][:60]}")
+        except Exception as e:  # noqa: BLE001
+            print(f"   記問題失敗：{e}")
 
     def lesson_text(self):
         rows = []
@@ -8173,24 +8196,9 @@ class FlowAgent(ProcedureMixin, Agent):
                 actions.remove(a)
             elif a.get("t") == "記問題":
                 # 2026-09-27 使用者：他遇到問題要自己記下來（例如腦內地圖找不到自己在哪），使用者會定期看
-                try:
-                    rec = {"時間": datetime.now().strftime("%m/%d %H:%M:%S"), "輪": self.stat.get("輪數", 0),
-                           "問題": str(a.get("問題") or a.get("內容") or "")[:200],
-                           "在做什麼": str(a.get("在做什麼") or f"{self.flow} 第{self.step}步")[:80],
-                           "試過": str(a.get("試過") or "")[:160],
-                           "區": str(getattr(self, "cur_zone", "") or ""), "任務": getattr(self, "cur_task", "") or "",
-                           "位置": [round(v, 1) for v in (getattr(self, "pos", None) or [0, 0])],
-                           "視角": f"{getattr(self, 'pitch_deg', 0):.0f}度/朝{getattr(self, 'yaw', 0) % 360:.0f}",
-                           "模型": getattr(self, "model", "")}
-                    if rec["問題"]:
-                        with open(os.path.join(self.dir, "遇到的問題.jsonl"), "a", encoding="utf-8") as fh:
-                            fh.write(json.dumps(rec, ensure_ascii=False) + NL)
-                        with open(os.path.join(self.dir, "遇到的問題.md"), "a", encoding="utf-8") as fh:
-                            fh.write(f"- {rec['時間']}｜{rec['在做什麼']}｜{rec['問題']}"
-                                     + (f"｜試過：{rec['試過']}" if rec["試過"] else "") + NL)
-                        print(f"   🆘 他記下遇到的問題：{rec['問題'][:60]}")
-                except Exception as e:  # noqa: BLE001
-                    print(f"   記問題失敗：{e}")
+                if str(a.get("問題") or a.get("內容") or "").strip():
+                    self.record_problem(str(a.get("問題") or a.get("內容")), tried=str(a.get("試過") or ""),
+                                        source="他自己")
                 actions.remove(a)
             elif a.get("t") == "水平歸零":
                 # 2026-09-26 使用者：他要知道怎麼修回水平、確保水平儀正確，每次登入優先調好。

@@ -97,8 +97,10 @@ def main():
                     probs.append(q)
             except (ValueError, KeyError):
                 pass
-    L.append(f"**他自己記的問題**：{len(probs)} 筆" + ("" if probs else "（這段沒記）"))
-    L += [f"- {q['時間']}｜{q.get('在做什麼', '')}｜{q['問題']}" + (f"｜試過：{q['試過']}" if q.get("試過") else "")
+    src = Counter(q.get("來源", "他自己") for q in probs)
+    L.append(f"**遇到的問題**：{len(probs)} 筆（" + ("、".join(f"{k} {v}" for k, v in src.items()) or "這段沒有") + "）")
+    L += [f"- {q['時間']}｜［{q.get('來源', '他自己')}］{q.get('在做什麼', '')}｜{q['問題']}"
+          + (f"｜原因：{q['原因']}" if q.get("原因") else "") + (f"｜試過：{q['試過']}" if q.get("試過") else "")
           for q in probs]
     L.append("")
     text = "\n".join(L)
