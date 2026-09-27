@@ -7880,6 +7880,7 @@ class FlowAgent(ProcedureMixin, Agent):
         self.save_progress()
 
         actions = o.get("a") if isinstance(o.get("a"), list) else []
+        self._asked = [str(a.get("t")) for a in actions if isinstance(a, dict)]   # 2026-09-27：他這輪要了哪些工具（擋掉／轉換之前）
         # 記位置／忘記位置：由他自己決定要記哪裡、叫什麼名字
         for a in list(actions):
             if not isinstance(a, dict):
@@ -7997,6 +7998,27 @@ class FlowAgent(ProcedureMixin, Agent):
                                        "在那之前多用 教眼睛 把認錯與漏掉的記下來，訓練資料才有料。" + NL)
                 except Exception as e:  # noqa: BLE001
                     print(f"   訓練請求失敗：{e}")
+                actions.remove(a)
+            elif a.get("t") == "記問題":
+                # 2026-09-27 使用者：他遇到問題要自己記下來（例如腦內地圖找不到自己在哪），使用者會定期看
+                try:
+                    rec = {"時間": datetime.now().strftime("%m/%d %H:%M:%S"), "輪": self.stat.get("輪數", 0),
+                           "問題": str(a.get("問題") or a.get("內容") or "")[:200],
+                           "在做什麼": str(a.get("在做什麼") or f"{self.flow} 第{self.step}步")[:80],
+                           "試過": str(a.get("試過") or "")[:160],
+                           "區": str(getattr(self, "cur_zone", "") or ""), "任務": getattr(self, "cur_task", "") or "",
+                           "位置": [round(v, 1) for v in (getattr(self, "pos", None) or [0, 0])],
+                           "視角": f"{getattr(self, 'pitch_deg', 0):.0f}度/朝{getattr(self, 'yaw', 0) % 360:.0f}",
+                           "模型": getattr(self, "model", "")}
+                    if rec["問題"]:
+                        with open(os.path.join(self.dir, "遇到的問題.jsonl"), "a", encoding="utf-8") as fh:
+                            fh.write(json.dumps(rec, ensure_ascii=False) + NL)
+                        with open(os.path.join(self.dir, "遇到的問題.md"), "a", encoding="utf-8") as fh:
+                            fh.write(f"- {rec['時間']}｜{rec['在做什麼']}｜{rec['問題']}"
+                                     + (f"｜試過：{rec['試過']}" if rec["試過"] else "") + NL)
+                        print(f"   🆘 他記下遇到的問題：{rec['問題'][:60]}")
+                except Exception as e:  # noqa: BLE001
+                    print(f"   記問題失敗：{e}")
                 actions.remove(a)
             elif a.get("t") == "水平歸零":
                 # 2026-09-26 使用者：他要知道怎麼修回水平、確保水平儀正確，每次登入優先調好。
@@ -8523,7 +8545,10 @@ class FlowAgent(ProcedureMixin, Agent):
             print("   ⏱ " + "　".join(f"{k} {v:.1f}s" for k, v in tk.items() if v >= 0.05))
         self.log({"時間": stamp, "模式": f"流程:{self.flow}", "步驟": self.step, "看到": seen,
                   "動作": actions, "擋掉": blocked, "秒": round(time.time() - t0, 2),
-                  "登記": self.stat["登記"]})
+                  "登記": self.stat["登記"],
+                  # 2026-09-27 使用者：拆解每一步各花幾秒、用了幾個工具、有沒有用子代理（反射／快思／慢想這幾層模型呼叫）
+                  "耗時": dict(tk), "要的工具": list(getattr(self, "_asked", []) or []),
+                  "模型": getattr(self, "model", "")})
         # 畫面長時間沒有變化＝卡住了，也要交報告
         d_now = frame_diff(before, self.grab_still(320))
         self.no_change = (getattr(self, "no_change", 0) + 1) if d_now < 3.0 else 0
