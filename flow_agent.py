@@ -1493,9 +1493,67 @@ class FlowAgent(ProcedureMixin, Agent):
                         "維持現在的職業去做事。點了程式會直接擋掉，只是白費一輪。")
         if self.gcfg.get("禁止上下轉頭"):
             rows.append("- **不准上下轉頭**：dy 一律無效，只有左右（dx）會轉。")
-        if not rows:
+        out = ("【使用者禁止的事（程式會擋，做了只是浪費一輪）】" + NL + NL.join(rows)) if rows else ""
+        mf = self.map_force_text()
+        return (out + (NL + NL if out and mf else "") + mf) if (out or mf) else ""
+
+    def map_force_text(self):
+        """2026-09-27 使用者：「腦內地圖 學習時強制每次使用，讓他知道場地佈局和他在哪」。"""
+        if not self.gcfg.get("強制腦內地圖"):
             return ""
-        return "【使用者禁止的事（程式會擋，做了只是浪費一輪）】" + NL + NL.join(rows)
+        names = list((getattr(self, "map", {}) or {}).keys())
+        return ("【腦內地圖：每一輪都要用（使用者規定）】" + NL
+                + '每一輪的 JSON 都要多一個欄位 **"我在":"地點名"**——你現在站在腦內地圖上的哪裡。' + NL
+                + "- 認得出是記過的地點 → 寫那個名字（程式會把你的座標校正到那裡）。" + NL
+                + '- 不在任何記過的地點 → 寫 **"新:你取的名字"**（例如 "新:大廳南邊的門"），程式會把現在的位置記起來。' + NL
+                + "- 沒寫的話程式會多問你一次，只是白費時間。" + NL
+                + "你記過的地點：" + ("、".join(names[:40]) if names else "（還沒有，第一輪就寫一個新的）"))
+
+    def enforce_map(self, o, uri):
+        """每輪檢查他有沒有說「我在」；沒說就用反射重問一次。回傳這輪用了哪一種（校正／新增／重問後…／沒答）。"""
+        if not self.gcfg.get("強制腦內地圖"):
+            return ""
+        here = str(o.get("我在") or "").strip()
+        how = ""
+        if not here:
+            names = list((getattr(self, "map", {}) or {}).keys())
+            q = ("只回答一件事：你現在站在腦內地圖的哪裡？" + NL
+                 + "記過的地點：" + ("、".join(names[:40]) if names else "（還沒有）") + NL
+                 + '認得就寫那個名字；不在任何記過的地點就寫 "新:你取的名字"。只輸出 JSON：{"我在":"..."}')
+            try:
+                raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(反射),
+                                           [{"type": "image_url", "image_url": {"url": uri}},
+                                            {"type": "text", "text": q}], 80, time.time() + 20.0, 0.2, effort=反射)
+                here = str((parse_json_loose(raw) or {}).get("我在") or "").strip()
+            except Exception as e:  # noqa: BLE001
+                print(f"   地圖重問失敗：{e}")
+            self.tick("地圖重問")
+            how = "重問後"
+            self.stat["地圖重問"] = self.stat.get("地圖重問", 0) + 1
+        if not here:
+            self.stat["地圖沒答"] = self.stat.get("地圖沒答", 0) + 1
+            print("   🗺⚠ 這輪沒說自己在腦內地圖的哪裡（重問也沒答）")
+            return "沒答"
+        if here.startswith(("新:", "新：")):
+            nm = here.split(":", 1)[-1].split("：", 1)[-1].strip()[:12]
+            if nm and nm not in self.map:
+                self.map[nm] = (round(self.pos[0], 2), round(self.pos[1], 2))
+                self.save_map()
+                print(f"   🗺 [地圖] 新地點「{nm}」記在 ({self.pos[0]:+.1f},{self.pos[1]:+.1f})")
+                return how + "新增:" + nm
+            here = nm
+        if here in self.map:
+            ox, oy = self.pos
+            self.pos = [float(self.map[here][0]), float(self.map[here][1])]
+            if abs(ox - self.pos[0]) + abs(oy - self.pos[1]) > 0.5:
+                print(f"   🧭 [地圖] 他說在「{here}」→ 座標 ({ox:+.1f},{oy:+.1f}) → ({self.pos[0]:+.1f},{self.pos[1]:+.1f})")
+            return how + "在:" + here
+        # 說了一個地圖上沒有的名字 → 當新地點記
+        nm = here[:12]
+        self.map[nm] = (round(self.pos[0], 2), round(self.pos[1], 2))
+        self.save_map()
+        print(f"   🗺 [地圖] 他說在「{nm}」（地圖上沒有）→ 記成新地點")
+        return how + "新增:" + nm
 
     def guard_job(self, actions):
         """2026-09-25 使用者：「要阻止他換職業」。遊戲.json 開「禁止換職業」時，
@@ -7777,6 +7835,7 @@ class FlowAgent(ProcedureMixin, Agent):
         self.last_seen = seen
         try:
             self.note_zone(o.get("區") or o.get("zone"))
+            self._map_used = self.enforce_map(o, uri)
         except Exception as e:  # noqa: BLE001
             print(f"   記區失敗：{e}")
         tk = str(o.get("task") or "").strip()[:20]
@@ -8548,6 +8607,7 @@ class FlowAgent(ProcedureMixin, Agent):
                   "登記": self.stat["登記"],
                   # 2026-09-27 使用者：拆解每一步各花幾秒、用了幾個工具、有沒有用子代理（反射／快思／慢想這幾層模型呼叫）
                   "耗時": dict(tk), "要的工具": list(getattr(self, "_asked", []) or []),
+                  "腦內地圖": getattr(self, "_map_used", ""),
                   "模型": getattr(self, "model", "")})
         # 畫面長時間沒有變化＝卡住了，也要交報告
         d_now = frame_diff(before, self.grab_still(320))

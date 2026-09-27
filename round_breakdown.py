@@ -81,6 +81,10 @@ def main():
     map_n = sum(tools[t] for t in MAP_TOOLS)
     L += [f"**腦內地圖**：用了 {map_n} 次（" + "、".join(f"{t} {tools[t]}" for t in MAP_TOOLS if tools[t]) + "）"
           + ("" if map_n else "——這段完全沒用"),
+          "**強制腦內地圖（每輪「我在」）**：" + (lambda c: "、".join(f"{k} {v}" for k, v in c.items()) or "（沒開或還沒資料）")(
+              Counter(("重問後" if str(r.get("腦內地圖", "")).startswith("重問後") else "")
+                      + (str(r.get("腦內地圖", "")).replace("重問後", "").split(":")[0] or "（空）")
+                      for r in rounds if "腦內地圖" in r)),
           f"**反射**：{stage_n['反射']}/{n} 輪都有跑；他喊「換快思」{tools['換快思']} 次。",
           f"**登記（報到成功）**：這段最後累計 {max([int(r.get('登記') or 0) for r in rounds] or [0])} 次。"]
     pp = os.path.join(HERE, "專案", args.game, "記憶", "遇到的問題.jsonl")
