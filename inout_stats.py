@@ -10,8 +10,15 @@ inout_stats.py — 用 Roblox 用戶端自己的紀錄算「場內／場外時�
   兩次 Joining 之間就是待在那個 place 的時間；超過 30 分鐘沒有任何 log 的空檔（Roblox 沒開／當掉）不算。
 每局輪班：一次「進到場內 → 離開場內」算一局；這段時間裡代理看到的最大「輪班 N」＝這局到第幾輪班。
   用「每局平均」而不是「最高」，避免某一局被隊友帶到很後面的輪班把數字拉高。
+行動成功（第二張表，2026-09-28 使用者要求）：
+  長按E成功／次數：行動日誌裡 hold 動作的「結果」（成功／沒反應）。
+  有效動作：步驟日誌裡有做動作的輪，之後畫面變化 ≥ 10 算有效（按了有東西變）。
+  關鍵成就：關鍵動作.jsonl 的項目（成功進場、撐完一整輪班、第一次做成某件事）。
+大步驟（第二張表）：步驟日誌的標記「第 N 步做完」（他自己送 這步做完）與「大動作「…」完成」。
+  每局平均＝場內那段時間裡完成的步數／局數；每小時＝整個階段的步數／統計小時。
 """
 import argparse
+import collections
 import glob
 import json
 import os
@@ -90,6 +97,37 @@ def main():
         if t and m and str(r.get("模式", "")).startswith("流程:"):
             shifts.append((t, int(m.group(1))))
 
+    # 行動成功與大步驟
+    holds = []   # (時間, 成功?)
+    for r, t in zip(rows, when):
+        for a in r.get("動作") or []:
+            if t and isinstance(a, dict) and a.get("t") == "hold" and "結果" in a:
+                holds.append((t, "成功" in str(a["結果"])))
+    sp = os.path.join(HERE, "專案", args.game, "記憶", "步驟日誌.jsonl")
+    srows = [json.loads(l) for l in open(sp, encoding="utf-8", errors="ignore") if l.strip().startswith("{")]
+    acts, steps, macros = [], [], []
+    for r, t in zip(srows, with_dates(srows, sp)):
+        if not t:
+            continue
+        mk = str(r.get("標記", ""))
+        if re.match(r"第 \d+ 步做完", mk):
+            steps.append(t)
+        elif mk.startswith("大動作「") and "完成" in mk:
+            macros.append(t)
+        did = str(r.get("做了", ""))
+        if "標記" not in r and did and did != "沒動作":
+            m = re.search(r"畫面變化 (\d+)", str(r.get("結果", "")))
+            acts.append((t, bool(m and int(m.group(1)) >= 10)))
+    kp = os.path.join(HERE, "專案", args.game, "記憶", "關鍵動作.jsonl")
+    keys = []
+    for l in open(kp, encoding="utf-8", errors="ignore"):
+        if l.strip().startswith("{"):
+            k = json.loads(l)
+            try:
+                keys.append((datetime.strptime("2026/" + k["時間"], "%Y/%m/%d %H:%M:%S"), k.get("項目", "")))
+            except (KeyError, ValueError):
+                pass
+
     def alive(t):
         return any(a <= t <= b for a, b in spans)
 
@@ -129,6 +167,28 @@ def main():
                  f"{100 * tin / tot if tot else 0:.0f}% | {len(games)} | "
                  f"{(sum(d for d, _ in games) / len(games) / 60) if games else 0:.1f} | "
                  f"{(sum(seen) / len(seen)) if seen else 0:.1f} | {med} | {len(seen)} |")
+    L += ["", "| 階段 | 長按E 成功/次數 | 成功率 | 有效動作/有做動作的輪 | 有效率 | 成功進場 | 撐完一整輪班 | 第一次做成 | "
+              "大步驟做完（第N步做完） | 大動作完成 | 每局平均完成大步驟 | 每小時完成大步驟 |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for name, a, b in PHASES:
+        A, B = datetime.strptime(a, "%Y-%m-%d %H:%M"), datetime.strptime(b, "%Y-%m-%d %H:%M")
+
+        def inn(xs):
+            return [x for x in xs if A <= (x[0] if isinstance(x, tuple) else x) <= B]
+        h, ac, st, mc, ks = inn(holds), inn(acts), inn(steps), inn(macros), inn(keys)
+        hok = sum(1 for _, ok in h if ok)
+        aok = sum(1 for _, ok in ac if ok)
+        cnt = collections.Counter(k for _, k in ks)
+        ng = per = 0
+        for t0, t1, pl in segs:
+            if pl in inside and A <= t0 <= B:
+                ng += 1
+                per += sum(1 for t in st + mc if t0 <= t <= t1)
+        hrs = (B - A).total_seconds() / 3600
+        L.append(f"| {name} | {hok}/{len(h)} | {100 * hok / len(h) if h else 0:.0f}% | {aok}/{len(ac)} | "
+                 f"{100 * aok / len(ac) if ac else 0:.0f}% | {cnt['成功進場']} | {cnt['撐完一整輪班']} | "
+                 f"{cnt['第一次做成某件事']} | {len(st)} | {len(mc)} | {per / ng if ng else 0:.2f} | "
+                 f"{(len(st) + len(mc)) / hrs:.1f} |")
     text = "\n".join(L)
     print(text)
     if args.out:
