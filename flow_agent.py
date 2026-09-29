@@ -25,6 +25,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -5781,6 +5782,17 @@ class FlowAgent(ProcedureMixin, Agent):
                             f"切成 {len(steps)} 步：" + " → ".join(steps))
         self.note_progress("寫步驟")
 
+    def describe_tools(self):
+        """這一輪他用了哪些工具（已經被移出 actions 的那些），寫成一句給【上一步】用。"""
+        out = []
+        for a in getattr(self, "_asked_full", []) or []:
+            t = str(a.get("t") or "")
+            if not t or t in ("key", "hold", "click", "look", "aim", "move", "scroll", "wait", "type"):
+                continue
+            extra = a.get("字") or a.get("g") or a.get("名") or a.get("大動作") or ""
+            out.append(f"用工具「{t}」" + (f"（{str(extra)[:16]}）" if extra else ""))
+        return "、".join(out)
+
     def macro_step_done(self, a=None):
         """{"t":"這步做完"}：往前推一步；最後一步做完就換下一個大動作。"""
         steps = self.macro_steps()
@@ -5849,6 +5861,26 @@ class FlowAgent(ProcedureMixin, Agent):
         if not bud:
             self.budget_hint = ""
             return
+        # 2026-09-29 使用者：**沒有直接完成小動作要處罰**（−20）。
+        # 大動作整體超支原本只扣 3 分；這裡細到每一個小步驟：同一步做了兩輪還沒送「這步做完」，
+        # 第三輪起每輪扣一次。換步、換大動作、重寫步驟都重新計。
+        try:
+            key = (self.macro_name(), self.macro_step_idx(), len(self.macro_steps()),
+                   self.macro.get("起輪"))
+            now = int(self.stat.get("輪數", 0))
+            if key != getattr(self, "_step_key", None):
+                self._step_key, self._step_start = key, now
+            step_used = now - self._step_start
+            if step_used > self.ROUNDS_PER_STEP:
+                steps = self.macro_steps()
+                i = self.macro_step_idx()
+                cur = steps[i] if i < len(steps) else ""
+                self.punish("小步驟沒直接做完",
+                            f"「{self.macro_name()}」第 {i + 1} 步「{str(cur)[:30]}」已經做了 {step_used} 輪"
+                            f"（一步最多 {self.ROUNDS_PER_STEP} 輪）。這一輪就把它做掉送"
+                            '{"t":"這步做完"}，做不到就用工具重切成做得到的小步驟。')
+        except Exception as e:  # noqa: BLE001
+            print(f"   小步驟計輪失敗：{e}")
         if self.macro.get("起輪") is None:
             # 開機後接手一個已經切好步驟的大動作：從現在開始算，不追溯上次開機
             self.macro["起輪"] = int(self.stat.get("輪數", 0))
@@ -8188,6 +8220,7 @@ class FlowAgent(ProcedureMixin, Agent):
 
         actions = o.get("a") if isinstance(o.get("a"), list) else []
         self._asked = [str(a.get("t")) for a in actions if isinstance(a, dict)]   # 2026-09-27：他這輪要了哪些工具（擋掉／轉換之前）
+        self._asked_full = [dict(a) for a in actions if isinstance(a, dict)]      # 2026-09-29：工具執行完會被移出 actions，留一份給【上一步】摘要
         # 記位置／忘記位置：由他自己決定要記哪裡、叫什麼名字
         # 2026-09-27 使用者：「他不需要想怎麼走，只需要知道他在哪、要去哪，剩下直接用地圖計算」
         _dest = getattr(self, "_goto_place", "")
@@ -8770,7 +8803,10 @@ class FlowAgent(ProcedureMixin, Agent):
         self.leave_hint = ""
         self.hold_block_hint = ""
         self.flow_lock_hint = ""
-        summ_prev = "、".join(self.describe(a) for a in actions) or "沒動作"
+        # 2026-09-29 使用者：**有做事就不算沒動作，要鼓勵他調用工具**。
+        # 工具（點字、這步做完、寫步驟、記知識…）執行完會被移出 actions，原本這裡就只剩「沒動作」，
+        # 連「點字『是的』重新連線、畫面變化 25」都回灌成「做了『沒動作』」，他的檢討因此一直以為自己在空轉。
+        summ_prev = "、".join(self.describe(a) for a in actions) or self.describe_tools() or "沒動作"
         # 重複動作偵測：一模一樣的動作連做好幾次都沒效果（整晚最常見的失敗模式）
         sig = json.dumps([{k: v for k, v in a.items() if k in ("t", "k", "g")} for a in actions],
                          ensure_ascii=False, sort_keys=True)
@@ -10033,6 +10069,9 @@ class FlowAgent(ProcedureMixin, Agent):
         # 但一次只扣 3 分——他超支多半是步驟切得太細，不是偷懶，罰 30 分把扣分表洗版了
         # （09/21 一天扣了 832 次＝−24960，蓋掉其他扣分的訊號）。
         "步數超支": 3,
+        # 2026-09-29 使用者：「有做事就不算，要鼓勵他調用工具，但是沒有直接完成小動作要處罰」
+        # ——一個小步驟超過兩輪沒做完、或想了卻沒送動作，各 −20（工具本身不加分，免得刷工具）。
+        "小步驟沒直接做完": 20, "想了卻沒做": 20,
     }
     SMALL = ("沒有目的地就亂走", "走不到目的地", "面壁", "空按E", "卡在選單", "大幅度轉頭",
              "鏡頭頂到天花板", "鏡頭頂到地板", "重複同一個動作", "原地空轉", "esc連按")
@@ -10896,6 +10935,18 @@ class FlowAgent(ProcedureMixin, Agent):
             w in think for w in ("等", "傳送", "載入", "配對", "人數", "倒數", "排隊"))
         if not asked and not waiting:
             self.punish("原地空轉", "這一輪你什麼都沒做，也不是在等任何事——沒有往任務前進。")
+        # 2026-09-29 使用者：用工具算做事、要鼓勵；但**想了卻沒做**要罰（−20）。
+        # 例：想法寫「直接走向右側框框」，卻只送「這步做完／換快思」、沒送任何會動到遊戲的動作。
+        acting_tools = ("點字", "點文字", "走到記過的", "走到", "水平歸零", "wait", "等")
+        acted_by_tool = any(t in acting_tools for t in asked)
+        if asked and not real and not waiting and not acted_by_tool:
+            intent = re.search(r"走向|走過去|走到|往前走|前進|按\s*[EeWwAaSsDd](?![A-Za-z])|長按|按住|點擊|去點|點一下|"
+                               r"站進|站上|站到|跳過去|靠近|轉向|轉過去", think)
+            done = re.search(r"做完|已經到|已到|已完成|完成了", think)
+            if intent and not done:
+                self.punish("想了卻沒做",
+                            f"你想的是「{think[:30]}」，這一輪卻只送了 {'、'.join(asked)[:30]}，"
+                            f"沒有送任何會真的去做的動作。想做什麼，這一輪就把那個動作送出去。")
         # UI 蓋著還不處理＝卡在選單
         try:
             if self.ui_open_hint():

@@ -80,7 +80,8 @@ def main():
                 looks = [a for a in acts if isinstance(a, dict) and a.get("t") == "look"]
                 if looks and all(not a.get("dx") and a.get("dy") for a in looks) and len(looks) == len(acts):
                     m["純上下"] += 1
-                if not acts and not r.get("地圖帶路"):
+                # 2026-09-29 使用者：有做事就不算沒動作——只用了工具（點字、這步做完…）的輪不算
+                if not acts and not r.get("地圖帶路") and not r.get("要的工具"):
                     m["沒動作"] += 1
             else:
                 act = str(acts)
