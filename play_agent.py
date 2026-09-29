@@ -474,7 +474,10 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
             resp.close()
         except Exception:  # noqa: BLE001
             pass
-    LAST_REASONING["text"] = "".join(reason)
+    if reason:
+        # 累加、不覆寫：慢想／檢討的推理是在輪與輪之間叫的，下一輪反射／快思（沒開推理）會先跑過這裡，
+        # 覆寫成空字串就把它洗掉了（2026-09-29 23:45 實測 思考流程 全是 0）。flow_agent.take_reasoning 會清空。
+        LAST_REASONING["text"] = (LAST_REASONING.get("text", "") + chr(10) + f"【{effort}】" + "".join(reason)).strip()
     return "".join(text), truncated, ttft, usage
 
 
