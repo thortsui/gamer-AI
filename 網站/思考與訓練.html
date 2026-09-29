@@ -1,0 +1,437 @@
+<title>gamer AI 思考與訓練</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --bg2:#ffffff; --bg3:#e9eef2; --ink:#1b2430; --ink2:#4b5866; --ink3:#7d8896;
+  --line:#d5dde5; --acc:#0e6f6a; --acc-soft:#d7edeb; --warn:#b4560a; --warn-soft:#fbe8d3;
+  --bad:#a8323e; --bad-soft:#f6dcdf; --prog:#5b4bb5; --prog-soft:#e6e2f7; --code:#eef2f5;
+  --shadow:0 1px 2px rgba(20,30,40,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#121a22; --bg2:#19232d; --bg3:#222e3a; --ink:#e6ecf1; --ink2:#aab6c2; --ink3:#7f8b98;
+    --line:#2d3a47; --acc:#4fc2b8; --acc-soft:#173a3a; --warn:#f0a35a; --warn-soft:#3d2a15;
+    --bad:#f08a95; --bad-soft:#42232a; --prog:#a89cf0; --prog-soft:#2b2749; --code:#0e151c;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#121a22; --bg2:#19232d; --bg3:#222e3a; --ink:#e6ecf1; --ink2:#aab6c2; --ink3:#7f8b98;
+  --line:#2d3a47; --acc:#4fc2b8; --acc-soft:#173a3a; --warn:#f0a35a; --warn-soft:#3d2a15;
+  --bad:#f08a95; --bad-soft:#42232a; --prog:#a89cf0; --prog-soft:#2b2749; --code:#0e151c;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;font-size:15px;line-height:1.75}
+.wrap{max-width:1100px;margin:0 auto;padding-block:0 64px;padding-inline:16px}
+header.top{padding-block:40px 20px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--acc)}
+h1{font-family:"LXGW WenKai TC","Noto Serif TC",serif;font-weight:700;font-size:clamp(30px,5vw,46px);line-height:1.15;margin:8px 0 12px;text-wrap:balance}
+.lede{font-size:17px;color:var(--ink2);max-width:66ch;margin:0}
+.meta{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px 18px;font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink3)}
+.layout{display:grid;grid-template-columns:200px 1fr;gap:36px;margin-top:24px}
+nav.side{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);align-self:start;font-size:13.5px}
+nav.side a{display:block;color:var(--ink2);text-decoration:none;padding:5px 10px;border-left:2px solid var(--line);}
+nav.side a.on,nav.side a:hover{color:var(--acc);border-left-color:var(--acc)}
+main{min-width:0}
+section{padding-block:36px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-family:"LXGW WenKai TC","Noto Serif TC",serif;font-size:28px;font-weight:700;margin:0 0 6px;text-wrap:balance}
+h2 .n{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
+h3{font-size:17px;font-weight:700;margin:26px 0 8px}
+p{margin:8px 0;max-width:70ch}
+ul,ol{max-width:72ch;padding-left:1.3em}
+li{margin:3px 0}
+code,pre{font-family:"IBM Plex Mono",ui-monospace,monospace}
+code{background:var(--code);padding:1px 5px;border-radius:3px;font-size:.92em}
+pre{background:var(--code);border:1px solid var(--line);padding:12px 14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.55;margin:10px 0}
+pre code{background:none;padding:0}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}
+.tile{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:14px 16px;box-shadow:var(--shadow)}
+.tile h4{margin:0 0 6px;font-size:15px}
+.tile .k{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
+.tile p{font-size:14px;color:var(--ink2);margin:4px 0 0}
+/* flow */
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:14px 0}
+.step{flex:1 1 130px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;position:relative;min-width:130px}
+.step .t{font-weight:700;font-size:14px}
+.step .d{font-size:12.5px;color:var(--ink2);line-height:1.5;margin-top:2px}
+.step .who{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.06em;padding:1px 6px;border-radius:3px;margin-bottom:4px}
+.who.local{background:var(--acc-soft);color:var(--acc)}
+.who.dgx{background:var(--prog-soft);color:var(--prog)}
+.who.prog{background:var(--bg3);color:var(--ink2)}
+.step::after{content:"→";position:absolute;right:-11px;top:38%;color:var(--ink3);font-size:15px}
+.step:last-child::after{content:""}
+/* bars */
+.bars{margin:12px 0 4px;max-width:640px}
+.bar{display:grid;grid-template-columns:110px 1fr 58px;gap:10px;align-items:center;font-size:13px;margin:4px 0}
+.bar .lab{color:var(--ink2)}
+.bar .trk{height:12px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.bar .fill{height:100%;background:var(--acc)}
+.bar .fill.o{background:var(--ink3)}
+.bar .v{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;text-align:right;color:var(--ink2)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+.tbl{overflow-x:auto}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:700;color:var(--ink2);font-size:12.5px;letter-spacing:.04em;background:var(--bg3)}
+td.num,th.num{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;font-family:"IBM Plex Mono",monospace}
+.pill.acc{background:var(--acc-soft);color:var(--acc)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.prog{background:var(--prog-soft);color:var(--prog)}
+.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0;font-size:14px}
+.note.acc{border-left-color:var(--acc);background:var(--acc-soft)}
+.levels{display:grid;gap:8px;margin-top:10px}
+.lv{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:6px}
+.lv .no{font-family:"IBM Plex Mono",monospace;font-weight:500;color:var(--acc)}
+.lv .no small{display:block;color:var(--ink3);font-weight:400}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.tree{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.6;background:var(--code);border:1px solid var(--line);border-radius:6px;padding:12px 14px;overflow-x:auto;white-space:pre}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 14px;font-size:14px;margin:8px 0}
+.kv dt{color:var(--ink3);font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.kv dd{margin:0}
+.timeline{list-style:none;padding:0;margin:12px 0;border-left:2px solid var(--line)}
+.timeline li{padding:4px 0 4px 16px;position:relative;font-size:14px}
+.timeline li::before{content:"";position:absolute;left:-6px;top:12px;width:10px;height:10px;border-radius:50%;background:var(--acc)}
+.timeline li b{font-family:"IBM Plex Mono",monospace;font-weight:500;color:var(--ink2);margin-right:8px}
+.small{font-size:13px;color:var(--ink3)}
+a{color:var(--acc)}
+@media (max-width:820px){
+  .layout{grid-template-columns:1fr}
+  nav.side{position:static;display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+  nav.side a{border-left:0;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12.5px}
+  .grid3,.two{grid-template-columns:1fr}
+  .step::after{content:""}
+}
+@media (prefers-reduced-motion:no-preference){ html{scroll-behavior:smooth} }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">gamer AI · Roblox 自主代理 · 2026-09-29</div>
+  <h1>他是怎麼想的、怎麼練出來的</h1>
+  <p class="lede">一台 DGX 上的大模型當大腦、一台筆電上的 YOLO 當眼睛、一支 Python 程式當身體。這一頁把每一輪 40 秒裡發生的事、三層思考怎麼分工、他看到什麼、賞罰怎麼算、記憶怎麼累積，以及大腦與眼睛各自怎麼訓練，從頭到尾攤開。</p>
+  <div class="meta">
+    <span>大腦 gamer-27b-ft-run1（Qwen3.8-27B LoRA → NVFP4）</span>
+    <span>眼睛 YOLO-World + Windows OCR</span>
+    <span>身體 flow_agent.py（約 11,700 行）</span>
+    <span>今天 1,386 輪 · 39.5 秒／輪 · 登記 0</span>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="side" id="nav">
+  <a href="#parts">三個部件</a>
+  <a href="#round">一輪怎麼算</a>
+  <a href="#layers">三層思考</a>
+  <a href="#prompt">他看到什麼</a>
+  <a href="#output">他怎麼回答</a>
+  <a href="#score">賞罰怎麼算</a>
+  <a href="#memory">記憶與自學</a>
+  <a href="#train-brain">訓練大腦</a>
+  <a href="#train-eyes">訓練眼睛</a>
+  <a href="#today">今天學到的</a>
+  <a href="#files">檔案索引</a>
+</nav>
+
+<main>
+
+<section id="parts">
+  <h2><span class="n">01</span>三個部件，各管一件事</h2>
+  <p>沒有任何一個部件「整個會玩遊戲」。大模型看不到即時畫面的位置、看不快；YOLO 看得快但不懂語意；程式只會照規則做。三個合在一起才是「他」。</p>
+  <div class="grid3">
+    <div class="tile"><div class="k">DGX Spark · 每輪 1～3 次</div><h4>大腦：語意判斷</h4><p>看一張截圖＋一大包文字，回一個 JSON：畫面上有什麼、想做什麼、送哪些動作。現在是自己微調的 Qwen3.8-27B（NVFP4，19 GB，11.7 字／秒）；原本是 Qwen3.8-Flash-Next（99 GB，48 字／秒）。</p></div>
+    <div class="tile"><div class="k">筆電 RTX 4060 · 每秒 5～20 次</div><h4>眼睛：東西在哪</h4><p>YOLO-World 開放詞彙偵測，只回答「person／door／coffee machine 在畫面的哪裡、多大」。Windows OCR 讀畫面上的字，讓「點字」工具能點到按鈕中心。走到人旁邊、停在對的位置這種事靠眼睛閉環，不問大腦。</p></div>
+    <div class="tile"><div class="k">flow_agent.py · 每輪</div><h4>身體與規則</h4><p>截圖、組提示、送請求、解析 JSON、按鍵滑鼠、算分、寫記憶、帶路、擋危險動作、排檢討。所有「不用想就該做的事」都在這裡，包括替他按鍵（今天起這些會寫進他的【上一步】）。</p></div>
+  </div>
+</section>
+
+<section id="round">
+  <h2><span class="n">02</span>一輪 40 秒裡發生的事</h2>
+  <p>代理是一個無限迴圈，一輪就是「看一次、想一次、動一次」。今天平均一輪 39.5 秒（Flash-Next 時代 25 秒）。順序如下：</p>
+  <div class="flow">
+    <div class="step"><span class="who prog">程式</span><div class="t">截圖</div><div class="d">抓 Roblox 視窗 1024 寬；太暗自動提亮。同時檢查是不是還在遊戲裡、placeId 有沒有換。</div></div>
+    <div class="step"><span class="who local">本機</span><div class="t">眼睛＋OCR</div><div class="d">YOLO 框出現在關心的東西；OCR 讀字（輪班 N、理智 %、E 提示、按鈕字）。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">反射</div><div class="d">大腦第一次被問：只看儀表（視角、標點、按鈕簿、短期記憶）＋「現在這一步」，回一句畫面描述 s 與要不要換快思。上限 40 秒。</div></div>
+    <div class="step"><span class="who prog">程式</span><div class="t">組面板</div><div class="d">把核心文件、專案提示、記憶、【上一步】、腦內地圖、賞罰提示拼成 system＋user（今天一份約 200 KB）。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">快思</div><div class="d">大腦第二次被問：回 JSON（s＝看到、想＝為什麼、a＝動作清單）。上限 90 秒，平均 14～18 秒。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">地圖重問</div><div class="d">他沒填「我在／要去」就再問一次（強制腦內地圖，今天 7～8 成的輪要重問）。</div></div>
+    <div class="step"><span class="who prog">程式</span><div class="t">審核與執行</div><div class="d">擋錢、擋換職業、砍太大的 dy、拆「轉頭＋移動」成兩輪，再照地圖帶路或按他的鍵。</div></div>
+    <div class="step"><span class="who prog">程式</span><div class="t">算分＋記憶</div><div class="d">比前後畫面差異；扣分／加分；寫短期記憶、行動日誌、面板存檔；必要時排檢討。</div></div>
+  </div>
+  <h3>時間花在哪（09/29 典型一輪）</h3>
+  <div class="bars">
+    <div class="bar"><span class="lab">快思</span><div class="trk"><div class="fill" style="width:38%"></div></div><span class="v">15 秒</span></div>
+    <div class="bar"><span class="lab">其他（檢討、帶路、存檔）</span><div class="trk"><div class="fill o" style="width:40%"></div></div><span class="v">16 秒</span></div>
+    <div class="bar"><span class="lab">反射</span><div class="trk"><div class="fill" style="width:16%"></div></div><span class="v">6.4 秒</span></div>
+    <div class="bar"><span class="lab">截圖</span><div class="trk"><div class="fill o" style="width:5%"></div></div><span class="v">0.3～8 秒</span></div>
+    <div class="bar"><span class="lab">地圖重問</span><div class="trk"><div class="fill" style="width:5%"></div></div><span class="v">1.9 秒</span></div>
+    <div class="bar"><span class="lab">組面板</span><div class="trk"><div class="fill o" style="width:1%"></div></div><span class="v">0.2 秒</span></div>
+  </div>
+  <p class="small">「其他」是程式在這一輪額外做的事：卡住檢討（3～4 分鐘，一段 30 分鐘裡常有 5～13 次）、成功回推、慢想、地圖帶路走 3～6 秒。截圖偶爾飆到 5～8 秒，跟 Roblox 連開幾天與背景眼睛訓練有關。</p>
+  <div class="note acc">反射每輪都跑，快思也每輪都跑：今天 8,941 輪裡反射 6,500 次、快思 2,391 次是累計數，同一輪兩者都會叫到。慢想、檢討是「不趕時間」的層，不受每輪上限影響。</div>
+</section>
+
+<section id="layers">
+  <h2><span class="n">03</span>三層思考，外加五種檢討</h2>
+  <p>使用者 09/20 定的分工：看得越少、越明確，出手越快。三層看到的東西不一樣，負責的事也不一樣。</p>
+  <div class="tbl"><table>
+    <tr><th>層</th><th>多久一次</th><th>看得到什麼</th><th>負責什麼</th><th>不准做什麼</th></tr>
+    <tr><td><b>反射</b></td><td>每輪，≤40 秒</td><td>基礎操作儀表 ＋ 現在這一步、接著那一步、然後那一步 ＋ 一句目的</td><td>照那一步馬上做</td><td>不改計畫；步驟對不上就送 <code>{"t":"換快思"}</code></td></tr>
+    <tr><td><b>快思</b></td><td>每輪，≤90 秒</td><td>基礎操作 ＋ 這個大動作的文檔 ＋ 現況</td><td>把大動作切成這個情況下做得到的細步驟（<code>寫步驟</code>）</td><td>不重排整個序列</td></tr>
+    <tr><td><b>慢想</b></td><td>每 12 輪、或他送 <code>重想</code>、或大動作序列跑完；≤2 分鐘</td><td>全部：學習模組、任務樹、四面環顧、短期記憶</td><td>排「主任務 → 大動作 1、2、3」的序列，並切好現在這一個</td><td>—</td></tr>
+  </table></div>
+  <p>名詞用煮飯比喻：<b>主任務</b>＝做一道菜；<b>大動作</b>＝洗菜、切菜、下鍋；<b>細步驟</b>＝拿菜、放水裡、搓、沖、瀝乾。快思交給反射的永遠只有三步＋一句目的。</p>
+  <h3>五種檢討（觸發後才跑，每次 45 秒～3 分鐘）</h3>
+  <ul>
+    <li><b>卡住檢討</b>：一個任務耗滿 5 分鐘沒進展、步數超支、連續 16 輪畫面沒變、臉貼牆、鏡頭卡住。要他回答：原因、錯在哪、下次怎麼做。今天 288 次。</li>
+    <li><b>死亡檢討</b>：畫面出現「你死了／遊戲結束」。先回放死前 8 張畫面，要他標「第幾秒出事」＋錯誤類型（沒互動到／走不到／地圖不對／看錯畫面／被面板擋住／不知道下一步／狀態沒顧／太慢／方向錯）。</li>
+    <li><b>扣分檢討</b>：每一種扣分第一次發生就檢討、訂規則；訂過規則的項目再犯 25 次才重檢討，避免同一句話寫一千次。</li>
+    <li><b>成功回推</b>：加分達門檻時，把「前幾輪做了什麼 → 當下 → 之後」封存成關鍵動作，讓他知道上次是怎麼成功的。</li>
+    <li><b>整理學習</b>：把零散筆記整理成規則；程式再用指令等級表審核，抵觸高階規則的直接刪掉（記在 <code>規則審核.md</code>）。</li>
+  </ul>
+  <p>他也能自己調思考強度：<code>{"t":"思考強度","強度":"反射"}</code> 一輪 15 秒不思考，適合被追、在跑；安全時再調回快思。反射模式下的扣分會排隊，回快思再補檢討。</p>
+</section>
+
+<section id="prompt">
+  <h2><span class="n">04</span>他每一輪看到什麼</h2>
+  <p>每輪的 system＋user 是程式當場拼的，整份存在 <code>記憶/最新提示.txt</code>（每 100 輪另存一份到 <code>提示存檔/</code>）。內容分五塊：</p>
+  <div class="two">
+    <div>
+      <h3>① 核心文件（41 份模組，每個遊戲共用）</h3>
+      <div class="tree">核心/
+├ 共用/      身分與現在的任務、指令等級表、
+│            我還是玩家嗎、鐵律與輸出格式
+├ 基礎操作/  基礎確認、開場三件事、你在哪與進入遊戲、
+│            進場階段與遊玩階段、移動與走位、視角、
+│            互動按E、卡住就重開、死亡重生、空間感、
+│            轉頭與貼牆為什麼會卡死、標點與腦中地圖、
+│            選單與UI、讀畫面上的字、一個任務五分鐘、
+│            先找到再走過去、眼睛與工具、教眼睛、
+│            工具要真的去用、動作表、思考強度
+└ 學習模組/  新遊戲通用準則、快思與慢想、目標懲罰與卡住、
+             任務分數制、程序化、任務目標與線索、
+             成功要回推、場地劃分、學到就要記、
+             事後回放檢討、先把地圖畫出來、先錄影再檢討、
+             地圖印證與探索、學習與查資料</div>
+      <p class="small">核心文件裡不准出現任何一款遊戲的名詞（09/26 使用者定），換遊戲照用。</p>
+    </div>
+    <div>
+      <h3>② 這個遊戲的專案</h3>
+      <div class="tree">專案/動物醫院/
+├ 遊戲.json     placeId、禁止換職業、強制腦內地圖
+├ 提示/         00_這隻遊戲（只有一份，他自己寫）
+├ 工作流程/     學會的事拆成的流程
+├ 大動作/       每個大動作的文檔
+├ 素材/標註     眼睛訓練用的畫面＋框
+└ 記憶/         他自己累積的一切（下一節）</div>
+      <h3>③ 記憶回灌</h3>
+      <ul>
+        <li><b>【上一步】</b>（09/29 起五行）：原本想、送出、實際按下去、被擋掉、⚙ 程式替你做了＋原因、結果。</li>
+        <li><b>短期記憶</b>：最近 4 輪的縮圖＋看到／想／做了／結果。</li>
+        <li><b>腦內地圖</b>：我在哪、標點清單、地點座標、要去哪；程式照它算方向與秒數。</li>
+        <li><b>大動作與步驟</b>：現在第幾個大動作、第幾步、步數預算還剩幾輪。</li>
+        <li><b>按鈕簿</b>（329 顆）、<b>成功紀錄</b>、他自己訂的規則、賞罰計分板、遇到的問題。</li>
+      </ul>
+      <h3>④ 儀表</h3>
+      <p>水平儀度數與面向、眼睛框到的東西與位置、OCR 讀到的字、左右牆距、畫面變化量、重複警報（程式先比對好「你正在重複」）。</p>
+      <h3>⑤ 當下才有的提示</h3>
+      <p>被扣分的那條、他自己訂過的規則、卡住／死亡後的改善、程式擋掉什麼、理智快沒了怎麼辦。</p>
+    </div>
+  </div>
+  <h3>指令等級表：抵觸時高的贏</h3>
+  <div class="levels">
+    <div class="lv"><div class="no">第 0 級<small>鐵律</small></div><div>不花錢；<code>s</code> 只寫看得到的；只輸出一個 JSON；不進錯遊戲；不污染核心；不查攻略。</div></div>
+    <div class="lv"><div class="no">第 1 級<small>使用者強制指令</small></div><div>23 條附日期的規則：場景一換先基礎確認、第三人稱、一個任務五分鐘、一步最多兩輪、走之前先指出目標、新地圖先畫地圖、三層分工、錄影再檢討、用工具算做事但小步驟要直接做完、【上一步】看程式替你做了什麼……</div></div>
+    <div class="lv"><div class="no">第 2 級<small>基礎操作與學習模組</small></div><div>怎麼走、怎麼看、怎麼互動、怎麼學。</div></div>
+    <div class="lv"><div class="no">第 3 級<small>他自己訂的</small></div><div>檢討訂的規則、慢想排的步驟、學到的筆記。只在不抵觸上面任何一級時算數；程式會自動刪掉抵觸的。</div></div>
+  </div>
+</section>
+
+<section id="output">
+  <h2><span class="n">05</span>他怎麼回答：一個 JSON</h2>
+  <p>每一輪大腦只能回一個 JSON，沒有 markdown、沒有多餘文字。<code>s</code> 是儀器讀數（只寫看得到的，寫錯等於騙未來的自己），<code>想</code> 是為什麼，<code>a</code> 是動作清單。</p>
+<pre><code>{"s": "灰牆面，頂部輪班1，右側蓋印表格，底部有E提示",
+ "想": "先後退離開牆面，再轉頭找電腦註冊區",
+ "我在": "蓋印表格區", "要去": "電腦註冊區",
+ "a": [{"t":"key","k":"s","d":1.0},
+       {"t":"look","dx":-90,"dy":0,"g":"轉向電腦"}]}</code></pre>
+  <h3>動作表</h3>
+  <div class="tbl"><table>
+    <tr><th>類</th><th>動作</th><th>說明</th></tr>
+    <tr><td rowspan="2">動到遊戲</td><td><code>key</code> <code>hold</code> <code>look</code> <code>click</code> <code>aim</code> <code>scroll</code> <code>wait</code></td><td>按鍵秒數、長按 E、轉視角 dx/dy、點座標、準心對準、滾輪、等。</td></tr>
+    <tr><td><code>點字</code> <code>走到記過的</code> <code>水平歸零</code></td><td>由程式代做：OCR 找那幾個字的框中心點下去；照腦內地圖轉向並走；把視角壓回水平。</td></tr>
+    <tr><td>計畫</td><td><code>寫步驟</code> <code>這步做完</code> <code>大動作完成</code> <code>換快思</code> <code>重想</code> <code>思考強度</code></td><td>切步驟、推進、換層、重新慢想、調速。</td></tr>
+    <tr><td>記憶</td><td><code>我在</code> <code>標點</code> <code>切空間</code> <code>記知識</code> <code>記問題</code> <code>基礎確認</code> <code>錄成程序</code></td><td>畫地圖、釘標點、記學到的、記遇到的問題、確認視角／人稱／游標、把一串操作錄成程式。</td></tr>
+  </table></div>
+  <p>程式收到後先審核再執行：擋掉含付費字的點擊、擋換職業、砍掉太大的 dy（避免甩到天花板）、同一輪「轉頭＋移動」拆成兩輪、地圖帶路時替他走。被改過或擋掉的動作，從今天起會寫進【上一步】讓他知道。</p>
+</section>
+
+<section id="score">
+  <h2><span class="n">06</span>賞罰怎麼算</h2>
+  <p>分數不是給人看的，是回灌給他的：每次扣分那一條會出現在下一輪提示裡，第一次發生就要他檢討、訂規則。使用者的原則是「告訴就是告訴」：規則寫進文件，程式只計分，不替他玩。</p>
+  <div class="two">
+    <div>
+      <h3>扣分（節錄）</h3>
+      <div class="tbl"><table>
+        <tr><th>項目</th><th class="num">分</th><th>怎麼判</th></tr>
+        <tr><td>碰到花錢的東西</td><td class="num">300</td><td>畫面出現購買框</td></tr>
+        <tr><td>原地空轉</td><td class="num">100</td><td>什麼都沒要、也不是在等</td></tr>
+        <tr><td>給自己偏袒的評分</td><td class="num">80</td><td></td></tr>
+        <tr><td>放棄自己訂的任務</td><td class="num">60</td><td></td></tr>
+        <tr><td>一直待在原地</td><td class="num">25</td><td></td></tr>
+        <tr><td>沒有目的地就亂走</td><td class="num">20</td><td>按 w 沒帶 g</td></tr>
+        <tr><td>上下來回甩視角</td><td class="num">20</td><td>|dy|≥150 後 60 秒內反向</td></tr>
+        <tr><td>沒事退出遊戲</td><td class="num">20</td><td></td></tr>
+        <tr><td><span class="pill warn">09/29 新</span> 小步驟沒直接做完</td><td class="num">20</td><td>同一步超過 2 輪，之後每輪扣</td></tr>
+        <tr><td><span class="pill warn">09/29 新</span> 想了卻沒做</td><td class="num">20</td><td>想法要動作、只送工具</td></tr>
+        <tr><td>鏡頭頂到天花板／地板</td><td class="num">15</td><td>水平儀 ±55 度</td></tr>
+        <tr><td>空按 E</td><td class="num">10</td><td>長按沒反應</td></tr>
+        <tr><td>面壁</td><td class="num">8</td><td></td></tr>
+        <tr><td>步數超支</td><td class="num">3</td><td>切幾步就要幾輪做完</td></tr>
+        <tr><td>重複同一個動作／esc 連按／卡在選單</td><td class="num">1</td><td>只記錄，累積給他看</td></tr>
+        <tr><td>死亡</td><td class="num">0</td><td>09/23 起不扣，只做死亡檢討</td></tr>
+      </table></div>
+    </div>
+    <div>
+      <h3>加分</h3>
+      <div class="tbl"><table>
+        <tr><th>項目</th><th class="num">分</th></tr>
+        <tr><td>治好一個病人</td><td class="num">600</td></tr>
+        <tr><td>撐完一整輪班</td><td class="num">150</td></tr>
+        <tr><td>完成一次 Check In（登記）</td><td class="num">100</td></tr>
+        <tr><td>成功進場（Roblox 紀錄 job 換了）</td><td class="num">30</td></tr>
+        <tr><td>第一次做成某件事、做成自己訂的任務</td><td class="num">依倒數</td></tr>
+        <tr><td>走到目標並互動成功、拍下新地標、腦中地圖印證正確</td><td class="num">小分</td></tr>
+        <tr><td>他自己提的操作加分（先對準再按 E、修回水平…）</td><td class="num">8～15</td></tr>
+      </table></div>
+      <p class="small">加分有 20 秒冷卻，同一項不能連發。加分達門檻會開一筆「關鍵動作」紀錄。工具本身不加分（免得刷工具）。</p>
+      <div class="note">今天的懲罰 20,160 分裡大半是新加的「小步驟 −20」：他在大廳被選單卡住時每輪都被扣，但換不出做法。這不是分數的問題，是下一節說的程式 bug。</div>
+    </div>
+  </div>
+</section>
+
+<section id="memory">
+  <h2><span class="n">07</span>記憶與自學：他怎麼變聰明（或沒有）</h2>
+  <p>模型本身每一輪都是失憶的。「記得」全靠程式把上一輪寫下的東西在下一輪回灌。記憶分三個時間尺度：</p>
+  <div class="grid3">
+    <div class="tile"><div class="k">秒～分鐘</div><h4>短期記憶</h4><p>最近 4 輪縮圖＋做了什麼＋結果；【上一步】；重複警報。防止把剛失敗的動作再做一次。</p></div>
+    <div class="tile"><div class="k">小時～天</div><h4>遊戲記憶</h4><p>腦內地圖、標點、按鈕簿、成功紀錄、大動作與步驟、他訂的規則、遇到的問題、程序。只屬於這隻遊戲。</p></div>
+    <div class="tile"><div class="k">永久</div><h4>深度記憶</h4><p>燒進權重的：狀態判斷、輸出格式、成功行為、學習方法。這就是微調（下一節）。</p></div>
+  </div>
+  <h3>自學的迴路</h3>
+  <ol>
+    <li>出事（扣分／卡住／死亡）→ 程式攤出「出事前 30 秒實際做了什麼」→ 他寫原因、錯在哪、下次怎麼做。</li>
+    <li>「下次怎麼做」變成第 3 級規則，存進 <code>學到的.md</code>／<code>研究筆記.md</code>；程式用等級表審核，抵觸的刪掉。</li>
+    <li>下一輪提示裡會念給他聽：「你自己訂過的規則是……這一輪就照它做」。</li>
+    <li>同一串動作做過 10 次以上，程式自動包成程序；他也可以 <code>錄成程序</code>，之後一句話跑完不問模型。</li>
+    <li>眼睛看錯的，他用「教眼睛」更正（<code>眼睛更正.jsonl</code>），收工時拿去訓練眼睛。</li>
+  </ol>
+  <div class="note">今天查到這條迴路卡在哪：他看不到程式替他按的 esc，所以 288 次檢討都怪自己「esc 連按」；每次檢討從零開始，10 分鐘內寫出 5 條互相矛盾的面板規則，沒有一條試過再記有沒有效；寫下的規則只是被念一遍，不會變成下一輪的動作。第一點今天已經改（【上一步】五行）。</div>
+</section>
+
+<section id="train-brain">
+  <h2><span class="n">08</span>訓練大腦：從日誌到 NVFP4</h2>
+  <p>目的是把「不會變的」燒進權重：規則、判斷、行為、學習方法、輸出格式。數字、作法、遊戲知識繼續走文件。訓練資料裡不准有任何一款遊戲的名詞。</p>
+  <div class="flow">
+    <div class="step"><span class="who prog">Windows</span><div class="t">撈資料</div><div class="d"><code>build_finetune_set.py</code> 只讀他的日誌，切成六類 chat 格式；遊戲名詞遮成「某物」，輸出含名詞的整筆丟。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">生成問答</div><div class="d"><code>gen_rule_qa.py</code> 把核心文件段落交給 Flash-Next 生 4～6 組問答（A_qa），再過濾一次名詞。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">LoRA 訓練</div><div class="d"><code>train_lora.py</code>：Qwen3.8-27B，只訓語言層線性層，只對 assistant 算 loss。訓練前要先停掉大腦，兩個放不進 119 GiB。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">合併</div><div class="d"><code>merge_lora.py</code>：adapter 合回底模 → bf16 完整權重 54 GB。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">壓縮</div><div class="d"><code>quant_nvfp4.py</code>：ModelOpt NVFP4，用自己的訓練集當校準；19 GB，解碼 4.1 → 11.7 字／秒。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">服務</div><div class="d">vLLM 容器 <code>vllm-gamer-27b-ft</code> 佔 8888；代理不用改設定，只放寬時限。</div></div>
+    <div class="step"><span class="who prog">Windows</span><div class="t">實戰 A/B</div><div class="d"><code>ab_stats.py</code>、<code>round_breakdown.py</code>、<code>inout_stats.py</code> 每 30 分鐘一列，跟 Flash-Next 基準比。</div></div>
+  </div>
+
+  <h3>六類資料（run1，2026-09-26）</h3>
+  <div class="tbl"><table>
+    <tr><th>類</th><th>教什麼</th><th>來源</th><th class="num">總數</th><th class="num">train / val</th><th>丟掉的主因</th><th>進 run1？</th></tr>
+    <tr><td><b>A</b> 規則內化</td><td>核心文件的規則</td><td>核心/ 切段 → 生成問答 A_qa</td><td class="num">169 段</td><td class="num">153 / 16</td><td>含遊戲名詞 5</td><td><span class="pill acc">是 ×2</span></td></tr>
+    <tr><td><b>B</b> 狀態判斷</td><td>看到什麼 → 視角／人稱／游標</td><td>基礎確認.jsonl</td><td class="num">173</td><td class="num">156 / 17</td><td>—</td><td><span class="pill acc">是 ×4</span></td></tr>
+    <tr><td><b>C</b> 成功軌跡</td><td>畫面 → 動作 JSON</td><td>關鍵動作.jsonl 成功前後幾輪</td><td class="num">2,917</td><td class="num">2,626 / 291</td><td>沒動作或畫面沒變 3,680、違反規則 1,215、含名詞 337</td><td><span class="pill acc">是</span></td></tr>
+    <tr><td><b>D</b> 錯誤→修正</td><td>做錯的 → 檢討寫的「下次」</td><td>犯錯紀錄＋三種檢討</td><td class="num">32,128</td><td class="num">28,916 / 3,212</td><td>檢討欄位空 2,699、含名詞 997</td><td><span class="pill bad">否</span></td></tr>
+    <tr><td><b>E</b> 輸出格式</td><td>s 只寫看得到的（正例／反例）</td><td>s 欄位</td><td class="num">601</td><td class="num">541 / 60</td><td>—</td><td><span class="pill acc">是</span></td></tr>
+    <tr><td><b>F</b> 學習方法</td><td>怎麼拆步驟、回推、檢討</td><td>慢想、成功回推、卡住／死亡檢討、程序</td><td class="num">2,469</td><td class="num">2,223 / 246</td><td>慢想含名詞 1,525、檢討欄位不足 993</td><td><span class="pill acc">是</span></td></tr>
+  </table></div>
+
+  <h3>run1 的配方與結果</h3>
+  <dl class="kv">
+    <dt>底模</dt><dd>Qwen/Qwen3.8-27B（dense、看得懂圖；Flash-Next 是 512 專家 MoE，原始 200 GB 放不下訓練）</dd>
+    <dt>LoRA</dt><dd>r 16、alpha 32、lr 1e-4、max_len 3072、grad_accum 16、2 epochs、seed 7</dd>
+    <dt>資料量</dt><dd>7,622 筆（A_qa ×2、B ×4），954 步，347 分鐘</dd>
+    <dt>驗證 loss</dt><dd>A_qa 2.32（ppl 10.1，第二輪開始背題目）· B 0.08 · C 0.17 · E 0.00 · F 1.37；整體在第 400 步最好，run1 用的是第 954 步</dd>
+    <dt>實戰</dt><dd>視角亂甩少一半、懲罰少一半；但進場率只有 Flash-Next 的 1/8、每輪慢 4 成、登記 0</dd>
+  </dl>
+  <h3>為什麼 run1 沒有贏（比較報告的結論）</h3>
+  <ol>
+    <li><b>C 類只教了「看畫面→按鍵」</b>：解析動作的程式只認基本動作，含工具（我在、標點、走到記過的、這步做完…）的輪整筆被丟。模型學成不會用工具。</li>
+    <li><b>A 類過擬合</b>：val loss 2.17 → 2.32，第二輪開始背題目。</li>
+    <li><b>沒有成功報到的正例</b>：兩個遊戲都沒人成功過，資料裡一筆都沒有，模型自然不會。</li>
+    <li><b>D 類沒進訓練</b>：「同一動作沒效還重複」「點同一座標十幾次」這些最常見的壞習慣沒被糾正。</li>
+  </ol>
+  <h3>run2 的配方（待使用者點頭）</h3>
+  <ul>
+    <li>parse_actions 支援所有工具動作，C 類不再丟含工具的輪。</li>
+    <li>只訓 1 輪（或取第 400 步）、A 類不重複。</li>
+    <li>D 類轉成 DPO 對（chosen＝檢討寫的正確動作），專打重複同一動作。</li>
+    <li>等有「成功報到」的輪次再加進 C 類；用每輪面板存檔（<code>記憶/面板/*.jsonl.gz</code>）當輸入，不只用反射那一句「看到」。</li>
+  </ul>
+</section>
+
+<section id="train-eyes">
+  <h2><span class="n">09</span>訓練眼睛：他自己教 YOLO</h2>
+  <p>眼睛是 YOLO-World（開放詞彙：直接吃 "coffee machine" 這種詞，4060 上約 50 ms 一張）。他玩的時候如果覺得眼睛看錯，用「教眼睛」寫進 <code>眼睛更正.jsonl</code>：「yolo 說是 A，其實是 B」或「YOLO 沒框到 C」。</p>
+  <div class="flow">
+    <div class="step"><span class="who prog">收工時</span><div class="t">收資料集</div><div class="d"><code>素材/標註</code> 的畫面＋框，最多 1,500 張。</div></div>
+    <div class="step"><span class="who prog">程式</span><div class="t">套更正</div><div class="d">改類別名；沒框到的詞用 YOLO-World 回頭補框。基礎詞（wall、door、person…）也放進類別表當負樣本，免得忘掉通用詞。</div></div>
+    <div class="step"><span class="who local">4060</span><div class="t">微調</div><div class="d">YOLO-World 微調，3 epochs 約 40 分鐘。</div></div>
+    <div class="step"><span class="who prog">下次開機</span><div class="t">自動採用</div><div class="d">存成 <code>weights/eyes_trained.pt</code>，<code>local_vision.py</code> 有這個檔就優先用。</div></div>
+  </div>
+  <div class="note">現況：他累積的更正類別已經 1,370 個，超過上限 60（09/15 教訓：垃圾詞會毀掉權重），所以訓練每天都直接放棄。而且啟動腳本會等它最多 10 分鐘，今天每次重開代理都白等。要清 <code>眼睛更正.jsonl</code> 的類別才會再訓練成功。</div>
+</section>
+
+<section id="today">
+  <h2><span class="n">10</span>今天（09/29）查到的三件事</h2>
+  <ul class="timeline">
+    <li><b>10:40</b>「沒動作」136 輪裡 135 輪其實有用工具。工具執行完被移出動作清單，【上一步】只剩「做了『沒動作』」，他的檢討因此一直以為自己在空轉。改：用工具算做事、不加分；小步驟超過 2 輪 −20、想了卻沒做 −20。</li>
+    <li><b>13:40</b>他整天卡在大廳的「好友選單」，根因是程式：看到「購買／付費／商店／解鎖／升級」就自動按 esc，而大廳左邊常駐按鈕就寫著「商店」。程式一天替他按了 160 次 esc，打開 Roblox 選單；他以為關不掉，再按 esc／l 就跳出離開確認，循環整晚。</li>
+    <li><b>16:10</b>他不知道程式替他按了什麼，因為那些只印在終端機。改：【上一步】五行（原本想、送出、實際按下去、被擋掉、程式替你做了＋原因）。上線後馬上抓到：他送「s 後退離牆」，程式照地圖帶路改按「w 3 秒」去撞牆，然後提示還怪他「那一下沒有效果」。</li>
+  </ul>
+  <p>還在等使用者決定的：自動 esc 拿掉「商店／解鎖／升級」；地圖帶路不要蓋掉他自己的移動；自動 esc 先印原因再按；眼睛訓練停掉或清類別；檢討提示叫他先看「程式替你」；小步驟 −20 改每 3 輪扣一次。</p>
+</section>
+
+<section id="files">
+  <h2><span class="n">11</span>檔案索引</h2>
+  <div class="tbl"><table>
+    <tr><th>想看什麼</th><th>去哪裡</th></tr>
+    <tr><td>他這一輪收到的全文</td><td><code>專案/動物醫院/記憶/最新提示.txt</code>（每 100 輪存一份到 <code>提示存檔/</code>）</td></tr>
+    <tr><td>每一輪做了什麼、耗時、程式替他做了什麼</td><td><code>記憶/行動日誌.jsonl</code>（23,567 行）、<code>記憶/面板/*.jsonl.gz</code>（每輪面板）</td></tr>
+    <tr><td>他的檢討與規則</td><td><code>記憶/卡住檢討.md</code>、<code>死亡檢討.md</code>、<code>扣分檢討.md</code>、<code>學到的.md</code>、<code>研究筆記.md</code>、<code>規則審核.md</code></td></tr>
+    <tr><td>賞罰</td><td><code>記憶/懲罰.json</code>、<code>懲罰紀錄.md</code>、<code>獎勵.json</code>、<code>關鍵動作.md</code>；扣分表在 <code>flow_agent.py</code> 的 <code>PENALTY</code>、加分在 <code>REWARD</code></td></tr>
+    <tr><td>他看到的規則</td><td><code>核心/</code> 41 份 .md；等級表 <code>核心/共用/01_指令等級表.md</code></td></tr>
+    <tr><td>每 30 分鐘的觀察與 A/B</td><td><code>觀察紀錄/2026-09-29.md</code>、<code>訓練資料/finetune/AB對照.md</code>、<code>比較報告_Flash-Next_vs_27B.md</code></td></tr>
+    <tr><td>訓練大腦</td><td>Windows <code>build_finetune_set.py</code>、<code>gen_rule_qa.py</code>、<code>訓練資料/finetune/</code>；DGX <code>~/projects/gamer-ai-finetune</code>（本機備份 <code>DGX部署/finetune/</code>）：train_lora／merge_lora／quant_nvfp4／docker-compose</td></tr>
+    <tr><td>訓練眼睛</td><td><code>train_eyes.py</code>、<code>local_vision.py</code>、<code>記憶/眼睛更正.jsonl</code>、<code>記憶/訓練輸出.log</code></td></tr>
+    <tr><td>接手</td><td><code>重開電腦後怎麼接手.md</code>、<code>工作日誌/</code>；GitHub thortsui/gamer-AI（私人）</td></tr>
+  </table></div>
+</section>
+
+</main>
+</div>
+</div>
+
+<script>
+(function(){
+  var links=[].slice.call(document.querySelectorAll('#nav a'));
+  var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));});
+  function on(){
+    var y=window.scrollY+120, idx=0;
+    secs.forEach(function(s,i){ if(s && s.offsetTop<=y) idx=i; });
+    links.forEach(function(a,i){ a.classList.toggle('on', i===idx); });
+  }
+  window.addEventListener('scroll', on, {passive:true}); on();
+})();
+</script>
