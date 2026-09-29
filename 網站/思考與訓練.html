@@ -155,9 +155,9 @@ a{color:var(--acc)}
   <div class="flow">
     <div class="step"><span class="who prog">程式</span><div class="t">截圖</div><div class="d">抓 Roblox 視窗 1024 寬；太暗自動提亮。同時檢查是不是還在遊戲裡、placeId 有沒有換。</div></div>
     <div class="step"><span class="who local">本機</span><div class="t">眼睛＋OCR</div><div class="d">YOLO 框出現在關心的東西；OCR 讀字（輪班 N、理智 %、E 提示、按鈕字）。</div></div>
-    <div class="step"><span class="who dgx">DGX</span><div class="t">反射</div><div class="d">大腦第一次被問：只看儀表（視角、標點、按鈕簿、短期記憶）＋「現在這一步」，回一句畫面描述 s 與要不要換快思。上限 40 秒。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">反射（看一眼）</div><div class="d">大腦不推理、只看畫面回一句描述 s，當作這一輪的事實。上限 40 秒。</div></div>
     <div class="step"><span class="who prog">程式</span><div class="t">組面板</div><div class="d">把核心文件、專案提示、記憶、【上一步】、腦內地圖、賞罰提示拼成 system＋user（今天一份約 200 KB）。</div></div>
-    <div class="step"><span class="who dgx">DGX</span><div class="t">快思</div><div class="d">大腦第二次被問：回 JSON（s＝看到、想＝為什麼、a＝動作清單）。上限 90 秒，平均 14～18 秒。</div></div>
+    <div class="step"><span class="who dgx">DGX</span><div class="t">快思 或 反射檢查</div><div class="d">佇列空：快思回 JSON（s、想、a，加上 步:[①②③]）。佇列有：反射只回 ok，做成了程式做下一步，沒做成換快思。快思 ≤90 秒，反射 ≤40 秒。</div></div>
     <div class="step"><span class="who dgx">DGX</span><div class="t">地圖重問</div><div class="d">他沒填「我在／要去」就再問一次（強制腦內地圖，今天 7～8 成的輪要重問）。</div></div>
     <div class="step"><span class="who prog">程式</span><div class="t">審核與執行</div><div class="d">擋錢、擋換職業、砍太大的 dy、拆「轉頭＋移動」成兩輪，再照地圖帶路或按他的鍵。</div></div>
     <div class="step"><span class="who prog">程式</span><div class="t">算分＋記憶</div><div class="d">比前後畫面差異；扣分／加分；寫短期記憶、行動日誌、面板存檔；必要時排檢討。</div></div>
@@ -172,16 +172,16 @@ a{color:var(--acc)}
     <div class="bar"><span class="lab">組面板</span><div class="trk"><div class="fill o" style="width:1%"></div></div><span class="v">0.2 秒</span></div>
   </div>
   <p class="small">「其他」是程式在這一輪額外做的事：卡住檢討（3～4 分鐘，一段 30 分鐘裡常有 5～13 次）、成功回推、慢想、地圖帶路走 3～6 秒。截圖偶爾飆到 5～8 秒，跟 Roblox 連開幾天與背景眼睛訓練有關。</p>
-  <div class="note acc">反射每輪都跑，快思也每輪都跑：今天 8,941 輪裡反射 6,500 次、快思 2,391 次是累計數，同一輪兩者都會叫到。慢想、檢討是「不趕時間」的層，不受每輪上限影響。</div>
+  <div class="note acc">21:00 以前的節奏是每 4 輪快思一次、其餘反射自己決定動作（今天累計反射 6,500 次、快思 2,391 次）。21:00 起改成：快思排三步 → 反射檢查、程式做②③ → 回到快思。慢想、檢討是「不趕時間」的層，不受每輪上限影響。</div>
 </section>
 
 <section id="layers">
   <h2><span class="n">03</span>三層思考，外加五種檢討</h2>
-  <p>使用者 09/20 定的分工：看得越少、越明確，出手越快。三層看到的東西不一樣，負責的事也不一樣。</p>
+  <p>看得越少、越明確，出手越快。三層看到的東西不一樣，負責的事也不一樣。<span class="pill warn">09/29 21:00 改</span> 快思現在要直接給前後三步的詳細動作；反射不再決定動作，只檢查上一步有沒有正常執行。</p>
   <div class="tbl"><table>
     <tr><th>層</th><th>多久一次</th><th>看得到什麼</th><th>負責什麼</th><th>不准做什麼</th></tr>
-    <tr><td><b>反射</b></td><td>每輪，≤40 秒</td><td>基礎操作儀表 ＋ 現在這一步、接著那一步、然後那一步 ＋ 一句目的</td><td>照那一步馬上做</td><td>不改計畫；步驟對不上就送 <code>{"t":"換快思"}</code></td></tr>
-    <tr><td><b>快思</b></td><td>每輪，≤90 秒</td><td>基礎操作 ＋ 這個大動作的文檔 ＋ 現況</td><td>把大動作切成這個情況下做得到的細步驟（<code>寫步驟</code>）</td><td>不重排整個序列</td></tr>
+    <tr><td><b>快思</b></td><td>佇列空了或反射說沒做成時，≤90 秒</td><td>基礎操作 ＋ 這個大動作的文檔 ＋ 現況</td><td>回 <code>步:[①②③]</code>：現在這一步、接著、然後，每步附動作 JSON 與「做完會看到什麼」；①當場做</td><td>不重排整個序列</td></tr>
+    <tr><td><b>反射</b></td><td>佇列有東西時每輪，≤40 秒</td><td>【上一步】＋快思說做完會看到什麼＋儀表</td><td>只回 <code>ok</code>：上一步做成了程式就做②、③；沒做成就換快思</td><td>不送動作、不改計畫</td></tr>
     <tr><td><b>慢想</b></td><td>每 12 輪、或他送 <code>重想</code>、或大動作序列跑完；≤2 分鐘</td><td>全部：學習模組、任務樹、四面環顧、短期記憶</td><td>排「主任務 → 大動作 1、2、3」的序列，並切好現在這一個</td><td>—</td></tr>
   </table></div>
   <p>名詞用煮飯比喻：<b>主任務</b>＝做一道菜；<b>大動作</b>＝洗菜、切菜、下鍋；<b>細步驟</b>＝拿菜、放水裡、搓、沖、瀝乾。快思交給反射的永遠只有三步＋一句目的。</p>

@@ -6264,6 +6264,93 @@ class FlowAgent(ProcedureMixin, Agent):
         rows.append('　做完①就送 {"t":"這步做完"}；三步都做完或情況不對就送 {"t":"換快思"}。')
         return NL.join(rows)
 
+    # ---------------- 快思三步佇列（2026-09-29 使用者：快思直接出前後三步的詳細動作，反射只檢查）
+    PLAN3_ACTS = ("key", "hold", "click", "look", "aim", "scroll", "wait", "點字", "走到記過的", "水平歸零",
+                  "這步做完", "大動作完成", "寫步驟", "我在", "標點", "切空間", "記知識", "記問題", "基礎確認")
+
+    def plan3_ask(self):
+        """快思那一輪多要的東西：三步、每步附動作與「做完會看到什麼」。"""
+        return ("【快思要直接給三步的動作】（2026-09-29 使用者定）" + NL
+                + "除了這一輪的 a，還要把**現在這一步、接著那一步、然後那一步**各自的動作寫清楚，放在 步 裡：" + NL
+                + '　"步":[{"做":"後退離開牆面","a":[{"t":"key","k":"s","d":1.0}],"成":"畫面拉開、看得到走廊"},' + NL
+                + '　　　　{"做":"轉向電腦","a":[{"t":"look","dx":-90,"dy":0,"g":"電腦"}],"成":"電腦螢幕在畫面中央"},' + NL
+                + '　　　　{"做":"走到電腦前","a":[{"t":"key","k":"w","d":2.0,"g":"電腦"}],"成":"電腦變大、出現E提示"}]' + NL
+                + "規矩：①的 a 就是這一輪要做的（a 可以省略，程式會用 步[0].a）；每一步小到照著做不用想；"
+                + "「成」寫**畫面上看得到的變化**，反射就靠它判斷有沒有做成。" + NL
+                + "接下來的輪次由反射檢查：做成了程式直接做②、再做③；沒做成或三步做完，才回到你這裡重排。"
+                + '做完大動作的一步，把 {"t":"這步做完"} 放進那一步的 a。')
+
+    def plan3_apply(self, mode, o):
+        """快思：把 步[0..2] 收進佇列，這一輪做 ①。反射：看 ok 決定做下一步還是換快思。"""
+        def norm(st):
+            if not isinstance(st, dict):
+                return None
+            acts = [a for a in (st.get("a") or []) if isinstance(a, dict) and str(a.get("t") or "") in self.PLAN3_ACTS]
+            return {"做": str(st.get("做") or st.get("do") or "")[:40], "a": acts[:3],
+                    "成": str(st.get("成") or st.get("done") or "")[:40]}
+        if mode == 快思:
+            raw = o.get("步") or o.get("steps") or []
+            steps = [s for s in (norm(x) for x in (raw if isinstance(raw, list) else [])) if s and s["a"]]
+            if not steps:
+                self._plan_q, self._plan_cur = [], None
+                if raw:
+                    print("   ⚠ 快思的「步」裡沒有可執行的動作，這輪照 a 做、下輪還是快思")
+                return o
+            first = steps[0]
+            if not (o.get("a") or []):
+                o["a"] = list(first["a"])
+            self._plan_cur = first
+            self._plan_q = steps[1:3]
+            self.stat["快思三步"] = self.stat.get("快思三步", 0) + 1
+            print("   🧠 快思排了三步：" + " → ".join(f"{i + 1}.{s['做']}" for i, s in enumerate(steps[:3]))
+                  + f"（這輪做 1，佇列 {len(self._plan_q)}）")
+            self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 快思排三步："
+                                + " → ".join(s["做"] for s in steps[:3]))
+            return o
+        if not getattr(self, "_reflex_check", False):
+            return o
+        ok = o.get("ok")
+        if isinstance(ok, str):
+            ok = ok.strip().lower() in ("true", "是", "yes", "ok", "有", "1", "正常")
+        why = str(o.get("為什麼") or o.get("why") or o.get("想") or "")[:40]
+        cur = getattr(self, "_plan_cur", None) or {}
+        if ok:
+            nxt = self._plan_q.pop(0)
+            self._plan_cur = nxt
+            self.stat["反射檢查通過"] = self.stat.get("反射檢查通過", 0) + 1
+            print(f"   ✅ 反射：上一步「{cur.get('做', '')}」做成了 → 做下一步「{nxt['做']}」（佇列剩 {len(self._plan_q)}）")
+            o["a"] = list(nxt["a"])
+            o["想"] = f"（快思排的）{nxt['做']}"
+            if not self._plan_q:
+                self._force_fast = True          # 三步做完：下一輪回到快思重排
+        else:
+            self.stat["反射檢查失敗"] = self.stat.get("反射檢查失敗", 0) + 1
+            print(f"   ✋ 反射：上一步「{cur.get('做', '')}」沒做成（{why}）→ 換快思重排")
+            self._plan_q = []
+            o["a"] = [{"t": "換快思"}]
+            o["想"] = f"（反射）上一步沒做成：{why}"
+            self.mark_step(f"反射檢查沒過：{why}")
+        return o
+
+    def reflex_check_panel(self):
+        """反射有佇列時的提示：只問「上一步有沒有正常執行」，不決定動作。"""
+        cur = getattr(self, "_plan_cur", None) or {}
+        q = list(getattr(self, "_plan_q", []) or [])
+        parts = [self.ban_text(), self.last_step_text(),
+                 "【快思交代的上一步】做「" + cur.get("做", "") + "」，做完應該看到：「" + (cur.get("成") or "（沒寫）") + "」",
+                 "【接下來排好的】" + ("；".join(f"{i + 2}.{s['做']}" for i, s in enumerate(q)) if q else "（這是最後一步）"),
+                 "【眼睛看到】" + (getattr(self, "_seen_reflex", "") or ""),
+                 "【目前視角】" + self.gyro_text()[:200],
+                 "【畫面上的字】" + self.text_text()[:400],
+                 "【右上角任務】" + (getattr(self, "cur_task", "") or "（沒讀到）"),
+                 self.short_mem_text(2)]
+        body = NL.join(p for p in parts if p and p.strip())
+        return (body + NL * 2
+                + "**你只做一件事：檢查。** 看畫面判斷上一步有沒有正常執行（畫面是不是變成快思說的樣子、或至少朝那個方向變了）。" + NL
+                + "做成了 → ok:true，程式馬上做下一步；沒做成、畫面沒變、跳出沒看過的東西、被傳送、死掉 → ok:false，換快思重排。" + NL
+                + "**不要自己送動作。**只輸出 JSON："
+                + '{"s":"看到什麼(<=14字)","區":"你現在在哪一區(<=8字)","ok":true或false,"為什麼":"(<=20字)","task":"右上角任務原文"}')
+
     STEP_LOG = "步驟日誌.jsonl"
 
     def log_step(self, seen, did, eff):
@@ -8121,21 +8208,25 @@ class FlowAgent(ProcedureMixin, Agent):
         _doc = self.macro_doc()
         if _doc:
             text = text + NL + NL + "【這個大動作你自己寫的文檔】" + NL + _doc
+        text = text + NL + NL + self.plan3_ask()      # 2026-09-29：快思要直接給三步的動作
         content.append({"type": "text", "text": text})
         self.dump_prompt(text)
         self.tick("組面板")
         self.stat["模型輪"] = self.stat.get("模型輪", 0) + 1
         # 思考強度由他自己決定（使用者 2026-09-16）：快節奏的遊戲可以自己降成反射，
         # 一輪從 40 幾秒縮到十幾秒；要想清楚的時候再自己調回快思。
-        mode = getattr(self, "think_mode", 快思)
-        # 快思比重：他自己沒把強度調成反射時，也只有每 N 輪真的思考一次，其餘用反射。
-        every = max(1, int(getattr(self.args, "think_every", 4) or 4))
-        if mode == 快思 and every > 1 and (self.stat.get("輪數", 0) % every) != 0:
-            mode = 反射
-        if getattr(self, "_force_fast", False):     # 反射自己喊了「換快思」
+        # 2026-09-29 使用者：**快思直接給前後三步的詳細動作；反射只檢查上一步有沒有正常執行。**
+        # 快思那一輪回 步:[①②③]，①當場做；之後每輪反射看畫面判斷「上一步做成了嗎」——
+        # 成了程式就做②、再做③；沒成就換快思重排。三步做完也回到快思。
+        # 以前「每 4 輪快思一次、其餘反射自己決定動作」的節奏拿掉：反射不再決定動作。
+        q = list(getattr(self, "_plan_q", []) or [])
+        mode = 反射 if q else 快思
+        if getattr(self, "_force_fast", False):     # 反射說上一步沒做成、或他自己喊了換快思
             self._force_fast = False
+            self._plan_q = []
             mode = 快思
-            print("   🧠 上一輪反射喊了換快思 → 這一輪用會思考的那一層")
+            print("   🧠 換快思：重新排前後三步")
+        self._reflex_check = bool(q) and mode == 反射
         if mode == 快思 and not self.macro_steps() and self.macro_name():
             print(f"   🧠 「{self.macro_name()}」還沒有細步驟 → 這一輪請快思把它切開")
         # 2026-09-27：反射的 20 秒上限改成參數（微調 27B 比 Flash-Next 慢很多，20 秒答不完就變「沒動作」）
@@ -8169,8 +8260,9 @@ class FlowAgent(ProcedureMixin, Agent):
             tokens_use = 400
         elif mode == 反射:
             # 2026-09-20：反射＝基礎操作的儀表＋現在這一步（不是整份面板、也不是一行提示）
+            # 2026-09-29：有快思排好的佇列時，反射只做檢查（reflex_check_panel），不決定動作
             content_use = [{"type": "image_url", "image_url": {"url": uri}},
-                           {"type": "text", "text": self.reflex_panel()}]
+                           {"type": "text", "text": self.reflex_check_panel() if getattr(self, "_reflex_check", False) else self.reflex_panel()}]
             tokens_use = min(600, self.args.max_tokens)
         else:
             content_use, tokens_use = content, self.args.max_tokens
@@ -8181,6 +8273,10 @@ class FlowAgent(ProcedureMixin, Agent):
         self.tick("快思")
         self.log_panel(mode, content_use, raw)
         o = parse_json_loose(raw) or {}
+        try:
+            o = self.plan3_apply(mode, o)      # 2026-09-29：快思的三步進佇列；反射檢查結果決定做下一步或換快思
+        except Exception as e:  # noqa: BLE001
+            print(f"   三步佇列處理失敗：{e}")
         if not (o.get("a") or []):
             # 提示很長、又只有 5 秒，模型有時會來不及輸出動作 → 用精簡版重問一次
             short = ("看畫面，現在馬上做一件事。" + NL
@@ -11042,7 +11138,7 @@ class FlowAgent(ProcedureMixin, Agent):
         # 例：想法寫「直接走向右側框框」，卻只送「這步做完／換快思」、沒送任何會動到遊戲的動作。
         acting_tools = ("點字", "點文字", "走到記過的", "走到", "水平歸零", "wait", "等")
         acted_by_tool = any(t in acting_tools for t in asked)
-        if asked and not real and not waiting and not acted_by_tool:
+        if asked and not real and not waiting and not acted_by_tool and not getattr(self, "_reflex_check", False):
             intent = re.search(r"走向|走過去|走到|往前走|前進|按\s*[EeWwAaSsDd](?![A-Za-z])|長按|按住|點擊|去點|點一下|"
                                r"站進|站上|站到|跳過去|靠近|轉向|轉過去", think)
             done = re.search(r"做完|已經到|已到|已完成|完成了", think)
