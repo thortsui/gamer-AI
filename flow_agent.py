@@ -39,6 +39,19 @@ import pydirectinput  # noqa: E402
 from local_vision import Eyes  # noqa: E402
 from local_text import TextEyes  # noqa: E402
 import zh_text  # noqa: E402  繁簡／OCR 形近字的容錯比對（2026-09-18）
+import builtins  # noqa: E402
+
+# 2026-09-29 使用者：「他需要知道自己上一步按了什麼、為什麼要用這個按鈕、和他原本想要怎麼做」。
+# 程式替他按鍵的地方有幾十處（自動 esc、壓平視角、後退、帶路…），每一處動手前都會先印一句原因。
+# 這裡記住最近印出的那一句，程式替他動手時就拿它當「為什麼」，寫進他的【上一步】。
+_LAST_PRINT = {"line": ""}
+
+
+def print(*args, **kw):  # noqa: A001
+    s = " ".join(str(x) for x in args).strip()
+    if s:
+        _LAST_PRINT["line"] = s
+    builtins.print(*args, **kw)
 
 # 2026-09-14 專案結構（使用者要求）：
 #   核心/共用・基礎操作・學習模組 ← 每個遊戲都載入，換遊戲照用
@@ -2095,8 +2108,68 @@ class FlowAgent(ProcedureMixin, Agent):
                     f"畫面出現「按住 E」之類的提示才按得到。" + NL)
         return ok, held
 
+    # ---------------- 他送的 vs 實際做的 vs 程式替他做的（2026-09-29 使用者）
+    def act_note(self, what):
+        """有東西真的動到遊戲時呼叫：他這一輪的動作記成「實際執行」，其他一律記成「程式替你做」。"""
+        if getattr(self, "_in_prog_exec", False):
+            return                                  # 已經在 execute 那層記過了，不重複
+        if getattr(self, "_his_exec", False):
+            self._exec_log = (getattr(self, "_exec_log", []) + [what])[-8:]
+            return
+        why = str(_LAST_PRINT.get("line") or "").lstrip("⚠🚫🔻🔺🧹🚑🔁🌀🔎🧭⏸✂↕🗺🚶📍 ").strip()
+        log = getattr(self, "_prog_log", [])
+        if log and log[-1][1] == why[:60]:
+            log[-1] = (log[-1][0] + "、" + what, log[-1][1])   # 同一個原因連續按好幾下就併成一筆
+        else:
+            log.append((what, why[:60]))
+        self._prog_log = log[-6:]
+
+    def execute(self, actions):
+        if actions and not getattr(self, "_his_exec", False) and not getattr(self, "_in_prog_exec", False):
+            self.act_note("、".join(self.describe(a) for a in actions if isinstance(a, dict))[:60])
+            self._in_prog_exec = True
+            try:
+                return super().execute(actions)
+            finally:
+                self._in_prog_exec = False
+        if actions and getattr(self, "_his_exec", False):
+            self._exec_log = (getattr(self, "_exec_log", []) +
+                              [self.describe(a) for a in actions if isinstance(a, dict)])[-8:]
+            self._in_prog_exec = True               # 他的動作在這層記完，底下的按鍵不再重複記
+            try:
+                return super().execute(actions)
+            finally:
+                self._in_prog_exec = False
+        return super().execute(actions)
+
+    def raw_look(self, dx, dy, steps=8):
+        try:
+            self.act_note(f"轉視角 {int(dx)},{int(dy)}")
+        except (TypeError, ValueError):
+            pass
+        return super().raw_look(dx, dy, steps)
+
+    def step_record(self):
+        """一輪結束時整理：他原本送了什麼、實際執行了什麼、被擋掉什麼、程式替他做了什麼。"""
+        orig = [a for a in (getattr(self, "_asked_full", []) or []) if isinstance(a, dict)]
+        orig_s = "、".join(self.describe(a) if a.get("t") in ("key", "hold", "click", "look", "aim", "scroll", "wait")
+                          else f"工具「{a.get('t')}」" for a in orig)[:90]
+        exe_s = "、".join(getattr(self, "_exec_log", []) or [])[:90]
+        blk = getattr(self, "_blocked_now", []) or []
+        blk_s = "、".join(str(b) for b in blk)[:60]
+        prog = getattr(self, "_prog_log", []) or []
+        prog_s = "；".join(f"{w}（程式說：{y}）" if y else w for w, y in prog)[:160]
+        self._exec_log, self._prog_log, self._blocked_now = [], [], []
+        self._his_exec = False                  # 保險：一輪結束一定關掉，免得中途例外讓之後的程式動作被算成他的
+        self._last_step_rec = {"原本": orig_s, "實際": exe_s, "擋": blk_s, "程式": prog_s}
+        return dict(self._last_step_rec)
+
     def press_key(self, k, d=0.3):
         import pydirectinput
+        try:
+            self.act_note(f"按 {k} {float(d):.1f}s")
+        except (TypeError, ValueError):
+            pass
         try:
             self.trace_add(f"按 {k} {float(d):.1f}s")
             self.route_note(str(k).lower(), float(d))       # 在大廳的話，錄下這一步（走到門口的路線）
@@ -4759,6 +4832,10 @@ class FlowAgent(ProcedureMixin, Agent):
                "看到": str(seen or "")[:60], "想": str(want or "")[:40],
                "做了": str(did or "")[:80], "結果": str(eff or "")[:40],
                "區": str(getattr(self, "cur_zone", "") or ""), "圖": ""}
+        try:
+            rec.update(self.step_record())      # 原本送／實際執行／被擋／程式替你做（2026-09-29）
+        except Exception as e:  # noqa: BLE001
+            print(f"   上一步紀錄失敗：{e}")
         im = getattr(self, "_frame_im", None) if im is None else im
         if im is not None:
             try:
@@ -4780,7 +4857,10 @@ class FlowAgent(ProcedureMixin, Agent):
             ago = len(rows) - i
             out.append(f"　{ago} 輪前（{r.get('時', '')}）在「{r.get('區') or '沒標區'}」："
                        f"看到「{r.get('看到', '')}」→ 想「{r.get('想', '')}」"
-                       f"→ 做了「{r.get('做了', '')}」→ {r.get('結果', '')}")
+                       f"→ 做了「{r.get('做了', '')}」"
+                       + (f"［被擋：{r['擋'][:30]}］" if r.get("擋") else "")
+                       + (f"［程式替你：{r['程式'][:50]}］" if r.get("程式") else "")
+                       + f"→ {r.get('結果', '')}")
         return NL.join(out)
 
     def last_step_text(self):
@@ -4798,9 +4878,26 @@ class FlowAgent(ProcedureMixin, Agent):
         why = str(r.get("想") or "").strip()
         eff = str(r.get("結果") or "").strip()
         dead = ("幾乎沒動" in eff or "變化 0" in eff or "沒生效" in eff)
-        out = (f"【上一步】你做了「{did}」"
-               + (f"（因為：{why}）" if why else "")
-               + (f" → 結果：{eff}" if eff else ""))
+        # 2026-09-29 使用者：「他需要知道自己上一步按了什麼、為什麼要用這個按鈕、和他原本想要怎麼做」，
+        # 也要知道**程式替他按了什麼**——不然選單被程式打開，他只會以為是自己按壞的。
+        orig, exe = str(r.get("原本") or ""), str(r.get("實際") or "")
+        lines = [f"【上一步】你原本想：{why or '（沒寫）'}"]
+        lines.append(f"　你送出：{orig or did}")
+        def _kinds(x):
+            # 「1s」跟「1.0s」、標籤文字不同不算不一樣；鍵、方向、秒數、dx/dy 數值不同就算（程式改過他的動作）
+            return sorted(re.sub(r"「.*?」", "", re.sub(r"(\d+)\.0(?!\d)", r"\1", p)).strip()
+                          for p in x.split("、") if p and not p.startswith("工具"))
+        if exe and _kinds(exe) != _kinds(orig):
+            lines.append(f"　實際按下去的：{exe}（跟你送的不一樣＝程式改過或只做了一部分）")
+        elif not exe and any(not p.startswith("工具") for p in orig.split("、") if p):
+            lines.append("　實際按下去的：（沒有）——你送的動作一個都沒真的做")
+        if r.get("擋"):
+            lines.append(f"　被擋掉沒做：{r['擋']}")
+        if r.get("程式"):
+            lines.append(f"　⚙ **程式替你做了**：{r['程式']}——這不是你按的，畫面的變化可能是它造成的")
+        if eff:
+            lines.append(f"　結果：{eff}")
+        out = NL.join(lines)
         if dead:
             out += ("　⚠ **那一下沒有效果**。同樣的做法不會突然有效——"
                     "這一輪換別的做法（換方向、先關掉擋住的東西、先確認游標有沒有被鎖），"
@@ -8645,6 +8742,7 @@ class FlowAgent(ProcedureMixin, Agent):
         actions = [self.tame_look(a) for a in actions if isinstance(a, dict)]
         actions = [a for a in actions if a]      # tame_look 回 None＝這個動作沒有意義，丟掉
         actions, blocked = self.guard(actions, 0)
+        self._blocked_now = list(blocked)       # 2026-09-29：寫進【上一步】，讓他知道哪個動作被擋、為什麼
         self.stat["擋掉"] += len(blocked)
         for b in blocked:
             print(f"   🚫 擋掉 {b}")
@@ -8680,6 +8778,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 self._track = lab
                 break
         rest = []
+        self._his_exec = True                   # 2026-09-29：從這裡到 execute(rest) 動到遊戲的都是「他自己的動作」
         for a in actions:
             if a.get("t") == "middle":
                 # 中鍵不是用來轉視角的——換成捲動視窗內容
@@ -8703,7 +8802,10 @@ class FlowAgent(ProcedureMixin, Agent):
         self._busy = True
         rest = self.guard_hold(self.guard_leave(self.guard_esc(self.guard_job(self.guard_pay_click(self.clamp_aim(rest))))))
         pre_click = self.grab_still(320)
-        self.execute(rest)
+        try:
+            self.execute(rest)
+        finally:
+            self._his_exec = False
         self.check_click(rest, pre_click)
         self._busy = False
         # 他自己提的操作加分：小幅度把歪掉的視角修回水平（用畫面判斷，不看推算角度）
@@ -8904,7 +9006,8 @@ class FlowAgent(ProcedureMixin, Agent):
         if tk:
             print("   ⏱ " + "　".join(f"{k} {v:.1f}s" for k, v in tk.items() if v >= 0.05))
         self.log({"時間": stamp, "模式": f"流程:{self.flow}", "步驟": self.step, "看到": seen,
-                  "動作": actions, "擋掉": blocked, "秒": round(time.time() - t0, 2),
+                  "動作": actions, "擋掉": blocked, "程式替你": (getattr(self, "_last_step_rec", {}) or {}).get("程式", ""),
+                  "秒": round(time.time() - t0, 2),
                   "登記": self.stat["登記"],
                   # 2026-09-27 使用者：拆解每一步各花幾秒、用了幾個工具、有沒有用子代理（反射／快思／慢想這幾層模型呼叫）
                   "耗時": dict(tk), "要的工具": list(getattr(self, "_asked", []) or []),
