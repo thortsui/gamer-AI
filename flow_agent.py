@@ -6297,8 +6297,11 @@ class FlowAgent(ProcedureMixin, Agent):
                     print("   ⚠ 快思的「步」裡沒有可執行的動作，這輪照 a 做、下輪還是快思")
                 return o
             first = steps[0]
-            if not (o.get("a") or []):
-                o["a"] = list(first["a"])
+            # ①的 a 就是這一輪要做的：他另外在 a 裡放的工具（記知識、我在、標點…）保留，
+            # 動到遊戲的動作以 步[0].a 為準——不然反射下一輪會拿「①做成了嗎」去檢查一個根本沒做的動作
+            game = ("key", "hold", "click", "look", "aim", "scroll", "wait", "點字", "走到記過的", "水平歸零")
+            tools = [a for a in (o.get("a") or []) if isinstance(a, dict) and str(a.get("t") or "") not in game]
+            o["a"] = tools + list(first["a"])
             self._plan_cur = first
             self._plan_q = steps[1:3]
             self.stat["快思三步"] = self.stat.get("快思三步", 0) + 1
