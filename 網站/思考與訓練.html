@@ -204,7 +204,7 @@ a{color:var(--acc)}
     <li><b>即時思考</b>：<a href="http://192.168.0.114:8300/think">http://192.168.0.114:8300/think</a>（區網；同一台電腦用 <code>http://127.0.0.1:8300/think</code>，或點 <code>網站/open_thinking.bat</code>）。代理跑起來時儀表板會一起開。</li>
     <li><b>每一輪的原文</b>：<code>記憶/面板/2026-09-29.jsonl.gz</code>（他收到的 user 全文＋他回的 JSON，1,500 多輪）；<code>記憶/思考流程.jsonl</code>（每輪 看到／想／做了，一行一輪）；<code>記憶/最新提示.txt</code>（最新一輪全文）。</li>
   </ul>
-  <p class="small">他沒有藏起來的想法可看：快思開 reasoning_effort=low、慢想與檢討開 xhigh，模型內部有推理，但程式沒有存那段推理；存下來的是他寫出來的 s／想／步／檢討全文。要存推理內容得改 <code>play_agent.stream_json</code>。</p>
+  <p class="small">他有沒有「藏起來的想法」：<b>快思這一層從 09/21 起是關掉內部推理的</b>（當時實測他推理時用英文把整張中文面板翻譯複述一遍，494 token 幾乎全花在抄面板；關掉後一輪從 35 秒降到 6 秒、「想」欄反而更準），所以快思的全部思考就是 s／想／步 那幾行。<b>慢想與各種檢討</b>開 xhigh，模型會先寫一段推理再答；這段推理 23:20 起會存進 <code>記憶/面板</code>、<code>思考流程.jsonl</code>，儀表板 /think、/flow 多一列「推理」。</p>
 
   <h3>22:03:13　第 8,952 輪（快思，舊格式最後幾輪之一）</h3>
   <dl class="kv">

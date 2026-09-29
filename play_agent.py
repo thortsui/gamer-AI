@@ -460,7 +460,8 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
             if obj.get("usage"):
                 usage = obj["usage"]
             for ch in obj.get("choices", []):
-                rpiece = ch.get("delta", {}).get("reasoning_content")
+                # vLLM 的 qwen3 reasoning parser 串流時用 "reasoning"（實測 2026-09-29），舊版叫 "reasoning_content"
+                rpiece = ch.get("delta", {}).get("reasoning_content") or ch.get("delta", {}).get("reasoning")
                 if rpiece:
                     reason.append(rpiece)
                 piece = ch.get("delta", {}).get("content")
