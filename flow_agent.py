@@ -27,6 +27,7 @@ import json
 import os
 import re
 import sys
+import queue
 import threading
 import time
 from datetime import datetime
@@ -780,6 +781,63 @@ class FlowAgent(ProcedureMixin, Agent):
                            "有變化就照原本的計畫繼續，還是沒變才換做法。" + NL)
         return True
 
+    # ---------------- 檢討背景化（2026-09-29 使用者：「檢討不擋迴圈」）
+    # 09/29 全天 1,545 輪的「其他」時間 21,421 秒裡，卡住檢討／扣分檢討／成功回推佔了六成：
+    # 每一次都是同步叫 27B 想 40～100 秒，主迴圈停著等，最慢的輪三個檢討疊在一起 150 秒。
+    # 現在檢討丟到一條背景執行緒排隊跑：主迴圈馬上進下一輪，結果出來從下一輪開始回灌。
+    # 同一種檢討在跑或排隊中就不再排；排隊超過 REVIEW_MAX_PENDING 就略過。慢想維持同步（它在排下一步）。
+    REVIEW_MAX_PENDING = 3
+
+    def _in_review_thread(self):
+        return threading.current_thread() is getattr(self, "_review_thread", None)
+
+    def review_async(self, name, fn, *args, after=None):
+        q = getattr(self, "_review_q", None)
+        if q is None:
+            q = self._review_q = queue.Queue()
+            self._review_pending = set()
+            self._review_running = ""
+            t = threading.Thread(target=self._review_worker, name="review", daemon=True)
+            self._review_thread = t
+            t.start()
+        if name in self._review_pending or self._review_running == name:
+            print(f"   ⏳ 「{name}」已在背景排隊／進行中，這次不再排")
+            return False
+        if q.qsize() >= self.REVIEW_MAX_PENDING:
+            print(f"   ⏳ 背景檢討已排 {q.qsize()} 個，「{name}」這次略過")
+            return False
+        self._review_pending.add(name)
+        q.put((name, fn, args, after))
+        print(f"   🧵 「{name}」丟到背景執行（不擋這一輪），排隊 {q.qsize()} 個")
+        return True
+
+    def _review_worker(self):
+        while True:
+            name, fn, args, after = self._review_q.get()
+            self._review_pending.discard(name)
+            self._review_running = name
+            t0 = time.time()
+            try:
+                fn(*args)
+                if after:
+                    after()
+                print(f"   🧵✅ 背景「{name}」做完（{time.time() - t0:.0f} 秒）")
+            except Exception as e:  # noqa: BLE001
+                print(f"   🧵 背景「{name}」失敗：{e}")
+            finally:
+                self._review_running = ""
+                self.stat["背景檢討"] = self.stat.get("背景檢討", 0) + 1
+
+    def review_status_text(self):
+        """給提示用：背景有檢討在跑就講一句，免得他以為沒人理他。"""
+        r = getattr(self, "_review_running", "")
+        n = self._review_q.qsize() if getattr(self, "_review_q", None) else 0
+        if not r and not n:
+            return ""
+        if not r:
+            return f"（背景排了 {n} 個檢討還沒開始，結果出來會放進下一輪）"
+        return f"（背景正在做「{r}」" + (f"，另外排了 {n} 個" if n else "") + "，結果出來會放進下一輪）"
+
     def stuck_review(self, why):
         """卡住也要交報告書，跟死亡一樣。"""
         if time.time() - getattr(self, "_last_stuck_review", 0) < 120:
@@ -793,6 +851,10 @@ class FlowAgent(ProcedureMixin, Agent):
         if self.retry_last():
             print(f"   📋 先重試上一個動作，這次不寫檢討（原因：{why}）")
             return
+        self.review_async("卡住檢討", self._stuck_review_llm, why)   # 2026-09-29：叫模型那一半丟背景，不擋迴圈
+
+    def _stuck_review_llm(self, why):
+        """卡住檢討真正叫模型的那一半（背景執行緒）。前面的重試／重進判斷仍在主迴圈做。"""
         print(f"   📋 卡住檢討：{why}")
         uri, _ = jpeg_data_uri(self.draw_eyes(draw_grid(self.grab_still(1024))), 70)
         # 2026-09-17 使用者：卡住檢討也要看短期記憶——「一直卡在同一個地方」這件事
@@ -5236,7 +5298,13 @@ class FlowAgent(ProcedureMixin, Agent):
         print(f"   📗 他把這條分成**遊戲記憶**（{file or '死亡教訓'}）：{body[:40]}")
         return "遊戲記憶"
 
+    def _after_death_review(self):
+        if getattr(self, "death_note", ""):
+            self.add_note(f"（死亡檢討）{self.death_note[:60]}")
+
     def death_review(self):
+        if not self._in_review_thread():
+            return self.review_async("死亡檢討", self.death_review, after=self._after_death_review)
         """覆寫父類別：回放＋短期記憶一起看，檢討要多出「改善」與「他自己分類要記到哪」。"""
         n = getattr(self, "death_count", 1)
         print(f"   💀 第 {n} 次死亡，請他自己檢討、訂改善、並決定這條記到哪裡")
@@ -8225,6 +8293,8 @@ class FlowAgent(ProcedureMixin, Agent):
         if _doc:
             text = text + NL + NL + "【這個大動作你自己寫的文檔】" + NL + _doc
         text = text + NL + NL + self.plan3_ask()      # 2026-09-29：快思要直接給三步的動作
+        if self.review_status_text():
+            text = text + NL + self.review_status_text()
         content.append({"type": "text", "text": text})
         self.dump_prompt(text)
         self.tick("組面板")
@@ -8390,13 +8460,16 @@ class FlowAgent(ProcedureMixin, Agent):
                               "然後你要花好幾輪才關得掉（今天已經發生很多次）。"
                               "那不是任務需要的東西——**繞過去，看你的步驟該做什麼**。" + NL
                               + (getattr(self, "item_hint", "") or ""))
-        # 看到購買／商店字樣：程式直接 esc，不要讓他在購買視窗前面耗時間
-        if (any(k in seen for k in ("購買", "付費", "商店", "解鎖", "升級"))
+        # 看到付費視窗的字：程式直接 esc，不要讓他在購買視窗前面耗時間
+        # 2026-09-29 使用者：**拿掉「商店／解鎖／升級」**——大廳左側常駐按鈕就寫著「商店」，
+        # 這條今天替他按了 160+ 次 esc，把 Roblox 選單打開，他整晚在「好友選單關不掉」裡打轉。
+        # 只認真正付費視窗才會出現的字（跟 SHOP_WORDS 同一個原則）。
+        if (any(k in seen.lower() for k in ("購買", "付費", "付款", "robux", "儲值", "確認購買", "立即購買", "buy now", "gamepass"))
                 and time.time() - getattr(self, "_last_auto_esc", 0) > 30):
             self._last_auto_esc = time.time()
-            self.press_key("esc", 0.05)
             self.buy_popups = getattr(self, "buy_popups", 0) + 1
-            print(f"   🚫 偵測到購買/商店字樣，程式直接按 esc（第 {self.buy_popups} 次）")
+            print(f"   🚫 偵測到付費視窗的字，程式直接按 esc（第 {self.buy_popups} 次）")   # 先印再按：【上一步】的「程式說」才對得上
+            self.press_key("esc", 0.05)
 
         nf = str(o.get("flow") or "").strip()
         locks = getattr(self, "lock_flows", []) or ([self.lock_flow] if getattr(self, "lock_flow", "") else [])
@@ -9013,8 +9086,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 # 2026-09-23 使用者：死亡不扣分（只檢討）。原本 −10（09/19 前 −150）。
                 print("   💀 你死了（不扣分，使用者 09/23 定；只做死亡檢討）")
                 self.death_review()          # 會寫進 死亡檢討.md 並更新 self.death_note
-                if getattr(self, "death_note", ""):
-                    self.add_note(f"（死亡檢討）{self.death_note[:60]}")
+                # 死亡檔會在背景寫完後由 _after_death_review 記筆記（2026-09-29 檢討背景化）
             except Exception as e:  # noqa: BLE001
                 print(f"   死亡檢討失敗：{e}")
 
@@ -9288,6 +9360,8 @@ class FlowAgent(ProcedureMixin, Agent):
 {map}"""
 
     def organise(self):
+        if not self._in_review_thread():
+            return self.review_async("整理學習", self.organise)
         """讓他自己把學到的東西整理成一份分類文件（程式只負責觸發與保存）。"""
         print("   📚 整理時間：讓他自己把學到的東西分類整理")
         rows = sorted(self.mem.items(), key=lambda kv: -kv[1])[:40]
@@ -11271,6 +11345,8 @@ class FlowAgent(ProcedureMixin, Agent):
         self.learn_from_win(kind, n)
 
     def learn_from_win(self, kind, n):
+        if not self._in_review_thread():
+            return self.review_async("成功回推", self.learn_from_win, kind, n)
         print(f"   🏆📖 因為「{kind}」成功了，停下來自己回推是怎麼做到的（不趕時間）…")
         old = (getattr(self, "wins_how", None) or {}).get(kind) or {}
         extra = (NL + f"你上次回推過同一件事，當時寫的重現步驟是：「{old.get('怎麼重現', '')}」。"
@@ -11453,6 +11529,8 @@ class FlowAgent(ProcedureMixin, Agent):
             print(f"   檢討失敗：{e}")
 
     def learn_from_penalty(self, kind, cnt):
+        if not self._in_review_thread():
+            return self.review_async("扣分檢討", self.learn_from_penalty, kind, cnt)
         """讓他自己檢討這一種扣分，並訂一條具體、可檢查的改善規則。"""
         times = f"（這是累積第 {cnt} 次）" if cnt > 1 else ""
         print(f"   📖 因為「{kind}」停下來檢討（不趕時間）…")
