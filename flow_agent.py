@@ -8421,6 +8421,13 @@ class FlowAgent(ProcedureMixin, Agent):
         # 2026-09-27 使用者：「他不需要想怎麼走，只需要知道他在哪、要去哪，剩下直接用地圖計算」
         _dest = getattr(self, "_goto_place", "")
         self._routed = ""
+        # 2026-09-29：反射檢查輪做的是快思排好的步驟，地圖帶路不要把它換掉
+        # （22:41 實測：反射說①做成了→該做②「look 對準蓋印表格」，卻被地圖重問拿到的「要去」蓋掉，
+        # 　改成 YOLO 閉環走 0.7 秒，那一步等於沒做，下一輪反射只能判「沒做成」）
+        if _dest and getattr(self, "_reflex_check", False):
+            print(f"   🗺⏸ 反射檢查輪：照快思排的步做，這輪不帶路去「{_dest}」")
+            self._goto_place = ""
+            _dest = ""
         try:
             if _dest and self.ui_open_hint():
                 print(f"   🗺✋ 畫面被面板蓋著，這輪不帶路去「{_dest}」")
