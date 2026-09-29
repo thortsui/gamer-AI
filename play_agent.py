@@ -377,6 +377,9 @@ class RobloxWindow:
 # 這台 DGX 實測（短 prompt）：反射 1.0s／快思 7.0s／慢想 10.2s。
 # 檔位只有 xhigh（預設）、medium、low，而且要放在請求**頂層**，不是 chat_template_kwargs。
 反射, 快思, 中想, 慢想 = "反射", "快思", "中想", "慢想"
+# 2026-09-29 使用者：「他的思考是會自己列出文字？」——模型內部推理（reasoning_content）以前只跑不存；
+# 現在每次呼叫完放在這裡，flow_agent 的 log_panel／思考流程 拿去存，儀表板也看得到。
+LAST_REASONING = {"text": ""}
 THINK_MODES = {
     # 模式: (要不要思考, effort, temperature, top_p)
     反射: (False, None,    0.70, 0.80),   # 官方給非思考模式的取樣建議
@@ -426,6 +429,7 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
     if remaining <= 0.2:
         return "", True, None, None
     text, ttft, usage, truncated = [], None, None, False
+    reason = []                      # 模型的內部推理（reasoning_content）
     t0 = time.time()
     resp = urllib.request.urlopen(req, timeout=remaining)
     try:
@@ -456,6 +460,9 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
             if obj.get("usage"):
                 usage = obj["usage"]
             for ch in obj.get("choices", []):
+                rpiece = ch.get("delta", {}).get("reasoning_content")
+                if rpiece:
+                    reason.append(rpiece)
                 piece = ch.get("delta", {}).get("content")
                 if piece:
                     if ttft is None:
@@ -466,6 +473,7 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
             resp.close()
         except Exception:  # noqa: BLE001
             pass
+    LAST_REASONING["text"] = "".join(reason)
     return "".join(text), truncated, ttft, usage
 
 

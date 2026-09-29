@@ -40,6 +40,7 @@ async function load(){
         ${o.任務?`<span>任務：${esc(o.任務)}</span>`:''}</div>
       <div class="line"><span class="k">看到</span><span class="see">${esc(o.看到)}</span></div>
       ${o.想?`<div class="line"><span class="k">想做</span><span class="think">${esc(o.想)}</span></div>`:''}
+      ${o.推理?`<div class="line"><span class="k">推理</span><span style="white-space:pre-wrap;opacity:.8;font-size:12px">${esc(o.推理)}</span></div>`:''}
       <div class="line"><span class="k">做了</span><span class="do">${esc(o.做了)}</span></div>
     </div>`).join('') || '<p class="dim">還沒有紀錄（代理剛啟動、或還沒跑到有輸出的輪次）。</p>';
 }

@@ -7213,6 +7213,18 @@ class FlowAgent(ProcedureMixin, Agent):
         except OSError:
             pass
 
+    def take_reasoning(self):
+        """拿出上一次模型呼叫的內部推理（reasoning_content），順便留一份給 思考流程／儀表板。"""
+        try:
+            import play_agent as _pa
+            t = str(_pa.LAST_REASONING.get("text") or "")
+            _pa.LAST_REASONING["text"] = ""
+        except Exception:  # noqa: BLE001
+            t = ""
+        if t:
+            self._last_reasoning = t
+        return t
+
     def log_panel(self, mode, content_use, raw):
         """2026-09-26 使用者要做 fine-tune：把每一輪真正送進模型的 user 面板＋模型原始輸出存下來。
 
@@ -7230,7 +7242,8 @@ class FlowAgent(ProcedureMixin, Agent):
                    "區": str(getattr(self, "cur_zone", "") or ""), "任務": getattr(self, "cur_task", "") or "",
                    "反射看到": getattr(self, "_seen_reflex", "") or "",
                    "system_hash": hashlib.md5(sysp.encode("utf-8")).hexdigest()[:12],
-                   "system_len": len(sysp), "user": NL.join(texts), "輸出": raw or ""}
+                   "system_len": len(sysp), "user": NL.join(texts), "輸出": raw or "",
+                   "推理": self.take_reasoning()}     # 2026-09-29：模型內部推理全文（以前只跑不存）
             d = os.path.join(self.dir, "面板")
             os.makedirs(d, exist_ok=True)
             with gzip.open(os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl.gz"), "ab") as fh:
@@ -9097,6 +9110,7 @@ class FlowAgent(ProcedureMixin, Agent):
                     "區": getattr(self, "cur_zone", ""),
                     "看到": seen[:120],
                     "想": str(o.get("想") or o.get("why") or "")[:80],
+                    "推理": str(getattr(self, "_last_reasoning", "") or "")[:1200],   # 2026-09-29：模型內部推理
                     "做了": summ[:160],
                     "任務": getattr(self, "cur_task", ""),
                     "視角": f"{getattr(self, 'pitch_deg', 0):.0f}度/朝{getattr(self, 'yaw', 0) % 360:.0f}",
@@ -9113,6 +9127,7 @@ class FlowAgent(ProcedureMixin, Agent):
             print("   ⏱ " + "　".join(f"{k} {v:.1f}s" for k, v in tk.items() if v >= 0.05))
         self.log({"時間": stamp, "模式": f"流程:{self.flow}", "步驟": self.step, "看到": seen,
                   "動作": actions, "擋掉": blocked, "程式替你": (getattr(self, "_last_step_rec", {}) or {}).get("程式", ""),
+                  "推理": str(getattr(self, "_last_reasoning", "") or "")[:1200],
                   "秒": round(time.time() - t0, 2),
                   "登記": self.stat["登記"],
                   # 2026-09-27 使用者：拆解每一步各花幾秒、用了幾個工具、有沒有用子代理（反射／快思／慢想這幾層模型呼叫）
