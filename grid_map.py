@@ -41,7 +41,8 @@ class GridMap:
         self.walked = set()                    # 真的走過的格子（不會被改成牆）
         self.scanned = []                      # 掃過的位置 [(x, y)]
         self.objects = []                      # 一維陣列：互動物／觸碰物的功能與使用方式
-        self.scale = None                      # 深度模型的 1 單位＝幾步（calibrate 量出來）
+        self.scale = None                      # 深度模型的 1 單位＝幾步（定案後不再變）
+        self.samples = []                      # 還沒定案前量到的樣本
         self.cam_back = 0.0                    # 第三人稱：鏡頭在自己後面幾步
         self.path = ""
 
@@ -365,7 +366,7 @@ class GridMap:
                 "量到次數": [[k[0], k[1], v] for k, v in self.hits.items()],
                 "走過": [list(c) for c in sorted(self.walked)],
                 "掃過的位置": [list(p) for p in self.scanned],
-                "深度比例": self.scale, "鏡頭在後面幾步": self.cam_back}
+                "深度比例": self.scale, "比例樣本": self.samples, "鏡頭在後面幾步": self.cam_back}
 
     def save(self, path=None):
         path = path or self.path
@@ -396,6 +397,7 @@ class GridMap:
             m.walked = {tuple(c) for c in d.get("走過") or []}
             m.scanned = [tuple(p) for p in d.get("掃過的位置") or []]
             m.scale = d.get("深度比例")
+            m.samples = list(d.get("比例樣本") or [])
             m.cam_back = float(d.get("鏡頭在後面幾步") or 0.0)
         except (TypeError, ValueError):
             pass

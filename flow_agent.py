@@ -9100,8 +9100,20 @@ class FlowAgent(ProcedureMixin, Agent):
                 if kk == "s":
                     self.press_key("s", float(a.get("d", 0.5) or 0.5))
                 else:
+                    _r0 = None
+                    try:
+                        if kk == "w" and self.gmap_on() and getattr(self, "gmap", None) is not None and not self.gmap.scale:
+                            _r0 = self.gmap_look()
+                    except Exception:  # noqa: BLE001
+                        _r0 = None
                     _real, _ = self.walk_guarded(kk, a.get("d", 0.5))
                     a["實走"] = _real                # 2026-09-30：位置用實際走的秒數算（被叫停就沒走那麼遠）
+                    try:
+                        if _r0 is not None:
+                            time.sleep(0.25)
+                            self.gmap_sample(_r0, self.gmap_look(), _real)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"   陣列地圖取樣失敗：{e}")
             else:
                 rest.append(a)
         self._busy = True
@@ -10246,6 +10258,7 @@ class FlowAgent(ProcedureMixin, Agent):
     GMAP_SCAN_TURNS = 12         # 掃一圈轉幾次（每次 30 度：畫面寬約 70 度，每個方向會在兩三面裡出現）
     GMAP_SKIP_CENTER = 10.0      # 正中間 ±幾度的視線不用：第三人稱時那裡是自己的背影，不是牆
     GMAP_MAX_DIST = 10.0         # 幾步以外的深度不當牆（太遠不準）
+    GMAP_DEFAULT_SCALE = 0.5     # 量不出來時的預設：深度 1 單位＝0.5 步（09/30 第一次實測量到 0.50）
     GMAP_CHECK_EVERY = 6         # 每幾輪用當下這一張畫面核對一次位置（不轉頭）
 
     def gmap_on(self):
@@ -10345,6 +10358,33 @@ class FlowAgent(ProcedureMixin, Agent):
         zs = sorted(z for a, z in rays if abs(a) <= 28) or sorted(z for a, z in rays)
         return zs[len(zs) // 2] if zs else None
 
+    def gmap_sample(self, r0, r1, walked):
+        """他自己往前走了一段：用走之前、走之後兩張畫面的深度差，量一次「深度 1 單位＝幾步」。
+
+        每一條視線各自比，取中位數；不合理的（沒變近、或算出來離譜）丟掉。湊滿 5 個取中位數定案，定案後就不再變
+        （同一張地圖從頭到尾要用同一把尺）。
+        """
+        gm = getattr(self, "gmap", None)
+        if gm is None or gm.scale or not r0 or not r1 or walked < 0.6:
+            return
+        a1 = {round(a): z for a, z in r1["rays"]}
+        diffs = sorted(z - a1[round(a)] for a, z in r0["rays"] if round(a) in a1 and z <= 14.0)
+        if len(diffs) < 3:
+            return
+        dd = diffs[len(diffs) // 2]
+        v = (walked / dd) if dd > 0.3 else None
+        ok = v is not None and 0.08 <= v <= 1.5
+        if ok:
+            gm.samples.append(round(v, 3))
+            if len(gm.samples) >= 5:
+                xs = sorted(gm.samples)
+                gm.scale = xs[len(xs) // 2]
+                print(f"   🗺 陣列地圖：比例定案 1 單位＝{gm.scale:.2f} 步（{len(xs)} 次樣本的中位數：{xs}）")
+                self.gmap_log("比例定案", 比例=gm.scale, 樣本=xs, 預設=False)
+            gm.save()
+        self.gmap_log("量比例樣本", 走了=round(walked, 2), 各線差的中位數=round(dd, 3), 這次=None if v is None else round(v, 3),
+                      採用=ok, 目前樣本數=len(gm.samples))
+
     def gmap_scan(self):
         """第一次到這個地方：程式自己原地轉一圈，用視覺深度把四周的牆畫進陣列。轉完回到原本的朝向。"""
         gm = self.gmap
@@ -10367,27 +10407,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 return False
         x0, y0 = self.pos[0], self.pos[1]
         if not gm.scale:
-            # 還不知道「深度 1 單位＝幾步」：朝最空的方向走一小段，看正前方深度少了多少
-            best = max(views, key=lambda v: self.gmap_front(v[1]) or 0)
-            turn = ((best[0] - getattr(self, "yaw", 0.0)) + 180) % 360 - 180
-            self.turn_by(turn)
-            time.sleep(0.4)
-            r0 = self.gmap_look()
-            walked, why = self.walk_guarded("w", 1.2)
-            th = math.radians(getattr(self, "yaw", 0.0))
-            self.pos[0] += math.sin(th) * walked
-            self.pos[1] += math.cos(th) * walked
-            time.sleep(0.3)
-            r1 = self.gmap_look()
-            z0, z1 = self.gmap_front(r0["rays"]), self.gmap_front(r1["rays"])
-            sc = gm.calibrate(z0, z1, walked) if (z0 and z1 and walked >= 0.5 and not why) else None
-            self.gmap_log("量比例", 走了=walked, 被擋=why[:30], 深度前=z0, 深度後=z1, 比例=sc)
-            self.turn_by(-turn)
-            if not sc:
-                print(f"   🗺 陣列地圖：比例沒量成（走 {walked:.1f}s、深度 {z0}→{z1}、{why or '深度沒變'}），下次再試")
-                self._gmap_retry_at = self.stat.get("輪數", 0) + 8
-                return False
-            print(f"   🗺 陣列地圖：量到深度比例 1 單位＝{sc:.2f} 步（走 {walked:.1f}s，深度 {z0:.2f}→{z1:.2f}）")
+            return False                       # 比例還沒定（見 gmap_sample），先不畫牆
         new = 0
         for yaw, rays, me in views:
             new += gm.scan(x0, y0, yaw, rays, max_dist=self.GMAP_MAX_DIST, self_depth=me)
@@ -10444,6 +10464,16 @@ class FlowAgent(ProcedureMixin, Agent):
             rnd = self.stat.get("輪數", 0)
             busy = bool(getattr(self, "_plan_q", None)) or getattr(self, "desk_lock", 0) >= 2 or self.dry
             level = abs(getattr(self, "pitch_deg", 0.0)) <= 20
+            if not gm.scale:
+                # 深度 1 單位＝幾步，要靠他自己往前走的時候量（gmap_sample），湊滿 5 次取中位數才定案。
+                # 等了 40 輪還湊不滿（他一直沒往前走成），就先用預設值，地圖才畫得起來。
+                self._gmap_wait = getattr(self, "_gmap_wait", 0) + 1
+                if self._gmap_wait >= 40:
+                    gm.scale = self.GMAP_DEFAULT_SCALE
+                    gm.save()
+                    print(f"   🗺 陣列地圖：等了 40 輪樣本只有 {len(gm.samples)} 個，比例先用預設 {gm.scale} 步／單位")
+                    self.gmap_log("比例定案", 比例=gm.scale, 樣本=gm.samples, 預設=True)
+                return
             if (not busy and level and gm.need_scan(self.pos[0], self.pos[1])
                     and rnd >= getattr(self, "_gmap_retry_at", 0)):
                 self.gmap_scan()
