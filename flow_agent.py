@@ -24,6 +24,7 @@ flow_agent.py — 工作流程版代理（取代寫死的技能狀態機）
 import argparse
 import glob
 import json
+import math
 import os
 import re
 import sys
@@ -2986,6 +2987,15 @@ class FlowAgent(ProcedureMixin, Agent):
                               "最後": datetime.now().strftime("%m/%d %H:%M")}
         self.save_spots()
         print(f"   🗺 腦中地圖記下互動點「{nm}」：x{self.pos[0]:+.1f} y{self.pos[1]:+.1f} 朝向 {self.yaw:.0f}°")
+        try:
+            if self.gmap_on() and getattr(self, "gmap", None) is not None:
+                th = math.radians(getattr(self, "yaw", 0.0))
+                ox, oy = self.pos[0] + math.sin(th), self.pos[1] + math.cos(th)      # 互動物在他面前那一格
+                self.gmap.add_object("互動物", ox, oy, nm, "", how)
+                self.gmap.save()
+                self.gmap_log("記物件", 種類="互動物", 名稱=nm, 格=list(self.gmap.cell_of(ox, oy)), 用法=how, 來源="互動成功自動記")
+        except Exception as e:  # noqa: BLE001
+            print(f"   陣列地圖記互動物失敗：{e}")
 
     def goto_remembered(self, name, why=""):
         """走到腦中地圖上記過的點（互動點或地點）——先轉到那個方位，再走那麼多秒。"""
@@ -2998,6 +3008,11 @@ class FlowAgent(ProcedureMixin, Agent):
         elif nm in (getattr(self, "map", {}) or {}):
             x, y = self.map[nm]
             tgt = (x, y, "地點")
+        if tgt is None and self.gmap_on() and getattr(self, "gmap", None) is not None:
+            o = self.gmap.find_object(nm)
+            if o:
+                ox, oy = self.gmap.center_of(*o["格"])
+                tgt = (ox, oy, o["種類"])
         if tgt is None:
             print(f"   ⚠ 腦中地圖上沒有「{nm}」")
             return False
@@ -3016,6 +3031,11 @@ class FlowAgent(ProcedureMixin, Agent):
         if dist < 0.4:
             print(f"   🧭 你已經在「{nm}」旁邊了（{dist:.1f}）")
             return True
+        try:
+            if self.gmap_walk(nm, x, y):        # 2026-09-30：有陣列地圖就照陣列找一條不穿牆的路
+                return True
+        except Exception as e:  # noqa: BLE001
+            print(f"   照陣列地圖走失敗，改走直線：{e}")
         ang = (math.degrees(math.atan2(vx, vy)) - getattr(self, "yaw", 0.0) + 540) % 360 - 180
         print(f"   🧭 照腦中地圖走去「{nm}」（{kind}）：轉 {ang:+.0f}°、走 {min(dist, 6.0):.1f} 秒"
               + (f"（{why}）" if why else ""))
@@ -3028,7 +3048,10 @@ class FlowAgent(ProcedureMixin, Agent):
             left -= step
             time.sleep(0.15)
         secs = max(0.3, min(6.0, dist))
-        self.walk_guarded("w", secs)
+        _w, _ = self.walk_guarded("w", secs)
+        _th = math.radians(getattr(self, "yaw", 0.0))      # 2026-09-30：程式帶路走的也要算進位置（以前沒算，地圖會漂）
+        self.pos[0] += math.sin(_th) * _w
+        self.pos[1] += math.cos(_th) * _w
         self.note_progress("照腦中地圖走過去")
         self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] "
                             f"你照腦中地圖走去「{nm}」（轉 {ang:+.0f} 度、走 {secs:.1f} 秒）")
@@ -4170,6 +4193,7 @@ class FlowAgent(ProcedureMixin, Agent):
         print(f"[地圖] 他自己記過 {len(self.map)} 個地方：{'、'.join(self.map) or '（還沒有）'}")
 
     def save_map(self):
+        self.gmap_save()
         try:
             with open(self.space_file("地圖.json"), "w", encoding="utf-8") as f:
                 json.dump({"地點": {k: [round(v[0], 2), round(v[1], 2)] for k, v in self.map.items()},
@@ -4189,6 +4213,11 @@ class FlowAgent(ProcedureMixin, Agent):
         if not pts or math.hypot(self.pos[0] - pts[-1][0], self.pos[1] - pts[-1][1]) > 0.4:
             pts.append((round(self.pos[0], 1), round(self.pos[1], 1)))
             self.trail_pts = pts[-4000:]
+        try:
+            if self.gmap_on() and getattr(self, "gmap", None) is not None:
+                self.gmap.mark_walked(self.pos[0], self.pos[1])
+        except Exception:  # noqa: BLE001
+            pass
 
     def mark_wall(self):
         """被擋住的時候，把「前方一步」的位置記成障礙——累積起來就是牆的形狀。"""
@@ -4200,6 +4229,14 @@ class FlowAgent(ProcedureMixin, Agent):
         if not any(math.hypot(wx - a, wy - b) < 0.5 for a, b in w[-60:]):
             w.append((round(wx, 1), round(wy, 1)))
             self.wall_pts = w[-1500:]
+        try:
+            if self.gmap_on() and getattr(self, "gmap", None) is not None:
+                c = self.gmap.mark_bump(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0))
+                if c:
+                    self.stat["陣列地圖撞牆"] = self.stat.get("陣列地圖撞牆", 0) + 1
+                    self.gmap_log("撞牆", 格=list(c))
+        except Exception:  # noqa: BLE001
+            pass
 
     def odometry(self, actions):
         """用他自己做的動作推算位置與朝向（走幾秒＝幾步，轉多少像素＝轉幾度）。"""
@@ -4217,6 +4254,8 @@ class FlowAgent(ProcedureMixin, Agent):
                     d = 0.0
                 if k not in ("w", "s", "a", "d") or d <= 0:
                     continue
+                if isinstance(a.get("實走"), (int, float)):
+                    d = float(a["實走"])
                 th = math.radians(self.yaw)
                 fx, fy = math.sin(th), math.cos(th)
                 rx, ry = math.cos(th), -math.sin(th)
@@ -6336,7 +6375,8 @@ class FlowAgent(ProcedureMixin, Agent):
 
     # ---------------- 快思三步佇列（2026-09-29 使用者：快思直接出前後三步的詳細動作，反射只檢查）
     PLAN3_ACTS = ("key", "hold", "click", "look", "aim", "scroll", "wait", "點字", "走到記過的", "水平歸零",
-                  "這步做完", "大動作完成", "寫步驟", "我在", "標點", "切空間", "記知識", "記問題", "基礎確認")
+                  "這步做完", "大動作完成", "寫步驟", "我在", "標點", "切空間", "記知識", "記問題", "基礎確認",
+                  "記互動物", "記觸碰物")
 
     def plan3_ask(self):
         """快思那一輪多要的東西：三步、每步附動作與「做完會看到什麼」。"""
@@ -8158,6 +8198,8 @@ class FlowAgent(ProcedureMixin, Agent):
         self.tick("截圖")
         self._seen_reflex = self.reflex_see(uri)
         self.tick("反射")
+        self.gmap_tick()                   # 2026-09-30：陣列地圖（沒掃過的地方用視覺掃一圈；平常只核對）
+        self.tick("陣列地圖")
         try:
             self.scene_tick()              # 2026-09-21：場景換了就先做基礎確認
             self.level_tick()              # 2026-09-23：等級表（開機一次；表改了就重審他自己的規則）
@@ -8891,6 +8933,12 @@ class FlowAgent(ProcedureMixin, Agent):
                 except Exception as e:  # noqa: BLE001
                     print(f"   標點失敗：{e}")
                 actions.remove(a)
+            elif a.get("t") in ("記互動物", "記觸碰物"):
+                try:
+                    self.gmap_add(str(a.get("t"))[1:], a)
+                except Exception as e:  # noqa: BLE001
+                    print(f"   記物件失敗：{e}")
+                actions.remove(a)
             elif a.get("t") in ("到標點", "對標點", "我在標點"):
                 try:
                     self.hit_point(a)
@@ -9052,7 +9100,8 @@ class FlowAgent(ProcedureMixin, Agent):
                 if kk == "s":
                     self.press_key("s", float(a.get("d", 0.5) or 0.5))
                 else:
-                    self.walk_guarded(kk, a.get("d", 0.5))
+                    _real, _ = self.walk_guarded(kk, a.get("d", 0.5))
+                    a["實走"] = _real                # 2026-09-30：位置用實際走的秒數算（被叫停就沒走那麼遠）
             else:
                 rest.append(a)
         self._busy = True
@@ -10190,6 +10239,306 @@ class FlowAgent(ProcedureMixin, Agent):
     def verify_text(self):
         return getattr(self, "verify", "") or "（這一輪還沒比對）"
 
+    # ---------------- 陣列地圖（2026-09-30 使用者定；細節在 grid_map.py 開頭）
+    # 整張地圖用二維陣列存、出生點是原點；牆壁用視覺深度畫；三種元素：牆壁／互動物／觸碰物。
+    # 只有第一次到一個地方才用視覺掃一圈，之後靠陣列地圖＋水平儀（程式自己送的轉頭量）推算；路線用 A* 在陣列上找。
+    # 開關：遊戲.json 的 "陣列地圖": true。所有事件記在 記憶/陣列地圖紀錄.jsonl（掃描、量比例、撞牆、核對、路線、物件）。
+    GMAP_SCAN_TURNS = 12         # 掃一圈轉幾次（每次 30 度：畫面寬約 70 度，每個方向會在兩三面裡出現）
+    GMAP_SKIP_CENTER = 10.0      # 正中間 ±幾度的視線不用：第三人稱時那裡是自己的背影，不是牆
+    GMAP_MAX_DIST = 10.0         # 幾步以外的深度不當牆（太遠不準）
+    GMAP_CHECK_EVERY = 6         # 每幾輪用當下這一張畫面核對一次位置（不轉頭）
+
+    def gmap_on(self):
+        return bool(self.gcfg.get("陣列地圖")) and not getattr(self, "_gmap_dead", False)
+
+    def gmap_file(self):
+        pid = None
+        try:
+            pid = self.current_place()
+        except Exception:  # noqa: BLE001
+            pass
+        return self.space_file(f"陣列地圖_{pid or '未知'}.json")
+
+    def gmap_log(self, kind, **kw):
+        """陣列地圖的每一件事都記一筆，之後才比得出有沒有改善。"""
+        try:
+            rec = {"時間": datetime.now().strftime("%m/%d %H:%M:%S"), "輪": self.stat.get("輪數", 0), "事件": kind,
+                   "位置": [round(self.pos[0], 2), round(self.pos[1], 2)], "朝向": round(getattr(self, "yaw", 0.0) % 360, 1)}
+            rec.update(kw)
+            with open(os.path.join(self.dir, "陣列地圖紀錄.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + NL)
+        except OSError:
+            pass
+
+    def gmap_load(self):
+        """載入現在這個場景（Roblox place）的陣列地圖；場景換了就換一張，並把出生點當原點。"""
+        if not self.gmap_on():
+            return
+        try:
+            import grid_map
+            p = self.gmap_file()
+            old = getattr(self, "gmap", None)
+            if old is not None and old.path == p:
+                return
+            if old is not None:
+                old.save()
+                # 換場景＝在新的地方出生：座標與朝向歸零，這張地圖的原點就是出生點
+                self.pos, self.yaw = [0.0, 0.0], 0.0
+            self.gmap = grid_map.GridMap.load(p)
+            c = self.gmap.counts()
+            print(f"[陣列地圖] {os.path.basename(p)}：牆壁 {c[grid_map.WALL]} 格、空地 {c[grid_map.FREE]} 格、"
+                  f"互動物／觸碰物 {len(self.gmap.objects)} 個、掃過 {len(self.gmap.scanned)} 處、深度比例 {self.gmap.scale}")
+            self.gmap_log("載入", 檔=os.path.basename(p), 牆=c[grid_map.WALL], 空地=c[grid_map.FREE],
+                          物件=len(self.gmap.objects), 換場景=old is not None)
+        except Exception as e:  # noqa: BLE001
+            print(f"   陣列地圖載入失敗：{e}")
+
+    def gmap_save(self):
+        try:
+            if getattr(self, "gmap", None) is not None:
+                self.gmap.save()
+        except Exception as e:  # noqa: BLE001
+            print(f"   陣列地圖存檔失敗：{e}")
+
+    def gmap_eye(self):
+        """本機深度模型（第一次用才載入）。載不起來就整個功能停用，不拖累代理。"""
+        if getattr(self, "_depth_eye", None) is None:
+            try:
+                import depth_eye
+                t0 = time.time()
+                self._depth_eye = depth_eye.DepthEye()
+                print(f"[陣列地圖] 深度模型載入完成（{time.time() - t0:.1f}s，{self._depth_eye.device}）")
+            except Exception as e:  # noqa: BLE001
+                print(f"[陣列地圖] 深度模型載不起來，這次開機停用陣列地圖的視覺部分：{e}")
+                self._gmap_dead = True
+                self.gmap_log("深度模型失敗", 原因=str(e)[:120])
+                return None
+        return self._depth_eye
+
+    def gmap_look(self, im=None):
+        """看一眼現在的畫面 → 各方向的深度。人（會走）不算牆；自己的背影用來量鏡頭離自己多遠。"""
+        eye = self.gmap_eye()
+        if eye is None:
+            return None
+        im = im or self.grab_still(640)
+        skip, me = [], None
+        try:
+            dets, stamp = self.eyes.latest()
+            if stamp and time.time() - stamp < 2.0:
+                for lab, arr in dets.items():
+                    for d in arr[:3]:
+                        box = (d["cx"] - d["w"] / 2, d["cy"] - d["h"] / 2, d["cx"] + d["w"] / 2, d["cy"] + d["h"] / 2)
+                        if Eyes.is_self(d):
+                            me = box
+                        elif lab in ("person", "people", "player", "character"):
+                            skip.append((box[0], box[2]))
+        except Exception:  # noqa: BLE001
+            pass
+        r = eye.rays(im, n=9, skip=skip, self_box=me)
+        # 正中間那幾條視線會打到自己的背影（第三人稱），一律不用；掃一圈時每個方向都會在別面的側邊再出現
+        r["rays"] = [(a, z) for a, z in r["rays"] if abs(a) >= self.GMAP_SKIP_CENTER]
+        return r
+
+    @staticmethod
+    def gmap_front(rays):
+        """正前方（±28 度內、已經去掉正中間自己的背影）的深度中位數。"""
+        zs = sorted(z for a, z in rays if abs(a) <= 28) or sorted(z for a, z in rays)
+        return zs[len(zs) // 2] if zs else None
+
+    def gmap_scan(self):
+        """第一次到這個地方：程式自己原地轉一圈，用視覺深度把四周的牆畫進陣列。轉完回到原本的朝向。"""
+        gm = self.gmap
+        t0 = time.time()
+        views = []
+        first = self.grab_still(320)
+        for i in range(self.GMAP_SCAN_TURNS):
+            r = self.gmap_look()
+            if r is None:
+                return False
+            views.append((getattr(self, "yaw", 0.0) % 360, r["rays"], r["self"]))
+            self.turn_by(360.0 / self.GMAP_SCAN_TURNS)
+            time.sleep(0.4)
+            if i == 0 and frame_diff(first, self.grab_still(320)) < 3.0:
+                # 轉了畫面卻沒變：有面板蓋著、游標沒鎖、或根本不在 3D 場景裡——這種畫面量出來的深度不能畫成牆
+                self.turn_by(-360.0 / self.GMAP_SCAN_TURNS)
+                print("   🗺 陣列地圖：想掃一圈，但轉頭畫面沒跟著動（面板擋住／不在場景裡），這次不掃")
+                self.gmap_log("掃描放棄", 原因="轉頭畫面沒變")
+                self._gmap_retry_at = self.stat.get("輪數", 0) + 5
+                return False
+        x0, y0 = self.pos[0], self.pos[1]
+        if not gm.scale:
+            # 還不知道「深度 1 單位＝幾步」：朝最空的方向走一小段，看正前方深度少了多少
+            best = max(views, key=lambda v: self.gmap_front(v[1]) or 0)
+            turn = ((best[0] - getattr(self, "yaw", 0.0)) + 180) % 360 - 180
+            self.turn_by(turn)
+            time.sleep(0.4)
+            r0 = self.gmap_look()
+            walked, why = self.walk_guarded("w", 1.2)
+            th = math.radians(getattr(self, "yaw", 0.0))
+            self.pos[0] += math.sin(th) * walked
+            self.pos[1] += math.cos(th) * walked
+            time.sleep(0.3)
+            r1 = self.gmap_look()
+            z0, z1 = self.gmap_front(r0["rays"]), self.gmap_front(r1["rays"])
+            sc = gm.calibrate(z0, z1, walked) if (z0 and z1 and walked >= 0.5 and not why) else None
+            self.gmap_log("量比例", 走了=walked, 被擋=why[:30], 深度前=z0, 深度後=z1, 比例=sc)
+            self.turn_by(-turn)
+            if not sc:
+                print(f"   🗺 陣列地圖：比例沒量成（走 {walked:.1f}s、深度 {z0}→{z1}、{why or '深度沒變'}），下次再試")
+                self._gmap_retry_at = self.stat.get("輪數", 0) + 8
+                return False
+            print(f"   🗺 陣列地圖：量到深度比例 1 單位＝{sc:.2f} 步（走 {walked:.1f}s，深度 {z0:.2f}→{z1:.2f}）")
+        new = 0
+        for yaw, rays, me in views:
+            new += gm.scan(x0, y0, yaw, rays, max_dist=self.GMAP_MAX_DIST, self_depth=me)
+        gm.note_scanned(x0, y0)
+        gm.save()
+        dt = time.time() - t0
+        self.stat["陣列地圖掃描"] = self.stat.get("陣列地圖掃描", 0) + 1
+        print(f"   🗺 陣列地圖：在 ({x0:+.1f},{y0:+.1f}) 掃了一圈，新畫 {new} 格牆（{dt:.1f}s）；這附近之後不用再掃")
+        self.gmap_log("掃描", 在=[round(x0, 2), round(y0, 2)], 新牆=new, 秒=round(dt, 1), 鏡頭在後=round(gm.cam_back, 2),
+                      各面正前方步數=[round((self.gmap_front(v[1]) or 0) * gm.scale, 1) for v in views])
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 程式替你原地轉了一圈，用視覺深度把四周的牆畫進陣列地圖"
+                            f"（新畫 {new} 格牆），已轉回原本的朝向")
+        return True
+
+    def gmap_check(self, rays_pack):
+        """不轉頭，用當下這一張畫面核對：照地圖這個方向應該幾步有牆，實際量到幾步。"""
+        gm = self.gmap
+        if not gm.scale:
+            return
+        obs = []
+        for a, z in rays_pack["rays"]:
+            d = z * gm.scale / max(0.2, math.cos(math.radians(a))) - gm.cam_back
+            if 0.5 <= d <= self.GMAP_MAX_DIST:
+                obs.append((a, d))
+        if len(obs) < 3:
+            return
+        r = gm.check_pose(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), obs)
+        if r["誤差"] is None:
+            return
+        self.stat["陣列地圖核對"] = self.stat.get("陣列地圖核對", 0) + 1
+        if r["符合"]:
+            self.gmap_hint = f"👁 視覺核對：前方的牆跟陣列地圖對得上（平均差 {r['誤差']:.1f} 步）。"
+        else:
+            self.stat["陣列地圖核對不符"] = self.stat.get("陣列地圖核對不符", 0) + 1
+            sug = r["建議位置"]
+            self.gmap_hint = (f"👁 視覺核對：**對不上**——照陣列地圖你前方的牆跟實際量到的平均差 {r['誤差']:.1f} 步，位置可能漂了。"
+                              + (f"比較像是在 ({sug[0]:+.0f},{sug[1]:+.0f})（差 {r['建議誤差']:.1f} 步）。認得出自己在哪就用「我在」校正。"
+                                 if sug else "附近找不到對得上的位置，程式下一輪會重掃這裡。"))
+            if not sug:
+                gm.scanned = [p for p in gm.scanned if math.hypot(p[0] - self.pos[0], p[1] - self.pos[1]) > 4.0]
+        self.gmap_log("核對", 誤差=round(r["誤差"], 2), 符合=r["符合"],
+                      建議=[round(v, 1) for v in r["建議位置"]] if r["建議位置"] else None)
+
+    def gmap_tick(self):
+        """每輪一次（截圖之後、組面板之前）。"""
+        if not self.gmap_on():
+            return
+        try:
+            self.gmap_load()
+            gm = getattr(self, "gmap", None)
+            if gm is None:
+                return
+            gm.mark_walked(self.pos[0], self.pos[1])
+            rnd = self.stat.get("輪數", 0)
+            busy = bool(getattr(self, "_plan_q", None)) or getattr(self, "desk_lock", 0) >= 2 or self.dry
+            level = abs(getattr(self, "pitch_deg", 0.0)) <= 20
+            if (not busy and level and gm.need_scan(self.pos[0], self.pos[1])
+                    and rnd >= getattr(self, "_gmap_retry_at", 0)):
+                self.gmap_scan()
+            elif level and gm.scale and rnd % self.GMAP_CHECK_EVERY == 0:
+                r = self.gmap_look()
+                if r:
+                    self.gmap_check(r)
+        except Exception as e:  # noqa: BLE001
+            print(f"   陣列地圖這一輪出錯（不影響他玩）：{e}")
+            self.gmap_log("出錯", 原因=str(e)[:160])
+
+    def gmap_text(self):
+        gm = getattr(self, "gmap", None)
+        if gm is None:
+            return ""
+        hint = getattr(self, "gmap_hint", "") or ""
+        tail = ("這張地圖是**陣列**：出生點是原點，牆是程式第一次到那裡時用視覺深度畫的，之後你的位置用「走了幾秒＋轉了幾度」推算。"
+                + NL + '要去某一格或某個記過的東西：{"t":"走到記過的","name":"名字"}，程式會照陣列找一條不穿牆的路帶你走。'
+                + NL + '互動成功的東西程式會自動記成互動物；你自己也可以記：'
+                + '{"t":"記互動物","name":"名字","功能":"按了會怎樣","用法":"怎麼按","前":1}、'
+                + '{"t":"記觸碰物","name":"名字","功能":"站上去會怎樣","用法":"怎麼站"}（記在你腳下那一格）。')
+        return NL.join(x for x in (gm.text(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), radius=8), hint, tail) if x)
+
+    def gmap_add(self, kind, a):
+        """他自己記的互動物／觸碰物。互動物在他前面（不可穿透，所以不會是他站的那一格）；觸碰物預設在腳下。"""
+        gm = getattr(self, "gmap", None)
+        if gm is None:
+            print("   ⚠ 陣列地圖沒開，記不了")
+            return
+        nm = str(a.get("name") or a.get("名稱") or "").strip()[:20]
+        if not nm:
+            print(f'   ⚠ 要寫 name：{{"t":"記{kind}","name":"名字","功能":"…","用法":"…"}}')
+            return
+        try:
+            ahead = float(a.get("前", 1 if kind == "互動物" else 0) or 0)
+        except (TypeError, ValueError):
+            ahead = 1.0 if kind == "互動物" else 0.0
+        if kind == "互動物":
+            ahead = max(1.0, ahead)
+        th = math.radians(getattr(self, "yaw", 0.0))
+        x, y = self.pos[0] + math.sin(th) * ahead, self.pos[1] + math.cos(th) * ahead
+        i = gm.add_object(kind, x, y, nm, str(a.get("功能") or ""), str(a.get("用法") or a.get("使用方式") or ""))
+        gm.save()
+        print(f"   🗺 陣列地圖記下{kind}「{nm}」：格 {gm.cell_of(x, y)}（一維陣列第 {i} 筆）")
+        self.gmap_log("記物件", 種類=kind, 名稱=nm, 格=list(gm.cell_of(x, y)), 功能=str(a.get("功能") or "")[:40],
+                      用法=str(a.get("用法") or "")[:40], 來源="他自己")
+        self.note_progress(f"記{kind}")
+
+    def gmap_walk(self, name, x, y, budget=6.0):
+        """照陣列地圖走：A* 找一條不穿牆的路，換成「轉幾度、走幾秒」照做。回傳 True＝有照陣列帶路。"""
+        gm = getattr(self, "gmap", None)
+        if gm is None or not self.gmap_on():
+            return False
+        segs = gm.route((self.pos[0], self.pos[1]), getattr(self, "yaw", 0.0), (x, y))
+        if not segs:
+            self.gmap_log("路線", 去=name, 結果="找不到路")
+            return False
+        plan = [{"轉": s["轉"], "走": s["走"]} for s in segs]
+        print(f"   🗺 照陣列地圖走去「{name}」：" + " → ".join(f"轉 {s['轉']:+.0f}° 走 {s['走']:.1f}s" for s in segs[:6]))
+        used, done, why = 0.0, 0, ""
+        for s in segs:
+            if used >= budget:
+                why = "這一輪的時間用完，下一輪接著走"
+                break
+            left = s["轉"]
+            for _ in range(8):
+                if abs(left) < 4:
+                    break
+                step = max(-1, min(1, left)) * min(abs(left), self.MAX_DX / (self.px_per_pct or 4.0) * 0.70)
+                self.turn_by(step)
+                left -= step
+                time.sleep(0.12)
+            need = min(s["走"], budget - used)
+            while need > 0.15:
+                walked, r = self.walk_guarded("w", min(need, 3.0))
+                th = math.radians(getattr(self, "yaw", 0.0))
+                self.pos[0] += math.sin(th) * walked
+                self.pos[1] += math.cos(th) * walked
+                gm.mark_walked(self.pos[0], self.pos[1])
+                used += walked
+                need -= max(walked, 0.15)
+                if r:
+                    why = r
+                    break
+            if why:
+                break
+            done += 1
+        dist = math.hypot(x - self.pos[0], y - self.pos[1])
+        self.stat["陣列地圖帶路"] = self.stat.get("陣列地圖帶路", 0) + 1
+        self.gmap_log("路線", 去=name, 計畫=plan[:8], 做完段數=done, 走了=round(used, 1), 停因=why[:40], 離目標=round(dist, 1))
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 程式照陣列地圖帶你走去「{name}」："
+                            f"{len(segs)} 段走了 {done} 段、{used:.1f} 秒，離目標還有 {dist:.1f} 步" + (f"（停下來：{why[:30]}）" if why else ""))
+        self.note_progress("照陣列地圖走")
+        return True
+
     # ---------------- 探索地圖：走過的、牆、還沒去過的
     CELL = 2.0               # 一格 2 步
     EXPLORE_R = 9            # 地圖畫他周圍幾格
@@ -10230,6 +10579,8 @@ class FlowAgent(ProcedureMixin, Agent):
         看不到邊界，他就永遠只在走過的那幾格裡繞。
         """
         import math
+        if self.gmap_on() and getattr(self, "gmap", None) is not None:
+            return self.gmap_text()         # 2026-09-30：開了陣列地圖就用它取代舊的探索格子
         walked, walls, named = self.explore_grid()
         front = self.frontier(walked, walls)
         me = self.cell_of(self.pos[0], self.pos[1])
