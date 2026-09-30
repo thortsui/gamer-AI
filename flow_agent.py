@@ -1735,6 +1735,8 @@ class FlowAgent(ProcedureMixin, Agent):
         if not self.gcfg.get("強制腦內地圖"):
             return ""
         self._goto_place = ""
+        if getattr(self, "_reflex_check", False):
+            return ""          # 2026-09-30：檢查輪只回 ok，不回「我在」，也不為了它再問一次模型
         here = str(o.get("我在") or "").strip()
         how = ""
         if not here:
@@ -6419,8 +6421,9 @@ class FlowAgent(ProcedureMixin, Agent):
         return (body + NL * 2
                 + "**你只做一件事：檢查。** 看畫面判斷上一步有沒有正常執行（畫面是不是變成快思說的樣子、或至少朝那個方向變了）。" + NL
                 + "做成了 → ok:true，程式馬上做下一步；沒做成、畫面沒變、跳出沒看過的東西、被傳送、死掉 → ok:false，換快思重排。" + NL
-                + "**不要自己送動作。**只輸出 JSON："
-                + '{"s":"看到什麼(<=14字)","區":"你現在在哪一區(<=8字)","ok":true或false,"為什麼":"(<=20字)","task":"右上角任務原文"}')
+                # 2026-09-30 使用者：反射輪只檢查快思交代的事有沒有做到，不需要輸出別的。
+                # 以前還要它寫 s／區／為什麼／task（約 50～60 個 token＝5 秒），現在只回 ok。
+                + '**不要自己送動作，也不要寫別的。**只輸出：{"ok":true} 或 {"ok":false}')
 
     STEP_LOG = "步驟日誌.jsonl"
 
@@ -8349,7 +8352,8 @@ class FlowAgent(ProcedureMixin, Agent):
             # 2026-09-29：有快思排好的佇列時，反射只做檢查（reflex_check_panel），不決定動作
             content_use = [{"type": "image_url", "image_url": {"url": uri}},
                            {"type": "text", "text": self.reflex_check_panel() if getattr(self, "_reflex_check", False) else self.reflex_panel()}]
-            tokens_use = min(600, self.args.max_tokens)
+            # 檢查輪只回 {"ok":true/false}（2026-09-30），上限壓小，答多了也不會拖時間
+            tokens_use = 24 if getattr(self, "_reflex_check", False) else min(600, self.args.max_tokens)
         else:
             content_use, tokens_use = content, self.args.max_tokens
         raw, trunc, ttft, _ = stream_json(self.endpoint, self.model, self.sys_prompt(mode),
@@ -8359,6 +8363,13 @@ class FlowAgent(ProcedureMixin, Agent):
         self.tick("快思")
         self.log_panel(mode, content_use, raw)
         o = parse_json_loose(raw) or {}
+        if getattr(self, "_reflex_check", False) and "ok" not in o:
+            # 檢查輪只回 ok：他沒包成 JSON（只寫 true／false）也認得；兩個都沒有就當沒做成
+            _r = str(raw or "").lower()
+            if "true" in _r and "false" not in _r:
+                o["ok"] = True
+            elif "false" in _r:
+                o["ok"] = False
         try:
             o = self.plan3_apply(mode, o)      # 2026-09-29：快思的三步進佇列；反射檢查結果決定做下一步或換快思
         except Exception as e:  # noqa: BLE001
@@ -8398,7 +8409,8 @@ class FlowAgent(ProcedureMixin, Agent):
         except Exception as e:  # noqa: BLE001
             print(f"   記區失敗：{e}")
         tk = str(o.get("task") or "").strip()[:20]
-        self.no_task_rounds = 0 if tk else getattr(self, "no_task_rounds", 0) + 1
+        if not getattr(self, "_reflex_check", False):     # 檢查輪不回 task，不算「沒回報任務」
+            self.no_task_rounds = 0 if tk else getattr(self, "no_task_rounds", 0) + 1
         if tk and tk != getattr(self, "cur_task", ""):
             print(f"   🎯 右上角任務：{tk}")
             self.note_progress("任務換了")
