@@ -7739,6 +7739,56 @@ class FlowAgent(ProcedureMixin, Agent):
         print("   👁✏ 教眼睛：" + "；".join([f"{r['yolo']}→{r['其實是']}" for r in rec["yolo更正"]]
                                        + [f"沒框到 {w}" for w in missing]))
 
+    # 2026-09-30 使用者：「試試看不寫」——看畫面那一步慢在**寫字**（約 80 個 token＝7 秒），不是慢在看。
+    # 預設不叫模型寫描述：「看到什麼」由程式用 YOLO 的框＋OCR 的字組出來（0 秒），
+    # 模型只回一個詞（鏡頭在看 天花板／地板／水平），水平儀校正照舊每輪都有。
+    # 代價：這個模式下不收 yolo更正／沒框到（教眼睛的素材不累積）。
+    # 要切回舊的（模型寫一句描述＋更正）：環境變數 GAMER_SEE_WRITE=on。
+    SEE_WRITE = str(os.environ.get("GAMER_SEE_WRITE", "off")).lower() in ("on", "1", "yes", "開")
+    SEE_PITCH_ASK = ("看這張遊戲畫面，只判斷鏡頭在看哪裡——用內容判斷，不是用格紋："
+                     "看到嵌燈、燈管、管線、格板從上方延伸＝天花板；"
+                     "看到椅腳、桌腳、地毯、掉在地上的東西、自己的影子＝地板；"
+                     "看到牆、櫃檯、門、螢幕、人＝水平。牆面的灰色格紋不是天花板。"
+                     "只輸出一個詞：天花板、地板、水平、不確定。")
+
+    def seen_by_program(self):
+        """不叫模型：用 YOLO 框到的東西＋OCR 讀到的字，組成「看到什麼」那一句。"""
+        parts = []
+        try:
+            rows = self.yolo_rows()
+            if rows:
+                parts.append("框到 " + "、".join(r.split("、")[0] + "）" if "、" in r else r for r in rows[:5]))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            lines, stamp = self.text_lines()
+            if stamp and lines:
+                words = [str(l["t"])[:10] for l in sorted(lines, key=lambda d: -d["h"])[:5]]
+                parts.append("字：" + "／".join(words))
+        except Exception:  # noqa: BLE001
+            pass
+        return ("；".join(parts) or "（眼睛沒框到東西、也沒讀到字）")[:60]
+
+    def reflex_see_nowrite(self, uri):
+        """看畫面但不寫描述：描述由程式組，模型只回俯仰一個詞。"""
+        seen = self.seen_by_program()
+        pv = "不確定"
+        try:
+            raw, _, _, _ = stream_json(
+                self.endpoint, self.model, self.SEE_SYS,
+                [{"type": "image_url", "image_url": {"url": uri}},
+                 {"type": "text", "text": self.SEE_PITCH_ASK}],
+                8, time.time() + 8.0, 0.2, effort=反射)
+            pv = next((k for k in ("天花板", "地板", "水平") if k in str(raw or "")), "不確定")
+        except Exception as e:  # noqa: BLE001
+            print(f"   反射看俯仰失敗：{e}")
+        self._seen_pitch = (pv, time.time())
+        if pv != "不確定":
+            seen = f"{seen}｜鏡頭在看{pv}"
+        self.stat["反射看到"] = self.stat.get("反射看到", 0) + 1
+        print(f"   👁 眼睛（程式組的，沒叫模型寫）：{seen}")
+        return seen
+
     def reflex_see(self, uri):
         """反射層：先用**不思考**的模式看一眼畫面（使用者 2026-09-14 定的分工）。
 
@@ -7749,6 +7799,8 @@ class FlowAgent(ProcedureMixin, Agent):
         對「畫面上有什麼」這種感知題只會給它編造的空間。
         所以：看＝反射，做＝快思，診斷＝慢想。
         """
+        if not self.SEE_WRITE:
+            return self.reflex_see_nowrite(uri)
         try:
             rows = self.yolo_rows()
             yolo = (self.YOLO_HINT.format(rows=NL + NL.join("　" + r for r in rows) + NL) if rows else "")
