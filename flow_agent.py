@@ -10548,7 +10548,20 @@ class FlowAgent(ProcedureMixin, Agent):
                 time.sleep(0.12)
             need = min(s["走"], budget - used)
             while need > 0.15:
+                # 比例還沒定案時，程式帶路走的這一段也拿來取樣（開了強制腦內地圖後，他自己很少直接按 w）
+                _r0 = None
+                try:
+                    if not gm.scale:
+                        _r0 = self.gmap_look()
+                except Exception:  # noqa: BLE001
+                    _r0 = None
                 walked, r = self.walk_guarded("w", min(need, 3.0))
+                try:
+                    if _r0 is not None:
+                        time.sleep(0.25)
+                        self.gmap_sample(_r0, self.gmap_look(), walked)
+                except Exception as e:  # noqa: BLE001
+                    print(f"   陣列地圖取樣失敗：{e}")
                 th = math.radians(getattr(self, "yaw", 0.0))
                 self.pos[0] += math.sin(th) * walked
                 self.pos[1] += math.cos(th) * walked

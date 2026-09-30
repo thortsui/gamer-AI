@@ -88,7 +88,7 @@ def gmap_events(mem, since_line_time=None):
         out["視覺核對"] = f"{len(checks)} 次，對得上 {ok} 次（{ok * 100 // len(checks)}%），平均誤差 {sum(e.get('誤差', 0) for e in checks) / len(checks):.2f} 步"
     if routes:
         found = [e for e in routes if e.get("結果") != "找不到路"]
-        arrived = sum(1 for e in found if (e.get("離目標") or 99) <= 1.5)
+        arrived = sum(1 for e in found if isinstance(e.get("離目標"), (int, float)) and e["離目標"] <= 1.5)
         out["照陣列帶路"] = f"{len(routes)} 次，找到路 {len(found)} 次，走到目標 1.5 步內 {arrived} 次"
     maps = []
     for p in glob.glob(os.path.join(mem, "陣列地圖_*.json")):
