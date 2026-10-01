@@ -9635,6 +9635,16 @@ class FlowAgent(ProcedureMixin, Agent):
               + "、".join(f"{x['方位']}{x['度']}度" for x in shots) + "）")
         return shots
 
+    def panel_for_slow(self):
+        """給慢想看的面板：快思那一輪的整份面板，但拿掉「情境說明」那一塊（那是核心文件，system 裡本來就有一份），
+        免得 system＋面板＋四張環顧圖超過 65,536 的上下文。"""
+        t = getattr(self, "_panel_text", "") or "（這一輪還沒組面板）"
+        a = t.find("【現在這個情境才有的說明】")
+        b = t.find("【程式確認：你現在看的是什麼視窗】")
+        if 0 <= a < b:
+            t = t[:a] + t[b:]
+        return t[:60000]
+
     def slow_think(self):
         """慢想：不趕時間，重新決定方向與接下來三步。結果會回灌給每一個快思輪次。"""
         print("   🐢 慢想中（最多兩分鐘，不趕時間）…")
@@ -9665,11 +9675,21 @@ class FlowAgent(ProcedureMixin, Agent):
                                     # 任務樹、步驟日誌、上一次計畫；禁令、被擋紀錄、改善規則、計分板、他自己的知識全都看不到，
                                     # 所以會排出被禁的步驟。現在把快思這一輪看到的整份面板原樣附上。
                                     + NL + NL + "【快思這一輪看到的完整面板】（禁令、上一步被擋了什麼、程式替你做了什麼、你的規則與知識都在裡面；排步驟前先讀）"
-                                    + NL + (getattr(self, "_panel_text", "") or "（這一輪還沒組面板）")
+                                    + NL + self.panel_for_slow()
                                     + NL + NL + self.SLOW_ASK})
-            raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
-                                       content, 3500, time.time() + self.SLOW_BUDGET, 0.35,
-                                       effort=中想)
+            try:
+                raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
+                                           content, 2500, time.time() + self.SLOW_BUDGET, 0.35,
+                                           effort=中想)
+            except Exception as e:  # noqa: BLE001
+                # 整份面板＋四張環顧圖＋system 可能超過模型 65,536 的上下文（HTTP 400）：退一步，不附面板再試一次
+                if "400" not in str(e):
+                    raise
+                print(f"   慢想太長被退回（{e}），改成不附整份面板再試一次")
+                content[-1]["text"] = content[-1]["text"].split("【快思這一輪看到的完整面板】")[0] + self.SLOW_ASK
+                raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
+                                           content, 2500, time.time() + self.SLOW_BUDGET, 0.35,
+                                           effort=中想)
         except Exception as e:  # noqa: BLE001
             print(f"   慢想失敗：{e}")
             return
