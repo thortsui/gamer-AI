@@ -10315,6 +10315,14 @@ class FlowAgent(ProcedureMixin, Agent):
                 # 換場景＝在新的地方出生：座標與朝向歸零，這張地圖的原點就是出生點
                 self.pos, self.yaw = [0.0, 0.0], 0.0
             self.gmap = grid_map.GridMap.load(p)
+            if not self.gmap.scale:
+                m = (self.measures_load().get("深度比例") or {})
+                key = str(self.current_place() or "未知")
+                src = m.get(key) or m.get("預設")
+                if src and src.get("值"):
+                    self.gmap.scale = float(src["值"])
+                    print(f"   🗺 陣列地圖：這張圖沒比例，沿用這支遊戲量測值裡的 {self.gmap.scale}（{'同場景' if key in m else '預設'}）")
+                    self.gmap_log("比例沿用", 比例=self.gmap.scale, 來源=("同場景" if key in m else "預設"))
             c = self.gmap.counts()
             print(f"[陣列地圖] {os.path.basename(p)}：牆壁 {c[grid_map.WALL]} 格、空地 {c[grid_map.FREE]} 格、"
                   f"互動物／觸碰物 {len(self.gmap.objects)} 個、掃過 {len(self.gmap.scanned)} 處、深度比例 {self.gmap.scale}")
@@ -10518,6 +10526,38 @@ class FlowAgent(ProcedureMixin, Agent):
                 + '{"t":"記觸碰物","name":"名字","功能":"站上去會怎樣","用法":"怎麼站"}（記在你腳下那一格）。')
         return NL.join(x for x in (gm.text(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), radius=8), hint, tail) if x)
 
+    MEASURE_FILE = "量測值.json"
+
+    def measures_load(self):
+        try:
+            return json.load(open(os.path.join(self.dir, self.MEASURE_FILE), encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def measures_save_scale(self, v, how):
+        """2026-10-01 使用者：量過的數值記在**這支遊戲**的檔案裡（每支遊戲不同）。
+        深度比例依 place 分開記，另存一個「預設」給同一支遊戲還沒量過的場景用；順便把視角刻度抄一份進來，一眼看全。"""
+        try:
+            d = self.measures_load()
+            key = str(self.current_place() or "未知")
+            stamp = datetime.now().strftime("%m/%d %H:%M")
+            d.setdefault("深度比例", {})[key] = {"值": v, "方法": how, "時間": stamp}
+            d["深度比例"]["預設"] = {"值": v, "來自": key, "時間": stamp}
+            try:
+                cal = json.load(open(os.path.join(self.dir, "視角校準.json"), encoding="utf-8")) or {}
+                d["視角刻度"] = {"每度dx": (cal.get("水平") or {}).get("每度dx"), "一圈dx": (cal.get("水平") or {}).get("一圈dx"),
+                               "每度dy": (cal.get("垂直") or {}).get("每度dy"), "時間": (cal.get("水平") or {}).get("時間")}
+            except Exception:  # noqa: BLE001
+                pass
+            d["說明"] = "他自己量的數值，只對這支遊戲成立：深度比例（深度 1 單位＝幾步，依 place）、視角刻度（每度 dx／dy）"
+            json.dump(d, open(os.path.join(self.dir, self.MEASURE_FILE), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            man = getattr(self, "manual", None)
+            if isinstance(man, dict):
+                man["深度比例"] = f"深度 1 單位＝{v} 步（{how}，{stamp}，place {key}）"
+                self.save_manual()
+        except Exception as e:  # noqa: BLE001
+            print(f"   量測值存檔失敗：{e}")
+
     def gmap_measure(self):
         """他送「量比例」：程式替他走 1.2 秒、比較走前走後正前方的深度，算出「深度 1 單位＝幾步」並定案。
         要站在正對一面牆、前方還有幾步空間的地方量才準；量不出來會告訴他為什麼。"""
@@ -10548,6 +10588,7 @@ class FlowAgent(ProcedureMixin, Agent):
         if ok:
             gm.scale = round(v, 3)
             gm.save()
+            self.measures_save_scale(gm.scale, "量比例（程式替你走 1.2 秒量的）")
             msg = f"量到：走 {walked:.1f} 秒，正前方深度 {z0:.2f}→{z1:.2f}（各線差的中位數 {dd:.2f}）→ 深度 1 單位＝{gm.scale} 步。已定案，之後開始畫牆"
         else:
             msg = (f"沒量成：走 {walked:.1f} 秒，正前方深度 {z0}→{z1}" + (f"（{why}）" if why else "")
@@ -10572,6 +10613,7 @@ class FlowAgent(ProcedureMixin, Agent):
             return
         gm.scale = round(v, 3)
         gm.save()
+        self.measures_save_scale(gm.scale, "定比例（他自己填的）")
         print(f"   🗺 他自己定了深度比例：1 單位＝{gm.scale} 步")
         self.gmap_log("量比例", 比例=gm.scale, 成功=True, 來源="他自己定")
         self.note_progress("定比例")
