@@ -9556,7 +9556,7 @@ class FlowAgent(ProcedureMixin, Agent):
     SLOW_EVERY = 12          # 每 12 個快思輪次慢想一次
     # 2026-09-14 實測：慢想（xhigh＋真實 2.8 萬 token 提示）純模型時間中位數 94 秒，
     # 最慢 102 秒——原本 120 秒的預算隨時會超時。改成 200 秒。
-    SLOW_BUDGET = 60.0       # 2026-09-17 使用者：慢想一分鐘就好（原本 200 秒太久）
+    SLOW_BUDGET = 100.0      # 2026-09-17 使用者：一分鐘；2026-10-01 慢想多讀整份面板（約 2 萬 tokens，多 15 秒）→ 放寬到 100 秒，不然 JSON 寫不完整次作廢
 
     SLOW_ASK = """【慢想時間】現在**不趕時間**，你有兩分鐘可以好好想。
 快思那一層（每輪 10 秒）只負責移動和眼前的小判斷；**方向是這裡決定的**。
@@ -9661,6 +9661,11 @@ class FlowAgent(ProcedureMixin, Agent):
                                     + ((NL + NL + self.step_journal_text())
                                        if self.step_journal_text() else "")
                                     + NL + NL + self.last_plan_text()
+                                    # 2026-10-01 使用者：「慢想要能看到完整的內容」——以前慢想只拿到環顧圖、歷史、視角、字、探索地圖、
+                                    # 任務樹、步驟日誌、上一次計畫；禁令、被擋紀錄、改善規則、計分板、他自己的知識全都看不到，
+                                    # 所以會排出被禁的步驟。現在把快思這一輪看到的整份面板原樣附上。
+                                    + NL + NL + "【快思這一輪看到的完整面板】（禁令、上一步被擋了什麼、程式替你做了什麼、你的規則與知識都在裡面；排步驟前先讀）"
+                                    + NL + (getattr(self, "_panel_text", "") or "（這一輪還沒組面板）")
                                     + NL + NL + self.SLOW_ASK})
             raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
                                        content, 3500, time.time() + self.SLOW_BUDGET, 0.35,
