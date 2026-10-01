@@ -6381,7 +6381,7 @@ class FlowAgent(ProcedureMixin, Agent):
     # ---------------- 快思三步佇列（2026-09-29 使用者：快思直接出前後三步的詳細動作，反射只檢查）
     PLAN3_ACTS = ("key", "hold", "click", "look", "aim", "scroll", "wait", "點字", "走到記過的", "水平歸零",
                   "這步做完", "大動作完成", "寫步驟", "我在", "標點", "切空間", "記知識", "記問題", "基礎確認",
-                  "記互動物", "記觸碰物")
+                  "記互動物", "記觸碰物", "量比例", "定比例")
 
     def plan3_ask(self):
         """快思那一輪多要的東西：三步、每步附動作與「做完會看到什麼」。"""
@@ -8938,6 +8938,18 @@ class FlowAgent(ProcedureMixin, Agent):
                 except Exception as e:  # noqa: BLE001
                     print(f"   標點失敗：{e}")
                 actions.remove(a)
+            elif a.get("t") in ("量比例", "量深度比例"):
+                try:
+                    self.gmap_measure()
+                except Exception as e:  # noqa: BLE001
+                    print(f"   量比例失敗：{e}")
+                actions.remove(a)
+            elif a.get("t") in ("定比例", "定深度比例"):
+                try:
+                    self.gmap_set_scale(a)
+                except Exception as e:  # noqa: BLE001
+                    print(f"   定比例失敗：{e}")
+                actions.remove(a)
             elif a.get("t") in ("記互動物", "記觸碰物"):
                 try:
                     self.gmap_add(str(a.get("t"))[1:], a)
@@ -10380,12 +10392,7 @@ class FlowAgent(ProcedureMixin, Agent):
         v = (walked / dd) if dd > 0.3 else None
         ok = v is not None and 0.08 <= v <= 1.5
         if ok:
-            gm.samples.append(round(v, 3))
-            if len(gm.samples) >= 5:
-                xs = sorted(gm.samples)
-                gm.scale = xs[len(xs) // 2]
-                print(f"   🗺 陣列地圖：比例定案 1 單位＝{gm.scale:.2f} 步（{len(xs)} 次樣本的中位數：{xs}）")
-                self.gmap_log("比例定案", 比例=gm.scale, 樣本=xs, 預設=False)
+            gm.samples = (gm.samples + [round(v, 3)])[-12:]      # 只當參考給他看；比例要他自己量（使用者 10/01）
             gm.save()
         self.gmap_log("量比例樣本", 走了=round(walked, 2), 各線差的中位數=round(dd, 3), 這次=None if v is None else round(v, 3),
                       採用=ok, 目前樣本數=len(gm.samples))
@@ -10480,15 +10487,7 @@ class FlowAgent(ProcedureMixin, Agent):
             busy = bool(getattr(self, "_plan_q", None)) or getattr(self, "desk_lock", 0) >= 2 or self.dry
             level = abs(getattr(self, "pitch_deg", 0.0)) <= 20
             if not gm.scale:
-                # 深度 1 單位＝幾步，要靠他自己往前走的時候量（gmap_sample），湊滿 5 次取中位數才定案。
-                # 等了 40 輪還湊不滿（他一直沒往前走成），就先用預設值，地圖才畫得起來。
-                self._gmap_wait = getattr(self, "_gmap_wait", 0) + 1
-                if self._gmap_wait >= 40:
-                    gm.scale = self.GMAP_DEFAULT_SCALE
-                    gm.save()
-                    print(f"   🗺 陣列地圖：等了 40 輪樣本只有 {len(gm.samples)} 個，比例先用預設 {gm.scale} 步／單位")
-                    self.gmap_log("比例定案", 比例=gm.scale, 樣本=gm.samples, 預設=True)
-                return
+                return      # 2026-10-01 使用者：「他需要自己測量是多少」——比例沒定之前不畫牆；他用 量比例／定比例 來定
             if (not busy and level and gm.need_scan(self.pos[0], self.pos[1])
                     and rnd >= getattr(self, "_gmap_retry_at", 0)):
                 self.gmap_scan()
@@ -10505,12 +10504,77 @@ class FlowAgent(ProcedureMixin, Agent):
         if gm is None:
             return ""
         hint = getattr(self, "gmap_hint", "") or ""
+        if not gm.scale:
+            ref = ("、".join(str(x) for x in gm.samples[-6:]) if gm.samples else "（還沒有）")
+            hint = (hint + NL if hint else "") + (
+                "📏 **深度比例還沒定，牆畫不出來——要你自己量**（使用者規定）：走到正對一面牆、前方還有 3 步以上空間、沒有面板蓋著的地方，"
+                '送 {"t":"量比例"}；程式會替你走 1.2 秒、比較前後的深度，算出「深度 1 單位＝幾步」。'
+                '自己算好了也可以直接 {"t":"定比例","比例":0.5}。'
+                f"程式在你走路時順便量到的參考值：{ref}（很散，只當參考）。")
         tail = ("這張地圖是**陣列**：出生點是原點，牆是程式第一次到那裡時用視覺深度畫的，之後你的位置用「走了幾秒＋轉了幾度」推算。"
                 + NL + '要去某一格或某個記過的東西：{"t":"走到記過的","name":"名字"}，程式會照陣列找一條不穿牆的路帶你走。'
                 + NL + '互動成功的東西程式會自動記成互動物；你自己也可以記：'
                 + '{"t":"記互動物","name":"名字","功能":"按了會怎樣","用法":"怎麼按","前":1}、'
                 + '{"t":"記觸碰物","name":"名字","功能":"站上去會怎樣","用法":"怎麼站"}（記在你腳下那一格）。')
         return NL.join(x for x in (gm.text(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), radius=8), hint, tail) if x)
+
+    def gmap_measure(self):
+        """他送「量比例」：程式替他走 1.2 秒、比較走前走後正前方的深度，算出「深度 1 單位＝幾步」並定案。
+        要站在正對一面牆、前方還有幾步空間的地方量才準；量不出來會告訴他為什麼。"""
+        gm = getattr(self, "gmap", None)
+        if gm is None or not self.gmap_on():
+            print("   ⚠ 陣列地圖沒開，量不了")
+            return
+        r0 = self.gmap_look()
+        if not r0:
+            return
+        z0 = self.gmap_front(r0["rays"])
+        self._prog_walk = True
+        try:
+            walked, why = self.walk_guarded("w", 1.2)
+        finally:
+            self._prog_walk = False
+        th = math.radians(getattr(self, "yaw", 0.0))
+        self.pos[0] += math.sin(th) * walked
+        self.pos[1] += math.cos(th) * walked
+        time.sleep(0.25)
+        r1 = self.gmap_look()
+        z1 = self.gmap_front(r1["rays"]) if r1 else None
+        a1 = {round(a): z for a, z in (r1["rays"] if r1 else [])}
+        diffs = sorted(z - a1[round(a)] for a, z in r0["rays"] if round(a) in a1 and z <= 14.0)
+        dd = diffs[len(diffs) // 2] if diffs else None
+        v = (walked / dd) if (dd and dd > 0.3 and walked >= 0.6) else None
+        ok = v is not None and 0.08 <= v <= 1.5
+        if ok:
+            gm.scale = round(v, 3)
+            gm.save()
+            msg = f"量到：走 {walked:.1f} 秒，正前方深度 {z0:.2f}→{z1:.2f}（各線差的中位數 {dd:.2f}）→ 深度 1 單位＝{gm.scale} 步。已定案，之後開始畫牆"
+        else:
+            msg = (f"沒量成：走 {walked:.1f} 秒，正前方深度 {z0}→{z1}" + (f"（{why}）" if why else "")
+                   + "。要正對一面牆、前方還有 3 步以上空間、沒有面板蓋著，再量一次")
+        print(f"   🗺 {msg}")
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 你送了 量比例，程式替你走了 {walked:.1f} 秒：{msg}")
+        self.gmap_hint = "📏 " + msg
+        self.gmap_log("量比例", 走了=round(walked, 2), 深度前=z0, 深度後=z1, 各線差的中位數=dd, 比例=gm.scale if ok else None, 成功=ok, 來源="他自己")
+        self.note_progress("量比例")
+
+    def gmap_set_scale(self, a):
+        """他送「定比例」：自己算好的「深度 1 單位＝幾步」。"""
+        gm = getattr(self, "gmap", None)
+        if gm is None:
+            return
+        try:
+            v = float(a.get("比例") or a.get("v") or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        if not (0.05 <= v <= 3.0):
+            print(f'   ⚠ 定比例要給 0.05～3 之間的數字：{{"t":"定比例","比例":0.5}}（你給的是 {a.get("比例")}）')
+            return
+        gm.scale = round(v, 3)
+        gm.save()
+        print(f"   🗺 他自己定了深度比例：1 單位＝{gm.scale} 步")
+        self.gmap_log("量比例", 比例=gm.scale, 成功=True, 來源="他自己定")
+        self.note_progress("定比例")
 
     def gmap_add(self, kind, a):
         """他自己記的互動物／觸碰物。互動物在他前面（不可穿透，所以不會是他站的那一格）；觸碰物預設在腳下。"""
