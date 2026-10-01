@@ -451,13 +451,10 @@ ASK = """【程式確認：你現在看的是什麼視窗】{where}
 【使用者交代】
 {instr}
 
-看畫面，決定接下來做什麼。只輸出 JSON：
-{{"s":"看到什麼(<=15字)","區":"你現在在這隻遊戲的哪一區（自己命名，<=8字，例如：選單、準備區、局內）",
- "task":"右上角黑底白字寫什麼（原文照抄，看不到就空字串）",
- "flow":"要用的流程名（不換就填現在這個）","step":做到第幾步的數字,
- "想":"你為什麼要做這個動作（<=25字，例如：要進場所以先把擋住的教學關掉）",
- "a":[動作...最多2個],"n":"真的學到新東西才寫(<=25字)，否則空字串",
- "diff":"這一輪你比對了什麼、發現哪裡不一樣(<=30字)，沒有比對就空字串"}}"""
+看畫面，決定接下來做什麼。只輸出 JSON，**能省就省、不要多寫**（2026-10-01 使用者：輸出減少字樣）：
+{{"s":"看到什麼(<=12字)","區":"哪一區(<=8字)","task":"右上角任務原文（沒有就空字串）",
+ "想":"為什麼做這個(<=20字)","a":[動作...最多2個]}}
+只有要換流程才加 "flow"、真的學到新東西才加 "n"(<=25字)、真的比對出差異才加 "diff"(<=30字)；否則這三個都不要寫。"""
 
 
 def single_instance_or_die(game):
@@ -10422,6 +10419,16 @@ class FlowAgent(ProcedureMixin, Agent):
         gm.note_scanned(x0, y0)
         gm.save()
         dt = time.time() - t0
+        try:
+            prof = [(self.gmap_front(v[1]) or 0) for v in views]
+            h = len(prof) // 2
+            a, b = prof[:h], prof[h:]
+            if h >= 4 and sum(abs(x - y) for x, y in zip(a, b)) / max(1e-6, sum(a) + sum(b)) < 0.08 and max(prof) - min(prof) > 1.0:
+                print("   ⚠ 陣列地圖：掃一圈的距離前後半圈幾乎一樣——轉頭刻度可能差兩倍（實際每次轉的角度是程式以為的兩倍），"
+                      "下次開機量刻度會重量；這次掃的牆方向可能不準")
+                self.gmap_log("刻度疑似差兩倍", 各面=[round(x, 1) for x in prof])
+        except Exception:  # noqa: BLE001
+            pass
         self.stat["陣列地圖掃描"] = self.stat.get("陣列地圖掃描", 0) + 1
         print(f"   🗺 陣列地圖：在 ({x0:+.1f},{y0:+.1f}) 掃了一圈，新畫 {new} 格牆（{dt:.1f}s）；這附近之後不用再掃")
         self.gmap_log("掃描", 在=[round(x0, 2), round(y0, 2)], 新牆=new, 秒=round(dt, 1), 鏡頭在後=round(gm.cam_back, 2),
@@ -12191,8 +12198,9 @@ class FlowAgent(ProcedureMixin, Agent):
             d0 = diff(grab(), start); hist.append(d0)
             if i >= 6 and d0 < best[0]:
                 best = (d0, i)
-            # 轉超過一圈半還沒回來就放棄
-            if i >= 12 and d0 < max(hist[:5]) * 0.35:
+            # 畫面回到起點＝轉了一圈。2026-10-01 修：以前要 i>=12 才肯停，一圈不到 1200 px 的遊戲
+            # 會轉到**第二圈**才停 → 每度 dx 剛好量成兩倍（陣列地圖掃一圈 12 面、每 6 面重複，就是這樣來的）。
+            if i >= 6 and d0 < max(hist[:5]) * 0.35:
                 best = (d0, i); break
         h_total = best[1] * self.CALIB_STEP if best[1] else 0
         dx_per_deg = round(h_total / 360.0, 2) if h_total else None
