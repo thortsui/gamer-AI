@@ -711,6 +711,9 @@ class FlowAgent(ProcedureMixin, Agent):
         return time.time() - getattr(self, "_alive_since", getattr(self, "_boot", time.time()))
 
     def frozen_hint(self):
+        # 2026-10-01 使用者：「卡 N 分鐘取消」——他把這個數字當成離開遊戲的理由（今天 63 次「卡住 N 分鐘，直接退出重進」），
+        # 而且計時器在他有進展時沒歸零，一路累積到 77 分鐘。面板不再顯示；內部的 frozen_secs 其他地方照舊用。
+        return ""
         s = self.frozen_secs()
         if s < 120:
             return ""
@@ -3048,7 +3051,11 @@ class FlowAgent(ProcedureMixin, Agent):
             left -= step
             time.sleep(0.15)
         secs = max(0.3, min(6.0, dist))
-        _w, _ = self.walk_guarded("w", secs)
+        self._prog_walk = True
+        try:
+            _w, _ = self.walk_guarded("w", secs)
+        finally:
+            self._prog_walk = False
         _th = math.radians(getattr(self, "yaw", 0.0))      # 2026-09-30：程式帶路走的也要算進位置（以前沒算，地圖會漂）
         self.pos[0] += math.sin(_th) * _w
         self.pos[1] += math.cos(_th) * _w
@@ -4503,6 +4510,8 @@ class FlowAgent(ProcedureMixin, Agent):
         """
         if k not in ("w", "a", "s", "d"):
             return
+        if getattr(self, "_prog_walk", False):
+            return                      # 2026-10-01：程式照地圖帶路走的，不是他的動作，不計分也不罰
         try:
             arrived = bool(reason) and "到眼前" in reason
             target = (str(getattr(self, "_track", "") or "").strip()
@@ -4727,8 +4736,7 @@ class FlowAgent(ProcedureMixin, Agent):
         except Exception:  # noqa: BLE001
             names = "某個動作"
         rows = [f"最近 {len(w)} 輪你只用了 **{kinds} 種**不同的做法；"
-                f"其中「{names}」就佔了 **{n} 輪**。",
-                f"這段時間你已經 **{frozen} 秒**沒有任何一件事成功（沒走成、沒按到、任務也沒變）。"]
+                f"其中「{names}」就佔了 **{n} 輪**。"]          # 2026-10-01：「N 秒沒成功」那句拿掉（卡 N 分鐘取消）
         if n >= 4 and frozen > 60:
             rows.append("**你自己看**：同一招做了這麼多次都沒用，它就是沒用。"
                         "這一輪請換一件完全不同的事——換目標、換方向、先站定看清楚、"
@@ -10555,7 +10563,11 @@ class FlowAgent(ProcedureMixin, Agent):
                         _r0 = self.gmap_look()
                 except Exception:  # noqa: BLE001
                     _r0 = None
-                walked, r = self.walk_guarded("w", min(need, 3.0))
+                self._prog_walk = True
+                try:
+                    walked, r = self.walk_guarded("w", min(need, 3.0))
+                finally:
+                    self._prog_walk = False
                 try:
                     if _r0 is not None:
                         time.sleep(0.25)
@@ -11605,7 +11617,7 @@ class FlowAgent(ProcedureMixin, Agent):
             self._frozen_mark = {"時間": now, "位置": pos}
             if moved < 2.0:
                 self.punish("一直待在原地",
-                            f"你已經 {int(fz)} 秒沒有任何一件事成功，而且這一分鐘"
+                            f"這一分鐘沒有任何一件事成功，而且"
                             f"只挪了 {moved:.1f} 公尺——等於待在原地。"
                             f"站著轉頭、按沒反應的 E、走半步又退回來，都不算在做事。"
                             f"**換一個看得到的目標，一次走過去。**")
