@@ -9556,7 +9556,7 @@ class FlowAgent(ProcedureMixin, Agent):
     SLOW_EVERY = 12          # 每 12 個快思輪次慢想一次
     # 2026-09-14 實測：慢想（xhigh＋真實 2.8 萬 token 提示）純模型時間中位數 94 秒，
     # 最慢 102 秒——原本 120 秒的預算隨時會超時。改成 200 秒。
-    SLOW_BUDGET = 100.0      # 2026-09-17 使用者：一分鐘；2026-10-01 慢想多讀整份面板（約 2 萬 tokens，多 15 秒）→ 放寬到 100 秒，不然 JSON 寫不完整次作廢
+    SLOW_BUDGET = 150.0      # 2026-09-17 使用者：一分鐘；2026-10-01 慢想多讀整份面板＋medium 推理，100 秒仍寫不完（21:59 回了全空的 JSON）→ 150 秒
 
     SLOW_ASK = """【慢想時間】現在**不趕時間**，你有兩分鐘可以好好想。
 快思那一層（每輪 10 秒）只負責移動和眼前的小判斷；**方向是這裡決定的**。
@@ -9677,19 +9677,29 @@ class FlowAgent(ProcedureMixin, Agent):
                                     + NL + NL + "【快思這一輪看到的完整面板】（禁令、上一步被擋了什麼、程式替你做了什麼、你的規則與知識都在裡面；排步驟前先讀）"
                                     + NL + self.panel_for_slow()
                                     + NL + NL + self.SLOW_ASK})
+            _t0 = time.time()
             try:
-                raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
-                                           content, 2500, time.time() + self.SLOW_BUDGET, 0.35,
-                                           effort=中想)
+                raw, _trunc, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
+                                                content, 2500, time.time() + self.SLOW_BUDGET, 0.35,
+                                                effort=中想)
             except Exception as e:  # noqa: BLE001
                 # 整份面板＋四張環顧圖＋system 可能超過模型 65,536 的上下文（HTTP 400）：退一步，不附面板再試一次
                 if "400" not in str(e):
                     raise
                 print(f"   慢想太長被退回（{e}），改成不附整份面板再試一次")
                 content[-1]["text"] = content[-1]["text"].split("【快思這一輪看到的完整面板】")[0] + self.SLOW_ASK
-                raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
-                                           content, 2500, time.time() + self.SLOW_BUDGET, 0.35,
-                                           effort=中想)
+                raw, _trunc, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
+                                                content, 2500, time.time() + self.SLOW_BUDGET, 0.35,
+                                                effort=中想)
+            # 2026-10-01：把慢想的原文與耗時留下來（之前空 JSON 查不到原因）
+            try:
+                with open(os.path.join(self.dir, "慢想原文.log"), "a", encoding="utf-8") as _f:
+                    _f.write(f"## {datetime.now().strftime('%m/%d %H:%M:%S')} 第 {self.stat.get('輪數', 0)} 輪　{time.time() - _t0:.0f}s"
+                             f"{'　⚠ 超時截斷' if _trunc else ''}　推理 {len(getattr(self, '_last_reasoning', '') or '')} 字" + NL + str(raw or "")[:4000] + NL + NL)
+            except Exception:  # noqa: BLE001
+                pass
+            if _trunc:
+                print(f"   ⚠ 慢想 {self.SLOW_BUDGET:.0f} 秒內沒寫完，被截斷（原文在 記憶/慢想原文.log）")
         except Exception as e:  # noqa: BLE001
             print(f"   慢想失敗：{e}")
             return
