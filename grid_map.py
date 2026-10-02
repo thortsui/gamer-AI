@@ -44,6 +44,7 @@ class GridMap:
         self.scale = None                      # 深度模型的 1 單位＝幾步（定案後不再變）
         self.samples = []                      # 還沒定案前量到的樣本
         self.cam_back = 0.0                    # 第三人稱：鏡頭在自己後面幾步
+        self.pending = []                      # 比例還沒定時看到的視野 [x, y, yaw, rays, self]；定了比例再補畫成牆
         self.path = ""
 
     # ---------------- 座標 ↔ 陣列
@@ -156,6 +157,21 @@ class GridMap:
                 new += 1
         return new
 
+    def keep_view(self, x, y, yaw, rays, self_depth=None):
+        """比例還沒定：先把這一面的深度存起來，等他量好比例再一次補畫（2026-10-02 使用者：第一次先不動、轉九十度慢慢畫）。"""
+        self.pending = (self.pending + [[round(x, 2), round(y, 2), round(yaw % 360, 1),
+                                          [[round(a, 1), round(z, 3)] for a, z in rays], self_depth]])[-80:]
+
+    def replay_pending(self, max_dist=10.0):
+        """比例定了：把之前存著的視野全部補畫成牆。回傳新畫幾格。"""
+        if not self.scale or not self.pending:
+            return 0
+        new = 0
+        for x, y, yaw, rays, me in self.pending:
+            new += self.scan(x, y, yaw, [tuple(r) for r in rays], max_dist=max_dist, self_depth=me)
+        self.pending = []
+        return new
+
     def note_scanned(self, x, y):
         self.scanned.append((round(x, 1), round(y, 1)))
 
@@ -206,6 +222,17 @@ class GridMap:
             if o["名稱"] == name:
                 return o
         return None
+
+    def objects_in_view(self, x, y, yaw, half_fov=35.0, max_dist=10.0):
+        """照地圖，現在畫面裡應該看得到哪些互動物／觸碰物：[(物件, 偏離角度, 幾步)]。"""
+        out = []
+        for o in self.objects:
+            ox, oy = self.center_of(*o["格"])
+            d = math.hypot(ox - x, oy - y)
+            ang = ((math.degrees(math.atan2(ox - x, oy - y)) - yaw) + 180) % 360 - 180
+            if 0.5 <= d <= max_dist and abs(ang) <= half_fov:
+                out.append((o, ang, d))
+        return out
 
     # ---------------- 視覺核對：我真的在地圖說的位置嗎
     def expected(self, x, y, yaw, max_dist=10.0):
@@ -366,7 +393,8 @@ class GridMap:
                 "量到次數": [[k[0], k[1], v] for k, v in self.hits.items()],
                 "走過": [list(c) for c in sorted(self.walked)],
                 "掃過的位置": [list(p) for p in self.scanned],
-                "深度比例": self.scale, "比例樣本": self.samples, "鏡頭在後面幾步": self.cam_back}
+                "深度比例": self.scale, "比例樣本": self.samples, "鏡頭在後面幾步": self.cam_back,
+                "待畫的視野": self.pending}
 
     def save(self, path=None):
         path = path or self.path
@@ -399,9 +427,45 @@ class GridMap:
             m.scale = d.get("深度比例")
             m.samples = list(d.get("比例樣本") or [])
             m.cam_back = float(d.get("鏡頭在後面幾步") or 0.0)
+            m.pending = list(d.get("待畫的視野") or [])
         except (TypeError, ValueError):
             pass
         return m
+
+    @classmethod
+    def merge(cls, maps, path=""):
+        """同一個場景的好幾張圖合成一張（2026-10-02 使用者：要合成）。都以出生點為原點，直接疊：
+        走過的一定是空地；互動物／觸碰物 > 牆 > 空地 > 未知；量到次數相加；物件同格同種只留一個。"""
+        out = cls()
+        out.path = path
+        rank = {UNKNOWN: 0, FREE: 1, WALL: 2, TOUCH: 3, INTERACT: 3}
+        for m in maps:
+            half = m.size // 2
+            for r, row in enumerate(m.grid):
+                for c, v in enumerate(row):
+                    if v == UNKNOWN:
+                        continue
+                    gx, gy = c - half, half - r
+                    if rank[v] > rank[out.get(gx, gy)]:
+                        out.set(gx, gy, v)
+            for k, v in m.hits.items():
+                out.hits[k] = out.hits.get(k, 0) + v
+            out.walked |= m.walked
+            out.scanned += [p for p in m.scanned if p not in out.scanned]
+            out.samples += m.samples
+            out.pending += m.pending
+            out.scale = out.scale or m.scale
+            out.cam_back = out.cam_back or m.cam_back
+            for o in m.objects:
+                if not any(tuple(p["格"]) == tuple(o["格"]) and p["種類"] == o["種類"] for p in out.objects):
+                    out.objects.append(dict(o, 編號=len(out.objects)))
+        for c in out.walked:
+            if out.get(*c) == WALL:
+                out.set(c[0], c[1], FREE)
+                out.hits.pop(c, None)
+        out.samples = out.samples[-12:]
+        out.pending = out.pending[-80:]
+        return out
 
 
 def _side(ang):

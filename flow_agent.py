@@ -10317,12 +10317,8 @@ class FlowAgent(ProcedureMixin, Agent):
         return bool(self.gcfg.get("陣列地圖")) and not getattr(self, "_gmap_dead", False)
 
     def gmap_file(self):
-        pid = None
-        try:
-            pid = self.current_place()
-        except Exception:  # noqa: BLE001
-            pass
-        return self.space_file(f"陣列地圖_{pid or '未知'}.json")
+        # 2026-10-02 使用者：同一個場景要合成一張——檔名只看場景（空間）名，不再分 Roblox place／伺服器
+        return self.space_file("陣列地圖.json")
 
     def gmap_log(self, kind, **kw):
         """陣列地圖的每一件事都記一筆，之後才比得出有沒有改善。"""
@@ -10343,21 +10339,31 @@ class FlowAgent(ProcedureMixin, Agent):
             import grid_map
             p = self.gmap_file()
             old = getattr(self, "gmap", None)
-            if old is not None and old.path == p:
+            try:
+                pid = self.current_place()
+            except Exception:  # noqa: BLE001
+                pid = None
+            moved = old is not None and pid != getattr(self, "_gmap_pid", pid)
+            self._gmap_pid = pid
+            if old is not None and old.path == p and not moved:
                 return
             if old is not None:
                 old.save()
-                # 換場景＝在新的地方出生：座標與朝向歸零，這張地圖的原點就是出生點
+                # 換場景／被傳送＝在新的地方出生：座標與朝向歸零，這張地圖的原點就是出生點
                 self.pos, self.yaw = [0.0, 0.0], 0.0
+                if old.path == p:
+                    self.gmap_log("重新出生", 檔=os.path.basename(p))
+                    return
             self.gmap = grid_map.GridMap.load(p)
             if not self.gmap.scale:
                 m = (self.measures_load().get("深度比例") or {})
-                key = str(self.current_place() or "未知")
+                key = self.measure_key()
                 src = m.get(key) or m.get("預設")
                 if src and src.get("值"):
                     self.gmap.scale = float(src["值"])
                     print(f"   🗺 陣列地圖：這張圖沒比例，沿用這支遊戲量測值裡的 {self.gmap.scale}（{'同場景' if key in m else '預設'}）")
                     self.gmap_log("比例沿用", 比例=self.gmap.scale, 來源=("同場景" if key in m else "預設"))
+                    self.gmap_replay()
             c = self.gmap.counts()
             print(f"[陣列地圖] {os.path.basename(p)}：牆壁 {c[grid_map.WALL]} 格、空地 {c[grid_map.FREE]} 格、"
                   f"互動物／觸碰物 {len(self.gmap.objects)} 個、掃過 {len(self.gmap.scanned)} 處、深度比例 {self.gmap.scale}")
@@ -10440,33 +10446,50 @@ class FlowAgent(ProcedureMixin, Agent):
         self.gmap_log("量比例樣本", 走了=round(walked, 2), 各線差的中位數=round(dd, 3), 這次=None if v is None else round(v, 3),
                       採用=ok, 目前樣本數=len(gm.samples))
 
+    GMAP_SCAN_STOPS = 4          # 2026-10-02 使用者：第一次到一個地方先不動、一次轉九十度，慢慢畫
+    GMAP_SCAN_NUDGE = 25.0       # 每一面左右各偏一點再看：正中間是自己的背影，偏一下才看得到正前方
+
     def gmap_scan(self):
-        """第一次到這個地方：程式自己原地轉一圈，用視覺深度把四周的牆畫進陣列。轉完回到原本的朝向。"""
+        """第一次到這個地方：站著不動，一次轉 90 度、四面各看一次（每面左右偏 25 度各看一眼），
+        用視覺深度把四周的牆畫進陣列。比例還沒定就先把看到的存起來，量好比例再補畫。轉完回到原本的朝向。"""
         gm = self.gmap
         t0 = time.time()
         views = []
         first = self.grab_still(320)
-        for i in range(self.GMAP_SCAN_TURNS):
-            r = self.gmap_look()
-            if r is None:
-                return False
-            views.append((getattr(self, "yaw", 0.0) % 360, r["rays"], r["self"]))
-            self.turn_by(360.0 / self.GMAP_SCAN_TURNS)
-            time.sleep(0.4)
-            if i == 0 and frame_diff(first, self.grab_still(320)) < 3.0:
-                # 轉了畫面卻沒變：有面板蓋著、游標沒鎖、或根本不在 3D 場景裡——這種畫面量出來的深度不能畫成牆
-                self.turn_by(-360.0 / self.GMAP_SCAN_TURNS)
-                print("   🗺 陣列地圖：想掃一圈，但轉頭畫面沒跟著動（面板擋住／不在場景裡），這次不掃")
-                self.gmap_log("掃描放棄", 原因="轉頭畫面沒變")
-                self._gmap_retry_at = self.stat.get("輪數", 0) + 5
-                return False
+        nd = self.GMAP_SCAN_NUDGE
+        for i in range(self.GMAP_SCAN_STOPS):
+            for k, off in enumerate((-nd, 2 * nd)):
+                self.turn_by(off)
+                time.sleep(0.4)
+                if i == 0 and k == 0 and frame_diff(first, self.grab_still(320)) < 3.0:
+                    # 轉了畫面卻沒變：有面板蓋著、游標沒鎖、或根本不在 3D 場景裡——這種畫面量出來的深度不能畫成牆
+                    self.turn_by(-off)
+                    print("   🗺 陣列地圖：想原地看四面，但轉頭畫面沒跟著動（面板擋住／不在場景裡），這次不看")
+                    self.gmap_log("掃描放棄", 原因="轉頭畫面沒變")
+                    self._gmap_retry_at = self.stat.get("輪數", 0) + 5
+                    return False
+                r = self.gmap_look()
+                if r is None:
+                    return False
+                views.append((getattr(self, "yaw", 0.0) % 360, r["rays"], r["self"]))
+            self.turn_by(-nd)                  # 回到這一面的正中間
+            time.sleep(0.2)
+            self.turn_by(360.0 / self.GMAP_SCAN_STOPS)
+            time.sleep(0.5)
         x0, y0 = self.pos[0], self.pos[1]
+        gm.note_scanned(x0, y0)
         if not gm.scale:
-            return False                       # 比例還沒定（見 gmap_sample），先不畫牆
+            for yaw, rays, me in views:        # 比例還沒定：先存起來，他量好比例再補畫（gmap_replay）
+                gm.keep_view(x0, y0, yaw, rays, me)
+            gm.save()
+            print(f"   🗺 陣列地圖：在 ({x0:+.1f},{y0:+.1f}) 原地轉了四面（每次 90 度），比例還沒定，先存著 {len(views)} 面，量好比例就補畫")
+            self.gmap_log("掃描", 在=[round(x0, 2), round(y0, 2)], 新牆=0, 秒=round(time.time() - t0, 1), 先存著=len(views))
+            self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 程式替你站著不動、一次轉 90 度看了四面，已轉回原本的朝向；"
+                                "深度比例還沒定，看到的先存著——送 量比例 之後會一次補畫成牆")
+            return True
         new = 0
         for yaw, rays, me in views:
             new += gm.scan(x0, y0, yaw, rays, max_dist=self.GMAP_MAX_DIST, self_depth=me)
-        gm.note_scanned(x0, y0)
         gm.save()
         dt = time.time() - t0
         try:
@@ -10483,7 +10506,7 @@ class FlowAgent(ProcedureMixin, Agent):
         print(f"   🗺 陣列地圖：在 ({x0:+.1f},{y0:+.1f}) 掃了一圈，新畫 {new} 格牆（{dt:.1f}s）；這附近之後不用再掃")
         self.gmap_log("掃描", 在=[round(x0, 2), round(y0, 2)], 新牆=new, 秒=round(dt, 1), 鏡頭在後=round(gm.cam_back, 2),
                       各面正前方步數=[round((self.gmap_front(v[1]) or 0) * gm.scale, 1) for v in views])
-        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 程式替你原地轉了一圈，用視覺深度把四周的牆畫進陣列地圖"
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 程式替你站著不動、一次轉 90 度看了四面，用視覺深度把四周的牆畫進陣列地圖"
                             f"（新畫 {new} 格牆），已轉回原本的朝向")
         return True
 
@@ -10515,6 +10538,28 @@ class FlowAgent(ProcedureMixin, Agent):
                 gm.scanned = [p for p in gm.scanned if math.hypot(p[0] - self.pos[0], p[1] - self.pos[1]) > 4.0]
         self.gmap_log("核對", 誤差=round(r["誤差"], 2), 符合=r["符合"],
                       建議=[round(v, 1) for v in r["建議位置"]] if r["建議位置"] else None)
+        return r["符合"]
+
+    def gmap_check_objects(self, rays_pack):
+        """2026-10-02 使用者：一直用視覺確認東西的相對位置。照地圖畫面裡應該看得到的互動物／觸碰物，
+        量那個方向的深度，看距離對不對得上。"""
+        import grid_map
+        gm = self.gmap
+        if not gm.scale or not gm.objects:
+            return ""
+        rays = rays_pack["rays"]
+        out = []
+        for o, ang, d in gm.objects_in_view(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0)):
+            near = [z for a, z in rays if abs(a - ang) <= 8]
+            if not near:
+                continue
+            z = sorted(near)[len(near) // 2]
+            seen = z * gm.scale / max(0.2, math.cos(math.radians(ang))) - gm.cam_back
+            ok = abs(seen - d) <= max(1.5, d * 0.3)
+            out.append(f"「{o['名稱']}」照地圖在你{grid_map._side(ang)} {d:.1f} 步，畫面量到那個方向 {seen:.1f} 步"
+                       + ("（對得上）" if ok else ("（**更近的地方有東西擋著**）" if seen < d else "（**那裡可能沒有它，或你位置漂了**）")))
+            self.gmap_log("物件核對", 名稱=o["名稱"], 地圖步數=round(d, 1), 量到=round(seen, 1), 符合=ok)
+        return ("👁 東西的位置：" + "；".join(out)) if out else ""
 
     def gmap_tick(self):
         """每輪一次（截圖之後、組面板之前）。"""
@@ -10529,15 +10574,25 @@ class FlowAgent(ProcedureMixin, Agent):
             rnd = self.stat.get("輪數", 0)
             busy = bool(getattr(self, "_plan_q", None)) or getattr(self, "desk_lock", 0) >= 2 or self.dry
             level = abs(getattr(self, "pitch_deg", 0.0)) <= 20
-            if not gm.scale:
-                return      # 2026-10-01 使用者：「他需要自己測量是多少」——比例沒定之前不畫牆；他用 量比例／定比例 來定
+            # 比例要他自己量（10/01）；但沒比例也照樣原地看四面、平常也照樣看——看到的先存著，量好比例一次補畫（10/02）
             if (not busy and level and gm.need_scan(self.pos[0], self.pos[1])
                     and rnd >= getattr(self, "_gmap_retry_at", 0)):
                 self.gmap_scan()
-            elif level and gm.scale and rnd % self.GMAP_CHECK_EVERY == 0:
+            elif level and rnd % self.GMAP_CHECK_EVERY == 0:
+                # 2026-10-02 使用者：要一直用視覺確認牆壁的正確距離與東西的相對位置
                 r = self.gmap_look()
                 if r:
-                    self.gmap_check(r)
+                    if not gm.scale:
+                        gm.keep_view(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), r["rays"], r["self"])
+                        gm.save()
+                    else:
+                        fit = self.gmap_check(r)
+                        if fit is not False:     # 位置對得上（或前方還沒畫過牆）才拿這一面更新牆：畫錯的牆會被視線穿過扣掉
+                            n = gm.scan(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), r["rays"],
+                                        max_dist=self.GMAP_MAX_DIST, self_depth=r["self"])
+                            gm.save()
+                            self.gmap_log("視覺更新牆", 新牆=n)
+                        self.gmap_obj_hint = self.gmap_check_objects(r)
         except Exception as e:  # noqa: BLE001
             print(f"   陣列地圖這一輪出錯（不影響他玩）：{e}")
             self.gmap_log("出錯", 原因=str(e)[:160])
@@ -10546,15 +10601,18 @@ class FlowAgent(ProcedureMixin, Agent):
         gm = getattr(self, "gmap", None)
         if gm is None:
             return ""
-        hint = getattr(self, "gmap_hint", "") or ""
+        hint = NL.join(x for x in (getattr(self, "gmap_hint", ""), getattr(self, "gmap_obj_hint", "")) if x)
         if not gm.scale:
             ref = ("、".join(str(x) for x in gm.samples[-6:]) if gm.samples else "（還沒有）")
             hint = (hint + NL if hint else "") + (
-                "📏 **深度比例還沒定，牆畫不出來——要你自己量**（使用者規定）：走到正對一面牆、前方還有 3 步以上空間、沒有面板蓋著的地方，"
+                "📏 **要畫地圖，第一步就是量比例**（使用者 10/02）。深度比例還沒定，牆畫不出來——要你自己量"
+                + (f"（程式已經替你原地看過、先存著 {len(gm.pending)} 面，量好就一次補畫）" if gm.pending else "")
+                + "：走到正對一面牆、前方還有 3 步以上空間、沒有面板蓋著的地方，"
                 '送 {"t":"量比例"}；程式會替你走 1.2 秒、比較前後的深度，算出「深度 1 單位＝幾步」。'
                 '自己算好了也可以直接 {"t":"定比例","比例":0.5}。'
                 f"程式在你走路時順便量到的參考值：{ref}（很散，只當參考）。")
-        tail = ("這張地圖是**陣列**：出生點是原點，牆是程式第一次到那裡時用視覺深度畫的，之後你的位置用「走了幾秒＋轉了幾度」推算。"
+        tail = ("這張地圖是**陣列**（同一個場景只有一張）：出生點是原點；第一次到一個地方，程式替你站著不動、一次轉 90 度看四面，用視覺深度畫牆；"
+                "之後每幾輪用當下的畫面再核對牆的距離和東西的位置；你的位置用「走了幾秒＋轉了幾度」推算。"
                 + NL + '要去某一格或某個記過的東西：{"t":"走到記過的","name":"名字"}，程式會照陣列找一條不穿牆的路帶你走。'
                 + NL + '互動成功的東西程式會自動記成互動物；你自己也可以記：'
                 + '{"t":"記互動物","name":"名字","功能":"按了會怎樣","用法":"怎麼按","前":1}、'
@@ -10562,6 +10620,23 @@ class FlowAgent(ProcedureMixin, Agent):
         return NL.join(x for x in (gm.text(self.pos[0], self.pos[1], getattr(self, "yaw", 0.0), radius=8), hint, tail) if x)
 
     MEASURE_FILE = "量測值.json"
+
+    def measure_key(self):
+        """量測值依場景（空間名）分開記，跟陣列地圖同一把鑰匙（10/02 起不再用 Roblox place）。"""
+        return str(getattr(self, "space", "") or self.SPACE0)
+
+    def gmap_replay(self):
+        """比例剛定好：把之前沒比例時存著的視野一次補畫成牆。"""
+        gm = getattr(self, "gmap", None)
+        if gm is None or not gm.scale or not gm.pending:
+            return 0
+        n = len(gm.pending)
+        new = gm.replay_pending(max_dist=self.GMAP_MAX_DIST)
+        gm.save()
+        print(f"   🗺 陣列地圖：比例定了，把之前存著的 {n} 面視野補畫成牆，新畫 {new} 格")
+        self.gmap_log("補畫", 視野=n, 新牆=new)
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 比例定了，程式把你之前轉頭看過的 {n} 面補畫進陣列地圖（新畫 {new} 格牆）")
+        return new
 
     def measures_load(self):
         try:
@@ -10574,7 +10649,7 @@ class FlowAgent(ProcedureMixin, Agent):
         深度比例依 place 分開記，另存一個「預設」給同一支遊戲還沒量過的場景用；順便把視角刻度抄一份進來，一眼看全。"""
         try:
             d = self.measures_load()
-            key = str(self.current_place() or "未知")
+            key = self.measure_key()
             stamp = datetime.now().strftime("%m/%d %H:%M")
             d.setdefault("深度比例", {})[key] = {"值": v, "方法": how, "時間": stamp}
             d["深度比例"]["預設"] = {"值": v, "來自": key, "時間": stamp}
@@ -10588,7 +10663,7 @@ class FlowAgent(ProcedureMixin, Agent):
             json.dump(d, open(os.path.join(self.dir, self.MEASURE_FILE), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
             man = getattr(self, "manual", None)
             if isinstance(man, dict):
-                man["深度比例"] = f"深度 1 單位＝{v} 步（{how}，{stamp}，place {key}）"
+                man["深度比例"] = f"深度 1 單位＝{v} 步（{how}，{stamp}，場景 {key}）"
                 self.save_manual()
         except Exception as e:  # noqa: BLE001
             print(f"   量測值存檔失敗：{e}")
@@ -10624,6 +10699,7 @@ class FlowAgent(ProcedureMixin, Agent):
             gm.scale = round(v, 3)
             gm.save()
             self.measures_save_scale(gm.scale, "量比例（程式替你走 1.2 秒量的）")
+            self.gmap_replay()
             msg = f"量到：走 {walked:.1f} 秒，正前方深度 {z0:.2f}→{z1:.2f}（各線差的中位數 {dd:.2f}）→ 深度 1 單位＝{gm.scale} 步。已定案，之後開始畫牆"
         else:
             msg = (f"沒量成：走 {walked:.1f} 秒，正前方深度 {z0}→{z1}" + (f"（{why}）" if why else "")
@@ -10649,6 +10725,7 @@ class FlowAgent(ProcedureMixin, Agent):
         gm.scale = round(v, 3)
         gm.save()
         self.measures_save_scale(gm.scale, "定比例（他自己填的）")
+        self.gmap_replay()
         print(f"   🗺 他自己定了深度比例：1 單位＝{gm.scale} 步")
         self.gmap_log("量比例", 比例=gm.scale, 成功=True, 來源="他自己定")
         self.note_progress("定比例")
