@@ -5010,6 +5010,12 @@ class FlowAgent(ProcedureMixin, Agent):
             out += ("　⚠ **那一下沒有效果**。同樣的做法不會突然有效——"
                     "這一輪換別的做法（換方向、先關掉擋住的東西、先確認游標有沒有被鎖），"
                     "不要再做一次一樣的事。")
+        gm = getattr(self, "gmap", None)
+        if self.gmap_on() and gm is not None and not gm.scale:
+            # 2026-10-03 使用者：「要提醒他量比例」——只提醒，不替他量、不加賞罰
+            out += (NL + "　📏 **提醒：這個場景的深度比例你還沒量，地圖畫不出牆**"
+                    + (f"（已經替你存著 {len(gm.pending)} 面等著畫）" if gm.pending else "")
+                    + '。找一個正對牆、前方有 3 步以上空間、沒有面板蓋著的時候，送 {"t":"量比例"}。')
         return out + NL
 
     def repeat_alarm(self, n=6):
