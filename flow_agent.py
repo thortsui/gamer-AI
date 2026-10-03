@@ -3301,6 +3301,29 @@ class FlowAgent(ProcedureMixin, Agent):
             return False, pid                      # 遊戲.json 沒寫 places 就不做這個判斷
         return (pid not in self.GAME_PLACES), pid
 
+    def relaunch_roblox_if_gone(self):
+        """2026-10-03 使用者：Roblox 被關掉（10/03 09:31 那次空等了 3 小時）就自己用深層連結重開回大廳。"""
+        try:
+            import subprocess
+            out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/NH"],
+                                 capture_output=True, text=True, timeout=15).stdout
+        except Exception:  # noqa: BLE001
+            return False
+        if "RobloxPlayerBeta" in out or not self.LOBBY_PLACE:
+            return False
+        url = f"roblox://experiences/start?placeId={self.LOBBY_PLACE}"
+        print(f"   🔁 Roblox 不在了 → 程式用深層連結重開回「{self.game}」大廳：{url}")
+        try:
+            os.startfile(url)          # noqa: S606  (Windows 專用)
+        except Exception as e:  # noqa: BLE001
+            print(f"   重開 Roblox 失敗：{e}")
+            return False
+        self.stat["重開Roblox"] = self.stat.get("重開Roblox", 0) + 1
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ Roblox 被關掉了，程式替你重開並連回「{self.game}」大廳——"
+                            "畫面回來後先做開場確認三件事")
+        time.sleep(30)
+        return True
+
     def rejoin_correct_game(self, why=""):
         """用 roblox:// 深層連結直接跳回正確的遊戲大廳（進錯遊戲時的唯一可靠救援）。"""
         if time.time() - getattr(self, "_rejoin_at", 0) < 180:
@@ -4971,6 +4994,50 @@ class FlowAgent(ProcedureMixin, Agent):
                        + f"→ {r.get('結果', '')}")
         return NL.join(out)
 
+    def top_notes_text(self):
+        """2026-10-03 使用者：「記錄好 都做」——放在面板最上面的三件事。只告訴他，不替他做、不加賞罰。
+        ① 量比例提醒（放在【上一步】最後面他沒看到）；② 他自己上次收工寫的檢討（以前只存檔、沒讀回來）；
+        ③ 他寫「視角水平」但水平儀顯示歪了——把矛盾指給他看。"""
+        out = []
+        gm = getattr(self, "gmap", None)
+        if self.gmap_on() and gm is not None and not gm.scale:
+            out.append("📏 **提醒：這個場景的深度比例你還沒量，地圖畫不出牆**"
+                       + (f"（已經替你存著 {len(gm.pending)} 面等著畫）" if gm.pending else "")
+                       + '。要畫地圖第一步就是量比例：找一個正對牆、前方有 3 步以上空間、沒有面板蓋著的時候，送 {"t":"量比例"}。')
+        rv = self.last_review_text()
+        if rv:
+            out.append(rv)
+        try:
+            pd = float(getattr(self, "pitch_deg", 0.0) or 0.0)
+            seen = str(getattr(self, "last_seen", "") or "") + str(getattr(self, "_last_think", "") or "")
+            if abs(pd) > 20 and "水平" in seen:
+                out.append(f"🧭 **你上一輪寫「視角水平」，但水平儀顯示{'抬頭' if pd > 0 else '低頭'} {abs(pd):.0f} 度**——"
+                           "以水平儀為準（等級表第 18 條），先把視角修回水平再做別的。")
+        except (TypeError, ValueError):
+            pass
+        return NL.join(out)
+
+    def last_review_text(self):
+        """讀這支遊戲最近一次收工檢討（記憶/進步日誌/最新一天.md 的「它自己寫的」），開機讀一次就快取。"""
+        if getattr(self, "_review_cache", None) is None:
+            self._review_cache = ""
+            try:
+                import glob as _glob
+                fs = sorted(f for f in _glob.glob(os.path.join(self.dir, "進步日誌", "20*.md")))
+                if fs:
+                    txt = open(fs[-1], encoding="utf-8").read()
+                    i = txt.find("## 它自己寫的")
+                    if i >= 0:
+                        body = txt[i + len("## 它自己寫的"):]
+                        body = body.split("→ 已寫入")[0].split(NL + "## ")[0].strip()
+                        keep = [l.strip() for l in body.splitlines() if l.strip().startswith(("我還是做不好", "明天要試", "我比昨天進步"))]
+                        if keep:
+                            self._review_cache = ("📓 **你上次收工自己寫的檢討**（" + os.path.basename(fs[-1])[:-3]
+                                                  + "，是你自己寫的，照著做）：" + NL + NL.join("　" + l for l in keep))
+            except Exception:  # noqa: BLE001
+                pass
+        return self._review_cache
+
     def last_step_text(self):
         """2026-09-22 使用者：**上一步做了什麼、為什麼做、結果如何**要單獨拉出來講。
 
@@ -5010,12 +5077,6 @@ class FlowAgent(ProcedureMixin, Agent):
             out += ("　⚠ **那一下沒有效果**。同樣的做法不會突然有效——"
                     "這一輪換別的做法（換方向、先關掉擋住的東西、先確認游標有沒有被鎖），"
                     "不要再做一次一樣的事。")
-        gm = getattr(self, "gmap", None)
-        if self.gmap_on() and gm is not None and not gm.scale:
-            # 2026-10-03 使用者：「要提醒他量比例」——只提醒，不替他量、不加賞罰
-            out += (NL + "　📏 **提醒：這個場景的深度比例你還沒量，地圖畫不出牆**"
-                    + (f"（已經替你存著 {len(gm.pending)} 面等著畫）" if gm.pending else "")
-                    + '。找一個正對牆、前方有 3 步以上空間、沒有面板蓋著的時候，送 {"t":"量比例"}。')
         return out + NL
 
     def repeat_alarm(self, n=6):
@@ -7924,6 +7985,8 @@ class FlowAgent(ProcedureMixin, Agent):
             if self._blind in (1, 5) or self._blind % 30 == 0:
                 print(f"   🔒 畫面拿不到（電腦鎖定或 Roblox 不在前景），第 {self._blind} 次——"
                       f"這一輪不呼叫模型、不記帳、不學東西；等畫面回來")
+            if self._blind % 15 == 3:
+                self.relaunch_roblox_if_gone()
             time.sleep(20)
             return
         if getattr(self, "_blind", 0):
@@ -8371,6 +8434,9 @@ class FlowAgent(ProcedureMixin, Agent):
         _rep = self.repeat_alarm()
         if _rep:                      # 2026-09-18：重複警報放**最前面**，不要埋在兩萬字裡
             text = _rep + NL + NL + text
+        _top = self.top_notes_text()
+        if _top:                      # 2026-10-03 使用者：量比例提醒、他自己的檢討、視角矛盾——放最上面
+            text = _top + NL + NL + text
         # 把反射看到的事實交給快思去決定要做什麼（反射本身已在截圖後跑過）
         if self._seen_reflex:
             text = (text + NL + NL
