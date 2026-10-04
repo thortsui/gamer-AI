@@ -55,6 +55,16 @@ def print(*args, **kw):  # noqa: A001
         _LAST_PRINT["line"] = s
     builtins.print(*args, **kw)
 
+
+def log_says_left(raw):
+    """Roblox 用戶端 log 的一段（bytes）→ 人是不是已經離開遊戲回到 Roblox 自己的頁面。
+    最後一筆 leaveUGCGameInternal 比最後一筆 Joining game 晚＝True；反過來＝False；兩種都沒有＝None。"""
+    j = raw.rfind(b"! Joining game")
+    lv = raw.rfind(b"leaveUGCGameInternal")
+    if j < 0 and lv < 0:
+        return None
+    return lv > j
+
 # 2026-09-14 專案結構（使用者要求）：
 #   核心/共用・基礎操作・學習模組 ← 每個遊戲都載入，換遊戲照用
 #   專案/<遊戲>/提示・工作流程・記憶・素材 ← 只有玩這個遊戲時才載入
@@ -3223,7 +3233,12 @@ class FlowAgent(ProcedureMixin, Agent):
             import glob as _glob
             import re as _re
             d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Roblox", "logs")
-            files = sorted(_glob.glob(os.path.join(d, "*.log")), key=os.path.getmtime, reverse=True)[:2]
+            # 2026-10-04：只看 Player 的 log。Studio 開著時它的 log 比較新，裡面也有「Joining game … place N」
+            # （試玩／Team Create），會被當成「現在人在那個 place」→ 假的進錯遊戲、每 3 分鐘被深層連結重連一次
+            # （10/02 發現的坑；10/04 23:14 實際發生：Studio 開著 89593991832201，他人在 105778205563598）。
+            files = sorted([f for f in _glob.glob(os.path.join(d, "*Player*.log"))
+                            if "CrashHandler" not in os.path.basename(f)],
+                           key=os.path.getmtime, reverse=True)[:3]
             for fp in files:
                 try:
                     size = os.path.getsize(fp)
@@ -3251,7 +3266,12 @@ class FlowAgent(ProcedureMixin, Agent):
             import glob as _glob
             import re as _re
             d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Roblox", "logs")
-            files = sorted(_glob.glob(os.path.join(d, "*.log")), key=os.path.getmtime, reverse=True)[:2]
+            # 2026-10-04：只看 Player 的 log。Studio 開著時它的 log 比較新，裡面也有「Joining game … place N」
+            # （試玩／Team Create），會被當成「現在人在那個 place」→ 假的進錯遊戲、每 3 分鐘被深層連結重連一次
+            # （10/02 發現的坑；10/04 23:14 實際發生：Studio 開著 89593991832201，他人在 105778205563598）。
+            files = sorted([f for f in _glob.glob(os.path.join(d, "*Player*.log"))
+                            if "CrashHandler" not in os.path.basename(f)],
+                           key=os.path.getmtime, reverse=True)[:3]
             for fp in files:
                 try:
                     size = os.path.getsize(fp)
@@ -3322,6 +3342,60 @@ class FlowAgent(ProcedureMixin, Agent):
         self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ Roblox 被關掉了，程式替你重開並連回「{self.game}」大廳——"
                             "畫面回來後先做開場確認三件事")
         time.sleep(30)
+        return True
+
+    OUT_OF_GAME_SECS = 60        # 離開遊戲後超過這麼久還沒回到任何一場，程式就用深層連結送回
+
+    def out_of_game(self):
+        """2026-10-04 使用者：「改掉」離開後回不來。
+        人是不是已經離開遊戲、回到 Roblox 自己的頁面（首頁／別的遊戲的頁面／商店頁）——看 Roblox log：
+        最後一筆 leaveUGCGameInternal 比最後一筆 Joining game 晚＝離開之後沒有再加入任何一場。
+        這時 current_place() 還是舊的 place，wrong_game() 不會動；Roblox 行程也還在，relaunch 也不會動
+        （10/04 11:16 他就這樣停在別人遊戲的 399 Robux 購買頁 95 分鐘）。讀不到紀錄就當作還在遊戲裡。"""
+        if time.time() - getattr(self, "_out_at", 0) < 15:
+            return getattr(self, "_out", False)
+        self._out_at = time.time()
+        out = False
+        try:
+            d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Roblox", "logs")
+            files = [f for f in glob.glob(os.path.join(d, "*Player*.log"))
+                     if "CrashHandler" not in os.path.basename(f)]       # Studio 的 log 不看
+            for fp in sorted(files, key=os.path.getmtime, reverse=True)[:3]:
+                try:
+                    size = os.path.getsize(fp)
+                    with open(fp, "rb") as fh:
+                        fh.seek(max(0, size - 20_000_000))
+                        raw = fh.read()
+                except OSError:
+                    continue
+                left = log_says_left(raw)
+                if left is None:
+                    continue                    # 深層連結轉接用的短 log 沒有這兩種紀錄，看下一個
+                out = left
+                break
+        except Exception:  # noqa: BLE001
+            out = False
+        self._out = out
+        return out
+
+    def back_into_game(self, secs):
+        """人不在任何一場遊戲裡超過 OUT_OF_GAME_SECS → 用 roblox:// 深層連結送回這個遊戲的大廳。"""
+        if time.time() - getattr(self, "_rejoin_at", 0) < 180 or not self.LOBBY_PLACE:
+            return False
+        self._rejoin_at = time.time()
+        url = f"roblox://experiences/start?placeId={self.LOBBY_PLACE}"
+        print(f"   🔁 人不在遊戲裡已經 {secs:.0f} 秒（Roblox 紀錄：離開之後沒有再加入）"
+              f"→ 程式用深層連結送回「{self.game}」：{url}")
+        try:
+            os.startfile(url)          # noqa: S606  (Windows 專用)
+        except Exception as e:  # noqa: BLE001
+            print(f"   深層連結失敗：{e}")
+            return False
+        self.stat["送回遊戲"] = self.stat.get("送回遊戲", 0) + 1
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙ 程式替你做了：你離開遊戲之後 {secs:.0f} 秒都沒有回到遊戲裡，"
+                            f"程式用連結把你送回「{self.game}」大廳——畫面回來後先做開場確認三件事")
+        self._out_since, self._out_at = 0, 0
+        time.sleep(12)
         return True
 
     def rejoin_correct_game(self, why=""):
@@ -8107,7 +8181,7 @@ class FlowAgent(ProcedureMixin, Agent):
             bad, pid = self.wrong_game()
             if bad:
                 self.wrong_game_rounds = getattr(self, "wrong_game_rounds", 0) + 1
-                print(f"   🚨 現在的 place {pid} 不是動物醫院（第 {self.wrong_game_rounds} 輪）")
+                print(f"   🚨 現在的 place {pid} 不是「{self.game}」（第 {self.wrong_game_rounds} 輪）")
                 if self.wrong_game_rounds >= 2:
                     self.wrong_game_rounds = 0
                     self.rejoin_correct_game(f"place {pid}")
@@ -8115,6 +8189,18 @@ class FlowAgent(ProcedureMixin, Agent):
                 self.wrong_game_rounds = 0
         except Exception as e:  # noqa: BLE001
             print(f"   檢查遊戲身分失敗：{e}")
+        # 2026-10-04 使用者「改掉」：他 esc＋l 離開之後人在 Roblox 首頁／別的遊戲的頁面，沒加入任何 place，
+        # 上面那個檢查不會動 → 超過一分鐘還沒回到遊戲裡，程式送他回來
+        try:
+            if self.out_of_game():
+                self._out_since = getattr(self, "_out_since", 0) or time.time()
+                gone = time.time() - self._out_since
+                if gone >= self.OUT_OF_GAME_SECS:
+                    self.back_into_game(gone)
+            else:
+                self._out_since = 0
+        except Exception as e:  # noqa: BLE001
+            print(f"   檢查是否還在遊戲裡失敗：{e}")
         # 櫃檯的東西他一直對不準（電腦成功率只有兩成）：眼睛看得很清楚的時候，程式直接幫他對準按一次
         try:
             if (self.flow in ("報到", "治療") and not self.in_lobby()
@@ -8705,18 +8791,24 @@ class FlowAgent(ProcedureMixin, Agent):
             pass
         if _dest:
             self._goto_place = ""
-            self._routed = _dest
             moves = [a for a in actions if isinstance(a, dict) and (
                 (a.get("t") == "key" and str(a.get("k", "")).lower() in ("w", "a", "s", "d"))
                 or (a.get("t") == "look" and a.get("dx")))]
-            for a in moves:
-                actions.remove(a)
-            print(f"   🗺➡ 他說要去「{_dest}」→ 用地圖算路線帶他走（拿掉他自己的 {len(moves)} 個移動動作）")
-            try:
-                self.goto_remembered(_dest, why="他說要去")
-                self.stat["地圖帶路"] = self.stat.get("地圖帶路", 0) + 1
-            except Exception as e:  # noqa: BLE001
-                print(f"   地圖帶路失敗：{e}")
+            if moves:
+                # 2026-10-04 使用者：「改掉」——地圖帶路不要蓋掉他自己的移動。
+                # 10/04 農場遊戲 1200 輪裡拿掉 289 次：「要去」多半是地圖重問補的（開場空地／這裡旁邊），
+                # 程式把他排好的 w 拿掉、再判「已經在旁邊了」→ 這輪變成沒動作 → 小步驟 −20 連扣。
+                # 現在：他自己送了移動就照他的走；只有他沒送移動、只說「要去」時程式才帶路。
+                print(f"   🗺⏸ 他自己送了 {len(moves)} 個移動動作，照他的走，這輪不帶路去「{_dest}」")
+                self.stat["帶路讓給他"] = self.stat.get("帶路讓給他", 0) + 1
+            else:
+                self._routed = _dest
+                print(f"   🗺➡ 他說要去「{_dest}」、自己沒送移動 → 用地圖算路線帶他走")
+                try:
+                    self.goto_remembered(_dest, why="他說要去")
+                    self.stat["地圖帶路"] = self.stat.get("地圖帶路", 0) + 1
+                except Exception as e:  # noqa: BLE001
+                    print(f"   地圖帶路失敗：{e}")
         for a in list(actions):
             if not isinstance(a, dict):
                 continue
