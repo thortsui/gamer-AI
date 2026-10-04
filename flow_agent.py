@@ -3356,7 +3356,9 @@ class FlowAgent(ProcedureMixin, Agent):
         最後一筆 leaveUGCGameInternal 比最後一筆 Joining game 晚＝離開之後沒有再加入任何一場。
         這時 current_place() 還是舊的 place，wrong_game() 不會動；Roblox 行程也還在，relaunch 也不會動
         （10/04 11:16 他就這樣停在別人遊戲的 399 Robux 購買頁 95 分鐘）。讀不到紀錄就當作還在遊戲裡。"""
-        if time.time() - getattr(self, "_out_at", 0) < 15:
+        # 快取只留 3 秒：10/05 07:26 實跑，15 秒快取讓「離開後的下一輪」拿到舊的 False，
+        # 晚了一輪才送回，他已經點了別人遊戲的播放鍵（進去 2 秒就被這裡拉回）。
+        if time.time() - getattr(self, "_out_at", 0) < 3:
             return getattr(self, "_out", False)
         self._out_at = time.time()
         out = False
