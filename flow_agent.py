@@ -3348,6 +3348,7 @@ class FlowAgent(ProcedureMixin, Agent):
     # 10/05 02:16 實跑：原本設 60 秒，他離開 39 秒後就點了頁面上的藍色播放鍵——那一頁是別人遊戲的頁面——
     # 又進錯遊戲 3 分鐘才被拉回。改成 0＝程式一發現他不在遊戲裡（離開後的下一輪）就送回，不等他去點。
     OUT_OF_GAME_SECS = 0
+    BACK_COOLDOWN = 90           # 送回之後這麼久之內不重送（等它加入完）
 
     def out_of_game(self):
         """2026-10-04 使用者：「改掉」離開後回不來。
@@ -3383,9 +3384,14 @@ class FlowAgent(ProcedureMixin, Agent):
 
     def back_into_game(self, secs):
         """人不在任何一場遊戲裡超過 OUT_OF_GAME_SECS → 用 roblox:// 深層連結送回這個遊戲的大廳。"""
-        if time.time() - getattr(self, "_rejoin_at", 0) < 180 or not self.LOBBY_PLACE:
+        # 冷卻只是為了不要在「正在加入」的那幾十秒裡重複送連結（實測加入最慢 53 秒）。
+        # 10/05 03:25 實跑：原本跟進錯遊戲共用 180 秒，他被送回後 2 分半又離開，差 1 秒被冷卻擋掉，
+        # 又自己點進別人的遊戲。改成自己的 90 秒；剛做過進錯遊戲救援的 60 秒內也不重送。
+        now = time.time()
+        if (now - getattr(self, "_back_at", 0) < self.BACK_COOLDOWN
+                or now - getattr(self, "_rejoin_at", 0) < 60 or not self.LOBBY_PLACE):
             return False
-        self._rejoin_at = time.time()
+        self._back_at = now
         url = f"roblox://experiences/start?placeId={self.LOBBY_PLACE}"
         print(f"   🔁 人不在遊戲裡已經 {secs:.0f} 秒（Roblox 紀錄：離開之後沒有再加入）"
               f"→ 程式用深層連結送回「{self.game}」：{url}")
