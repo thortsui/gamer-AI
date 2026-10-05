@@ -6637,8 +6637,27 @@ class FlowAgent(ProcedureMixin, Agent):
                   "這步做完", "大動作完成", "寫步驟", "我在", "標點", "切空間", "記知識", "記問題", "基礎確認",
                   "記互動物", "記觸碰物", "量比例", "定比例", "改提示")
 
+    # 2026-10-06 使用者：「盡量都要開思考、減少反射的方式遊玩，但注意不要閒置太久」
+    # GAMER_PLAN_STEPS=1：快思（開推理）每一輪只決定「現在這一步」，做完下一輪再看畫面、再想一次——
+    # 不排後面的步，所以幾乎沒有不思考的反射檢查輪（只剩他同一輪送兩個按鍵時，第二個還是先由檢查輪看過再按）。
+    # 不用寫 步，輸出短，一輪想的時間也短一點（人站著不動的時間）。預設 3＝09/29 的三步＋反射檢查。
+    try:
+        PLAN_STEPS = max(1, min(3, int(os.environ.get("GAMER_PLAN_STEPS", "3") or 3)))
+    except ValueError:
+        PLAN_STEPS = 3
+
     def plan3_ask(self):
         """快思那一輪多要的東西：三步、每步附動作與「做完會看到什麼」。"""
+        if self.PLAN_STEPS <= 1:
+            return ("【這一輪只決定現在這一步】（2026-10-06 使用者：盡量都開思考、減少反射）" + NL
+                    + "現在每一輪你都是先想過再決定，所以**不用排後面的步、不用寫 步**：只寫這一輪的 a。"
+                    + "做完之後，下一輪你會再看一次畫面、再想一次。" + NL
+                    + "**一次看畫面只按一個**：a 裡只放一個會動到遊戲的動作（走、轉頭、按 E、點、滾輪擇一）；"
+                    + "不動到遊戲的工具（這步做完、我在、標點、記知識…）可以一起放。放了兩個，程式只先做第一個，"
+                    + "第二個排到下一輪、由檢查輪看畫面確認再按。" + NL
+                    + "**不要閒置太久**（使用者交代）：你在想的時候，人是站著不動的。想清楚「現在畫面是什麼 → 這一下按什麼 → "
+                    + "按完應該看到什麼」就送出，不用把面板重講一遍。" + NL
+                    + '做完大動作的一步，把 {"t":"這步做完"} 放進 a。')
         return ("【快思要直接給三步的動作】（2026-09-29 使用者定）" + NL
                 + "除了這一輪的 a，還要把**現在這一步、接著那一步、然後那一步**各自的動作寫清楚，放在 步 裡：" + NL
                 + '　"步":[{"做":"後退離開牆面","a":[{"t":"key","k":"s","d":1.0}],"成":"畫面拉開、看得到走廊"},' + NL
@@ -6675,12 +6694,13 @@ class FlowAgent(ProcedureMixin, Agent):
             tools = [a for a in (o.get("a") or []) if isinstance(a, dict) and str(a.get("t") or "") not in game]
             o["a"] = tools + list(first["a"])
             self._plan_cur = first
-            self._plan_q = steps[1:3]
+            self._plan_q = steps[1:self.PLAN_STEPS]        # GAMER_PLAN_STEPS=1 → 不排後面的步，下一輪還是快思
             self.stat["快思三步"] = self.stat.get("快思三步", 0) + 1
             print("   🧠 快思排了三步：" + " → ".join(f"{i + 1}.{s['做']}" for i, s in enumerate(steps[:3]))
                   + f"（這輪做 1，佇列 {len(self._plan_q)}）")
-            self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 快思排三步："
-                                + " → ".join(s["做"] for s in steps[:3]))
+            if self.PLAN_STEPS > 1:
+                self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 快思排三步："
+                                    + " → ".join(s["做"] for s in steps[:3]))
             return o
         if not getattr(self, "_reflex_check", False):
             return o
