@@ -8789,7 +8789,8 @@ class FlowAgent(ProcedureMixin, Agent):
         raw, trunc, ttft, _ = stream_json(self.endpoint, self.model, self.sys_prompt(mode),
                                           content_use,
                                           tokens_use, time.time() + dl, 0.2,
-                                          effort=mode)
+                                          # 2026-10-05 使用者：快思（每輪做決定的這一次）開回推理；其他小呼叫照舊不推理
+                                          effort=("快思推理" if mode == 快思 else mode))
         self.tick("快思")
         self.log_panel(mode, content_use, raw)
         o = parse_json_loose(raw) or {}
