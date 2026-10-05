@@ -5084,6 +5084,10 @@ class FlowAgent(ProcedureMixin, Agent):
         ① 量比例提醒（放在【上一步】最後面他沒看到）；② 他自己上次收工寫的檢討（以前只存檔、沒讀回來）；
         ③ 他寫「視角水平」但水平儀顯示歪了——把矛盾指給他看。"""
         out = []
+        try:
+            out.append(self.acc_text())        # 2026-10-05 使用者：給他目標「先優先提高正確率」
+        except Exception:  # noqa: BLE001
+            pass
         gm = getattr(self, "gmap", None)
         if self.gmap_on() and gm is not None and not gm.scale:
             out.append("📏 **提醒：這個場景的深度比例你還沒量，地圖畫不出牆**"
@@ -5101,6 +5105,98 @@ class FlowAgent(ProcedureMixin, Agent):
         except (TypeError, ValueError):
             pass
         return NL.join(out)
+
+    # ---------------- 正確率（2026-10-05 使用者：「給他目標 先優先提高正確率」）
+    ACC_KEEP = 40
+
+    def acc_note(self, summ, dn):
+        """這一輪按下去的那一下有沒有反應。按 E 用程式判的成功／沒反應；其他用畫面有沒有變（變化 ≥3）。
+        程式帶路走的、只用工具或只等的輪次不算。只記錄給他看，不加分也不扣分。"""
+        import re as _re
+        if getattr(self, "_routed", ""):
+            return
+        s = str(summ or "")
+        if "長按 E" in s and ("成功）" in s or "沒反應）" in s):
+            kind, ok = "按E", "成功）" in s
+        elif dn is None or dn < 0:
+            return
+        elif "長按 E" in s or _re.search(r"按 e ", s):
+            kind, ok = "按E", dn >= 3
+        elif "點「" in s or "點字" in s:
+            kind, ok = "點", dn >= 3
+        elif _re.search(r"按 [wasd] ", s):
+            kind, ok = "走", dn >= 3
+        elif "轉視角" in s:
+            kind, ok = "轉", dn >= 3
+        else:
+            return
+        self.acc_log = (list(getattr(self, "acc_log", []) or []) + [(kind, bool(ok))])[-self.ACC_KEEP:]
+        self.stat["有反應" if ok else "沒反應"] = self.stat.get("有反應" if ok else "沒反應", 0) + 1
+
+    def acc_text(self):
+        """面板最上面那一行：使用者給的目標＋他最近幾下的正確率。"""
+        head = ("🎯 **使用者給你的目標（10/05）：先優先提高正確率**——每一下按下去之前先看畫面確認，按下去要有反應；"
+                "寧可少按，不要空按。")
+        log = list(getattr(self, "acc_log", []) or [])
+        tail = ('想提高它，你可以自己改【你自己寫的提示】：{"t":"改提示","內容":"你要每一輪都看到的話"}')
+        if len(log) < 5:
+            return head + NL + "　（你的正確率還在累計，按幾下之後這裡會出現數字。）" + tail
+        n, okn = len(log), sum(1 for _k, ok in log if ok)
+        parts = []
+        for k in ("按E", "點", "走", "轉"):
+            sub = [ok for kk, ok in log if kk == k]
+            if sub:
+                parts.append(f"{k} {sum(sub)}/{len(sub)}")
+        return (head + NL + f"　你最近 {n} 下：**有反應 {okn} 下（{100 * okn // n}%）**｜" + "、".join(parts) + "。" + tail)
+
+    # ---------------- 他自己寫的提示（2026-10-05 使用者：「你讓他自己去更新 Prompt」）
+    MY_PROMPT_FILE = "98_我自己寫的提示.md"
+    MY_PROMPT_MAX = 1200
+
+    def edit_my_prompt(self, a):
+        """{"t":"改提示","內容":"…"}：整段換成他寫的；加 "加":"一句" 是接在後面；"刪":"舊的那一句" 是拿掉那一句。
+        寫進 專案/<遊戲>/提示/98_我自己寫的提示.md（system 提示的倒數第二段，每一輪都會讀到），舊版留在 記憶/我的提示歷史.jsonl。"""
+        d = project_dir(self.game, "提示")
+        os.makedirs(d, exist_ok=True)
+        fp = os.path.join(d, self.MY_PROMPT_FILE)
+        head = ("---" + NL + "章節: §98 我自己寫的提示" + NL + "適用: 全部" + NL + "---" + NL * 2
+                + "【你自己寫的提示】（這一段是你自己寫的、你自己可以改：" + '{"t":"改提示","內容":"…"}'
+                + "；屬於第 3 級，跟上面的文件抵觸時以上面為準）" + NL)
+        old = ""
+        try:
+            raw = open(fp, encoding="utf-8").read()
+            i = raw.find("抵觸時以上面為準）")
+            old = raw[i + len("抵觸時以上面為準）"):].strip() if i >= 0 else ""
+        except OSError:
+            pass
+        new = old
+        body = str(a.get("內容") or a.get("content") or "").strip()
+        add = str(a.get("加") or "").strip()
+        cut = str(a.get("刪") or "").strip()
+        if body:
+            new = body
+        if cut and cut in new:
+            new = new.replace(cut, "").strip()
+        if add:
+            new = (new + NL + add).strip()
+        new = NL.join(l.rstrip() for l in new.splitlines() if l.strip())[:self.MY_PROMPT_MAX]
+        if not new or new == old:
+            print("   ✍ 改提示：內容是空的或跟原本一樣，沒有改")
+            return False
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write(head + new + NL)
+        try:
+            with open(os.path.join(self.dir, "我的提示歷史.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"時間": datetime.now().strftime("%m/%d %H:%M:%S"), "輪": self.stat.get("輪數", 0),
+                                    "舊": old, "新": new}, ensure_ascii=False) + NL)
+        except OSError:
+            pass
+        self.stat["改提示"] = self.stat.get("改提示", 0) + 1
+        print(f"   ✍ 他改了自己的提示（{len(old)} → {len(new)} 字）：{new[:80]}")
+        self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 你改了【你自己寫的提示】，下一輪起每一輪都會讀到："
+                            + new[:60])
+        self.note_progress("改提示")
+        return True
 
     def last_review_text(self):
         """讀這支遊戲最近一次收工檢討（記憶/進步日誌/最新一天.md 的「它自己寫的」），開機讀一次就快取。"""
@@ -6533,7 +6629,7 @@ class FlowAgent(ProcedureMixin, Agent):
     # ---------------- 快思三步佇列（2026-09-29 使用者：快思直接出前後三步的詳細動作，反射只檢查）
     PLAN3_ACTS = ("key", "hold", "click", "look", "aim", "scroll", "wait", "點字", "走到記過的", "水平歸零",
                   "這步做完", "大動作完成", "寫步驟", "我在", "標點", "切空間", "記知識", "記問題", "基礎確認",
-                  "記互動物", "記觸碰物", "量比例", "定比例")
+                  "記互動物", "記觸碰物", "量比例", "定比例", "改提示")
 
     def plan3_ask(self):
         """快思那一輪多要的東西：三步、每步附動作與「做完會看到什麼」。"""
@@ -6544,7 +6640,10 @@ class FlowAgent(ProcedureMixin, Agent):
                 + '　　　　{"做":"走到電腦前","a":[{"t":"key","k":"w","d":2.0,"g":"電腦"}],"成":"電腦變大、出現E提示"}]' + NL
                 + "規矩：①的 a 就是這一輪要做的（a 可以省略，程式會用 步[0].a）；每一步小到照著做不用想；"
                 + "「成」寫**畫面上看得到的變化**，反射就靠它判斷有沒有做成。" + NL
-                + "接下來的輪次由反射檢查：做成了程式直接做②、再做③；沒做成或三步做完，才回到你這裡重排。"
+                + "接下來的輪次由反射檢查：上一步做成了、**而且下一步要按的東西現在的畫面上對得上**，程式才做②、再做③；"
+                + "沒做成、畫面對不上、或三步做完，就回到你這裡重排。" + NL
+                + "**一次看畫面只按一個**：同一步裡放兩個會動到遊戲的動作（例如轉頭＋走、走＋按 E），程式只先做第一個，"
+                + "第二個排到下一輪、先看畫面確認再按。所以要按 E／點按鈕的那一步，前一步的「成」就要寫清楚：看到 E 提示、看到那顆按鈕。" + NL
                 + '做完大動作的一步，把 {"t":"這步做完"} 放進那一步的 a。')
 
     def plan3_apply(self, mode, o):
@@ -6584,11 +6683,27 @@ class FlowAgent(ProcedureMixin, Agent):
             ok = ok.strip().lower() in ("true", "是", "yes", "ok", "有", "1", "正常")
         why = str(o.get("為什麼") or o.get("why") or o.get("想") or "")[:40]
         cur = getattr(self, "_plan_cur", None) or {}
+        go = o.get("可以按")
+        if go is None:
+            go = o.get("go")
+        if isinstance(go, str):
+            go = go.strip().lower() in ("true", "是", "yes", "ok", "可以", "1", "對")
+        if ok and not go:
+            # 2026-10-05 使用者：按下去之前要先確認過畫面。上一步做成了，但下一步現在的畫面對不上（或他沒回答）→ 不按
+            nx = (self._plan_q[0] if self._plan_q else {})
+            self.stat["按前確認沒過"] = self.stat.get("按前確認沒過", 0) + 1
+            print(f"   🖐 反射：上一步「{cur.get('做', '')}」做成了，但下一步「{nx.get('做', '')}」"
+                  f"（{self.press_desc(nx.get('a'))}）現在的畫面對不上{'' if go is False else '（沒回答可以按）'} → 不按，換快思重排")
+            self._plan_q = []
+            o["a"] = [{"t": "換快思"}]
+            o["想"] = f"（反射）下一步現在不能按：{nx.get('做', '')}"
+            self.mark_step(f"按前確認沒過：{nx.get('做', '')}")
+            return o
         if ok:
             nxt = self._plan_q.pop(0)
             self._plan_cur = nxt
             self.stat["反射檢查通過"] = self.stat.get("反射檢查通過", 0) + 1
-            print(f"   ✅ 反射：上一步「{cur.get('做', '')}」做成了 → 做下一步「{nxt['做']}」（佇列剩 {len(self._plan_q)}）")
+            print(f"   ✅ 反射：上一步「{cur.get('做', '')}」做成了、下一步畫面確認可以按 → 做「{nxt['做']}」（佇列剩 {len(self._plan_q)}）")
             o["a"] = list(nxt["a"])
             o["想"] = f"（快思排的）{nxt['做']}"
             if not self._plan_q:
@@ -6603,24 +6718,70 @@ class FlowAgent(ProcedureMixin, Agent):
         return o
 
     def reflex_check_panel(self):
-        """反射有佇列時的提示：只問「上一步有沒有正常執行」，不決定動作。"""
+        """反射有佇列時的提示：檢查「上一步有沒有正常執行」＋確認「接下來要按的那一下，現在的畫面可不可以按」。不決定動作。"""
         cur = getattr(self, "_plan_cur", None) or {}
         q = list(getattr(self, "_plan_q", []) or [])
+        nxt = q[0] if q else {}
         parts = [self.ban_text(), self.last_step_text(),
                  "【快思交代的上一步】做「" + cur.get("做", "") + "」，做完應該看到：「" + (cur.get("成") or "（沒寫）") + "」",
-                 "【接下來排好的】" + ("；".join(f"{i + 2}.{s['做']}" for i, s in enumerate(q)) if q else "（這是最後一步）"),
+                 "【接下來要按的】" + (("做「" + nxt.get("做", "") + "」：" + self.press_desc(nxt.get("a"))) if nxt else "（這是最後一步）"),
+                 "【再後面排好的】" + ("；".join(f"{i + 3}.{s['做']}" for i, s in enumerate(q[1:])) if q[1:] else "（沒有了）"),
                  "【眼睛看到】" + (getattr(self, "_seen_reflex", "") or ""),
                  "【目前視角】" + self.gyro_text()[:200],
                  "【畫面上的字】" + self.text_text()[:400],
                  "【右上角任務】" + (getattr(self, "cur_task", "") or "（沒讀到）"),
                  self.short_mem_text(2)]
         body = NL.join(p for p in parts if p and p.strip())
+        # 2026-09-30 使用者：反射輪只檢查快思交代的事有沒有做到，不需要輸出別的（只回 ok）。
+        # 2026-10-05 使用者：「所有的按鍵按下去之前都需要確認過畫面再按」——10/05 實測，照排好的步直接送的 E
+        # 97 次、有結果的 66 次全部沒反應：按的那一輪沒有人看畫面上有沒有 E 提示。
+        # 現在檢查輪多回一個「可以按」：接下來要按的那一下，現在的畫面對不對得上。
         return (body + NL * 2
-                + "**你只做一件事：檢查。** 看畫面判斷上一步有沒有正常執行（畫面是不是變成快思說的樣子、或至少朝那個方向變了）。" + NL
-                + "做成了 → ok:true，程式馬上做下一步；沒做成、畫面沒變、跳出沒看過的東西、被傳送、死掉 → ok:false，換快思重排。" + NL
-                # 2026-09-30 使用者：反射輪只檢查快思交代的事有沒有做到，不需要輸出別的。
-                # 以前還要它寫 s／區／為什麼／task（約 50～60 個 token＝5 秒），現在只回 ok。
-                + '**不要自己送動作，也不要寫別的。**只輸出：{"ok":true} 或 {"ok":false}')
+                + "**你只做兩件事：檢查上一步、確認下一步。**都要看畫面回答。" + NL
+                + "ok＝上一步有沒有正常執行（畫面是不是變成快思說的樣子、或至少朝那個方向變了）。"
+                + "沒做成、畫面沒變、跳出沒看過的東西、被傳送、死掉 → false。" + NL
+                + "可以按＝【接下來要按的】那一下，現在的畫面對不對得上：要按 E，畫面上現在要看得到 E 提示／互動提示；"
+                + "要點按鈕或點字，那顆按鈕／那個字現在要看得到；要走或轉頭，前面沒有面板蓋住、方向對。對不上就 false。" + NL
+                + "兩個都 true 程式才會按下一步；有一個 false 就換快思重排。" + NL
+                + '**不要自己送動作，也不要寫別的。**只輸出：{"ok":true,"可以按":true}（兩個都要寫，各自 true 或 false）')
+
+    # ---------------- 一次看畫面只按一個（2026-10-05 使用者：所有的按鍵按下去之前都需要確認過畫面再按）
+    PRESS_ACTS = ("key", "hold", "click", "look", "aim", "scroll", "點字", "點文字", "走到記過的", "走到", "水平歸零")
+
+    def press_desc(self, acts):
+        """把一步的動作寫成一行字，給檢查輪看「接下來要按什麼」。"""
+        out = []
+        for a in (acts or []):
+            if not isinstance(a, dict):
+                continue
+            try:
+                out.append(self.describe(a))
+            except Exception:  # noqa: BLE001
+                out.append(str(a.get("t") or ""))
+        return "、".join(x for x in out if x) or "（沒有動作）"
+
+    def one_press_per_look(self, o):
+        """這一輪的 a 裡有兩個以上會動到遊戲的動作 → 只做第一個，其餘排到下一輪：先看畫面確認再按。
+
+        以前快思一輪可以送「轉頭＋走」「走＋按 E」「準心對準＋按 e」，第二個動作是在第一個改變畫面之後、
+        沒有人再看一眼的情況下按出去的。等／記知識／這步做完這類不動到遊戲的，跟著它前面那個動作走。"""
+        acts = [a for a in (o.get("a") or []) if isinstance(a, dict)]
+        idx = [i for i, a in enumerate(acts) if str(a.get("t") or "") in self.PRESS_ACTS]
+        if len(idx) <= 1:
+            return o
+        cut = idx[1]
+        now, later = acts[:cut], acts[cut:]
+        cur = getattr(self, "_plan_cur", None) or {}
+        do = (cur.get("做") or str(o.get("想") or o.get("why") or "") or "接著按")[:34]
+        rest = {"做": do + "（接著按）", "a": later, "成": cur.get("成") or ""}
+        self._plan_cur = {"做": do, "a": now, "成": "這一下有按出去、畫面有跟著變"}
+        self._plan_q = [rest] + list(getattr(self, "_plan_q", []) or [])
+        self._force_fast = False                 # 還有排著的動作：下一輪是檢查輪，不是快思
+        o["a"] = now
+        self.stat["一次只按一個"] = self.stat.get("一次只按一個", 0) + 1
+        print(f"   👀 一次看畫面只按一個：這輪先做「{self.press_desc(now)}」，"
+              f"「{self.press_desc(later)}」排到下一輪，先看畫面確認再按")
+        return o
 
     STEP_LOG = "步驟日誌.jsonl"
 
@@ -8621,9 +8782,10 @@ class FlowAgent(ProcedureMixin, Agent):
             content_use = [{"type": "image_url", "image_url": {"url": uri}},
                            {"type": "text", "text": self.reflex_check_panel() if getattr(self, "_reflex_check", False) else self.reflex_panel()}]
             # 檢查輪只回 {"ok":true/false}（2026-09-30），上限壓小，答多了也不會拖時間
-            tokens_use = 24 if getattr(self, "_reflex_check", False) else min(600, self.args.max_tokens)
+            tokens_use = 48 if getattr(self, "_reflex_check", False) else min(600, self.args.max_tokens)
         else:
-            content_use, tokens_use = content, self.args.max_tokens
+            # 2026-10-05：快思開回推理，推理的 token 也算在上限裡，給到 1300 才不會「想完沒份寫 JSON」
+            content_use, tokens_use = content, max(int(self.args.max_tokens), 1300)
         raw, trunc, ttft, _ = stream_json(self.endpoint, self.model, self.sys_prompt(mode),
                                           content_use,
                                           tokens_use, time.time() + dl, 0.2,
@@ -8636,10 +8798,12 @@ class FlowAgent(ProcedureMixin, Agent):
             _r = str(raw or "").lower()
             if "true" in _r and "false" not in _r:
                 o["ok"] = True
+                o.setdefault("可以按", True)       # 整段只有 true、沒有 false＝兩個都是 true
             elif "false" in _r:
                 o["ok"] = False
         try:
             o = self.plan3_apply(mode, o)      # 2026-09-29：快思的三步進佇列；反射檢查結果決定做下一步或換快思
+            o = self.one_press_per_look(o)     # 2026-10-05：一次看畫面只按一個，其餘排到下一輪先確認再按
         except Exception as e:  # noqa: BLE001
             print(f"   三步佇列處理失敗：{e}")
         if not (o.get("a") or []):
@@ -9181,6 +9345,12 @@ class FlowAgent(ProcedureMixin, Agent):
                 except Exception as e:  # noqa: BLE001
                     print(f"   改知識失敗：{e}")
                 actions.remove(a)
+            elif a.get("t") in ("改提示", "更新提示", "寫提示"):
+                try:
+                    self.edit_my_prompt(a)     # 2026-10-05 使用者：讓他自己去更新 Prompt
+                except Exception as e:  # noqa: BLE001
+                    print(f"   改提示失敗：{e}")
+                actions.remove(a)
             elif a.get("t") in ("思考強度", "思考"):
                 v = str(a.get("強度") or a.get("值") or a.get("v") or "").strip()
                 fast = any(k in v for k in ("反射", "不思考", "快", "低", "fast"))
@@ -9474,6 +9644,10 @@ class FlowAgent(ProcedureMixin, Agent):
             except Exception:  # noqa: BLE001
                 dn = -1.0
         eff = (f"畫面變化 {dn:.0f}" + ("（幾乎沒動）" if 0 <= dn < 3 else "")) if dn >= 0 else "效果不明"
+        try:
+            self.acc_note(summ, dn)        # 2026-10-05 使用者給的目標：先優先提高正確率 → 每一下有沒有反應都記下來給他看
+        except Exception as e:  # noqa: BLE001
+            print(f"   正確率記不進去：{e}")
         self.recent3 = (getattr(self, "recent3", []) + [f"做了「{summ}」→ {eff}"])[-3:]
         try:
             self.short_mem_push(seen, o.get("想") or o.get("why"), summ, eff)
