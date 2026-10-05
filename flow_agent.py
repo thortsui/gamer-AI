@@ -5088,6 +5088,12 @@ class FlowAgent(ProcedureMixin, Agent):
             out.append(self.acc_text())        # 2026-10-05 使用者：給他目標「先優先提高正確率」
         except Exception:  # noqa: BLE001
             pass
+        try:
+            cn = self.check_notes_text()       # 2026-10-05 使用者：檢查輪可以簡單寫一句 → 快思要讀得到
+            if cn:
+                out.append(cn)
+        except Exception:  # noqa: BLE001
+            pass
         gm = getattr(self, "gmap", None)
         if self.gmap_on() and gm is not None and not gm.scale:
             out.append("📏 **提醒：這個場景的深度比例你還沒量，地圖畫不出牆**"
@@ -6683,6 +6689,10 @@ class FlowAgent(ProcedureMixin, Agent):
             ok = ok.strip().lower() in ("true", "是", "yes", "ok", "有", "1", "正常")
         why = str(o.get("為什麼") or o.get("why") or o.get("想") or "")[:40]
         cur = getattr(self, "_plan_cur", None) or {}
+        try:
+            self.check_note(o)                 # 2026-10-05：檢查輪可以多寫一句（只收下、給快思看，不加分不扣分）
+        except Exception as e:  # noqa: BLE001
+            print(f"   檢查輪那一句沒收到：{e}")
         go = o.get("可以按")
         if go is None:
             go = o.get("go")
@@ -6717,6 +6727,42 @@ class FlowAgent(ProcedureMixin, Agent):
             self.mark_step(f"反射檢查沒過：{why}")
         return o
 
+    # ---------------- 檢查輪可以簡單寫一句（2026-10-05 使用者：「給反射動作添加可以簡單撰寫」）
+    CHECK_NOTE_MAX = 30          # 一句最多幾個字
+    CHECK_NOTE_KEEP = 6          # 留最近幾句
+    CHECK_NOTE_SHOW_SECS = 600   # 多久以內的才放上快思的面板
+
+    def check_note(self, o):
+        """檢查輪回的 JSON 裡有「寫」就收下：進這一輪的「看到」、進歷史、留給下一次快思看。只告訴，不賞不罰。"""
+        raw = o.get("寫") or o.get("記") or o.get("note") or ""
+        note = " ".join(str(raw).split())[:self.CHECK_NOTE_MAX]
+        if not note or note in ("無", "沒有", "none", "None", "…"):
+            return ""
+        stamp = datetime.now().strftime("%H:%M:%S")
+        rows = list(getattr(self, "check_notes", []) or [])
+        rows.append({"時": stamp, "t": time.time(), "寫": note})
+        self.check_notes = rows[-self.CHECK_NOTE_KEEP:]
+        self.stat["檢查輪寫了"] = self.stat.get("檢查輪寫了", 0) + 1
+        o["s"] = f"（檢查輪自己寫的）{note}"       # 這一輪短期記憶的「看到」用他自己寫的這一句
+        print(f"   ✍ 檢查輪寫了一句：{note}")
+        self.history.append(f"[{stamp}] 檢查輪你自己寫：{note}")
+        try:
+            with open(os.path.join(self.dir, "檢查輪寫的.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"日期": datetime.now().strftime("%Y-%m-%d"), "時間": stamp, "寫": note},
+                                   ensure_ascii=False) + NL)
+        except OSError:
+            pass
+        return note
+
+    def check_notes_text(self):
+        """快思面板最上面：他在檢查輪自己寫下的那幾句（十分鐘內的）。"""
+        now = time.time()
+        rows = [r for r in (getattr(self, "check_notes", []) or []) if now - r.get("t", 0) <= self.CHECK_NOTE_SHOW_SECS]
+        if not rows:
+            return ""
+        return ("📝 **你在檢查輪自己寫下的**（那時候畫面上看到的；現在畫面上可能已經沒有了）："
+                + "；".join(f"{r['時']}「{r['寫']}」" for r in rows[-4:]))
+
     def reflex_check_panel(self):
         """反射有佇列時的提示：檢查「上一步有沒有正常執行」＋確認「接下來要按的那一下，現在的畫面可不可以按」。不決定動作。"""
         cur = getattr(self, "_plan_cur", None) or {}
@@ -6743,7 +6789,12 @@ class FlowAgent(ProcedureMixin, Agent):
                 + "可以按＝【接下來要按的】那一下，現在的畫面對不對得上：要按 E，畫面上現在要看得到 E 提示／互動提示；"
                 + "要點按鈕或點字，那顆按鈕／那個字現在要看得到；要走或轉頭，前面沒有面板蓋住、方向對。對不上就 false。" + NL
                 + "兩個都 true 程式才會按下一步；有一個 false 就換快思重排。" + NL
-                + '**不要自己送動作，也不要寫別的。**只輸出：{"ok":true,"可以按":true}（兩個都要寫，各自 true 或 false）')
+                # 2026-10-05 使用者：「給反射動作添加可以簡單撰寫」——檢查輪看到的東西以前沒有地方寫，
+                # 字只出現在這一輪的畫面上，下一次快思就看不到了。
+                + "**可以多寫一句**（不一定要寫）：這一輪畫面上有快思該知道的事——跳出新的字、數字變了、出現或消失了什麼、"
+                + "跟快思說的不一樣——就加一個「寫」，20 字以內，寫你在畫面上看到的原樣。下一次快思會讀到這一句。" + NL
+                + '**不要自己送動作。**輸出：{"ok":true,"可以按":true}（兩個都要寫，各自 true 或 false）'
+                + '；有要寫的就 {"ok":true,"可以按":true,"寫":"看到的那一句"}')
 
     # ---------------- 一次看畫面只按一個（2026-10-05 使用者：所有的按鍵按下去之前都需要確認過畫面再按）
     PRESS_ACTS = ("key", "hold", "click", "look", "aim", "scroll", "點字", "點文字", "走到記過的", "走到", "水平歸零")
@@ -8782,7 +8833,8 @@ class FlowAgent(ProcedureMixin, Agent):
             content_use = [{"type": "image_url", "image_url": {"url": uri}},
                            {"type": "text", "text": self.reflex_check_panel() if getattr(self, "_reflex_check", False) else self.reflex_panel()}]
             # 檢查輪只回 {"ok":true/false}（2026-09-30），上限壓小，答多了也不會拖時間
-            tokens_use = 48 if getattr(self, "_reflex_check", False) else min(600, self.args.max_tokens)
+            # 2026-10-05：檢查輪可以多寫一句（30 字以內）→ 48 會把那一句切掉，放到 110；不寫的時候一樣只有十幾個 token
+            tokens_use = 110 if getattr(self, "_reflex_check", False) else min(600, self.args.max_tokens)
         else:
             # 2026-10-05：快思開回推理，推理的 token 也算在上限裡，給到 1300 才不會「想完沒份寫 JSON」
             content_use, tokens_use = content, max(int(self.args.max_tokens), 1300)
