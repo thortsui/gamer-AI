@@ -354,7 +354,7 @@ ASK = """【程式確認：你現在看的是什麼視窗】{where}
 【你自己寫的檢討報告】（上次為什麼死掉／為什麼卡住，這次不要再犯）
 {lesson}
 
-{score_reset_hint}{reward_hint}{train_hint}{propose_hint}{no_award_hint}{punish_hint}{lesson_hint}{study_hint}{task_hint}{retry_hint}{item_hint}{pay_hint}{death_hint}{aim_tip}{frozen}{flow_lock}{ui_hint}{hold_block}{leave_hint}{click_hint}{esc_hint}{longstuck}{osc_hint}{blocked}{brake_hint}{turn_move_hint}{dark_hint}{repeat_hint}{hold_hint}{spin_hint}【YOLO 算給你的下一步】{ycmd}
+{score_reset_hint}{reward_hint}{train_hint}{propose_hint}{no_award_hint}{punish_hint}{lesson_hint}{study_hint}{task_hint}{retry_hint}{item_hint}{pay_hint}{death_hint}{aim_tip}{frozen}{flow_lock}{ui_hint}{hold_block}{leave_hint}{click_hint}{esc_hint}{longstuck}{osc_hint}{blocked}{brake_hint}{two_part_hint}{turn_move_hint}{dark_hint}{repeat_hint}{hold_hint}{spin_hint}【YOLO 算給你的下一步】{ycmd}
 （這是偵測器的座標換算出來的建議，不是命令；你可以照做，也可以自己判斷不要照做。
 　要它直接帶你走過去就用 {{"t":"走到","target":"..."}}）
 【對正提示】{align}
@@ -1259,6 +1259,118 @@ class FlowAgent(ProcedureMixin, Agent):
             self.turn_move_hint = ("⚠ 上一輪你想一邊轉頭一邊移動，移動被拿掉了。**先對準，下一輪再走**。" + NL)
             return None
         return a
+
+    # ---------------- 一個動作拆兩段、中間看一眼、寧少勿多（2026-10-12 使用者）
+    # 使用者：「讓他把一個動作拆成兩個並且來回檢視，來確認是否達到；寧願少、不要多——
+    # 往前走到 100 他可以先走 70 再走 20，也不要走 110。」
+    # 程式照這條做：走路（w/a/d ≥ 0.6 秒）與轉頭（|dx| ≥ 80 或 |dy| ≥ 60）先做七成，停下來抓一張畫面：
+    # ①程式先看畫面有沒有變（沒變＝被擋／頂到底，後半段不做）②把畫面給他看，問剩下的兩成還要不要做；
+    # 他說要才做，答不出來或逾時一律不做。合計最多九成，永遠不會超過他要的量。
+    TWO_PART_FIRST, TWO_PART_SECOND = 0.7, 0.2
+    TWO_PART_SYS = ("你是正在玩 Roblox 的玩家自己的眼睛。看一張畫面回答一個是非題，"
+                    "原則是「寧願少、不要多」：拿不準就答 false。只輸出 JSON。")
+
+    def two_part_on(self):
+        if (os.environ.get("GAMER_TWO_PART", "on") or "on").strip().lower() in ("off", "0", "no"):
+            return False
+        return bool((getattr(self, "gcfg", None) or {}).get("拆兩段", True))
+
+    def two_part_ask(self, desc, done, rest, mid):
+        """中間的檢視：做了七成之後的畫面給他看，問剩下的兩成還要不要做。答不出來、逾時 → 不做。"""
+        try:
+            uri, _ = jpeg_data_uri(draw_grid(mid), 60)
+            dl = float(os.environ.get("GAMER_TWO_PART_DEADLINE", "15") or 15)
+            raw, _, _, _ = stream_json(
+                self.endpoint, self.model, self.TWO_PART_SYS,
+                [{"type": "image_url", "image_url": {"url": uri}},
+                 {"type": "text", "text": (
+                     f"你這一輪要做「{desc}」。程式先替你做了七成（{done}），這是做完七成之後現在的畫面。"
+                     f"剩下的兩成（{rest}）還要不要做？" + NL
+                     + "原則：**寧願少、不要多**。目標已經到了／已經對正／再做會撞到或過頭／畫面跳出沒看過的東西／"
+                     + "畫面被面板蓋住 → false；還差一點、方向對、前面是空的 → true。" + NL
+                     + '只輸出 JSON：{"再做":true} 或 {"再做":false,"為什麼":"10 字以內"}')}],
+                60, time.time() + dl, 0.2, effort=反射)
+            o = parse_json_loose(raw) or {}
+            go = o.get("再做")
+            if isinstance(go, str):
+                go = go.strip().lower() in ("true", "是", "要", "yes", "1")
+            return bool(go), str(o.get("為什麼") or "")[:20]
+        except Exception as e:  # noqa: BLE001
+            print(f"   ✂ 拆兩段檢視失敗（寧少勿多，剩下的不做）：{e}")
+            return False, "檢視失敗"
+
+    def _two_part_note(self, desc, what, asked):
+        self.stat["拆兩段"] = self.stat.get("拆兩段", 0) + 1
+        print(f"   ✂ {what}")
+        self.two_part_hint = (f"✂ 上一輪「{desc}」程式替你拆成兩段（先七成、看一眼、再兩成，合計九成，寧少勿多）：{what}。"
+                              "還差的量下一輪看畫面再補。" + NL)
+        try:
+            self._prog_log = (getattr(self, "_prog_log", []) + [(f"「{desc}」拆兩段", what[:60])])[-6:]
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            with open(os.path.join(self.dir, "拆兩段紀錄.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"時間": datetime.now().strftime("%H:%M:%S"), "輪": self.stat.get("輪數", 0),
+                                    "動作": desc, "問了他": asked, "結果": what}, ensure_ascii=False) + NL)
+        except OSError:
+            pass
+
+    def walk_two_part(self, k, d, a=None):
+        """走路拆兩段：先走七成 → 看一眼（程式＋他自己）→ 再走兩成。回傳 (實際走了幾秒, 原因)。"""
+        try:
+            d = float(d or 0.5)
+        except (TypeError, ValueError):
+            d = 0.5
+        if not self.two_part_on() or d < 0.6 or k not in ("w", "a", "d"):
+            return self.walk_guarded(k, d)
+        d1, d2 = round(d * self.TWO_PART_FIRST, 2), round(d * self.TWO_PART_SECOND, 2)
+        desc = f"按 {k} {d:.1f}s"
+        print(f"   ✂ 拆兩段：{desc} → 先走 {d1:.1f}s，看一眼，再走 {d2:.1f}s（合計 {d1 + d2:.1f}s，寧少勿多）")
+        before = self.grab_still(320)
+        real1, reason1 = self.walk_guarded(k, d1)
+        if reason1:
+            self._two_part_note(desc, f"前半段走 {real1:.1f}s 就被叫停（{reason1[:24]}），後半段沒走", False)
+            return real1, reason1
+        time.sleep(0.25)
+        mid = self.grab_still(320)
+        if frame_diff(before, mid) < 2.0:
+            self._two_part_note(desc, f"走了 {real1:.1f}s 畫面沒變＝被擋住，後半段 {d2:.1f}s 不走", False)
+            return real1, "拆兩段：前半段畫面沒變，後半段不走"
+        go, why = self.two_part_ask(desc, f"按 {k} {real1:.1f}s", f"按 {k} {d2:.1f}s", mid)
+        if not go:
+            self._two_part_note(desc, f"走了 {real1:.1f}s，你看了畫面說不用再走" + (f"（{why}）" if why else ""), True)
+            return real1, ""
+        real2, reason2 = self.walk_guarded(k, d2)
+        self._two_part_note(desc, f"走 {real1:.1f}s → 你看了一眼說繼續 → 再走 {real2:.1f}s"
+                            + (f"（被叫停：{reason2[:20]}）" if reason2 else ""), True)
+        return round(real1 + real2, 2), reason2
+
+    def look_two_part(self, a):
+        """轉頭拆兩段：先轉七成 → 看一眼 → 再轉兩成。小幅度（|dx|<80 且 |dy|<60）不拆，回 False 照舊做。"""
+        try:
+            dx, dy = float(a.get("dx", 0) or 0), float(a.get("dy", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        if abs(dx) < 80 and abs(dy) < 60:
+            return False
+        desc = f"轉視角 {int(dx)},{int(dy)}"
+        s1 = {"t": "look", "dx": int(round(dx * self.TWO_PART_FIRST)), "dy": int(round(dy * self.TWO_PART_FIRST))}
+        s2 = {"t": "look", "dx": int(round(dx * self.TWO_PART_SECOND)), "dy": int(round(dy * self.TWO_PART_SECOND))}
+        print(f"   ✂ 拆兩段：{desc} → 先轉 {s1['dx']},{s1['dy']}，看一眼，再轉 {s2['dx']},{s2['dy']}（寧少勿多）")
+        before = self.grab_still(320)
+        self.execute([s1])
+        time.sleep(0.3)
+        mid = self.grab_still(320)
+        if frame_diff(before, mid) < 2.0:
+            self._two_part_note(desc, f"轉了 {s1['dx']},{s1['dy']} 畫面沒變＝鏡頭頂到底或被鎖住，後半段不轉", False)
+            return True
+        go, why = self.two_part_ask(desc, f"轉 {s1['dx']},{s1['dy']}", f"轉 {s2['dx']},{s2['dy']}", mid)
+        if not go:
+            self._two_part_note(desc, f"轉了 {s1['dx']},{s1['dy']}，你看了畫面說不用再轉" + (f"（{why}）" if why else ""), True)
+            return True
+        self.execute([s2])
+        self._two_part_note(desc, f"轉 {s1['dx']},{s1['dy']} → 你看了一眼說繼續 → 再轉 {s2['dx']},{s2['dy']}", True)
+        return True
 
     def check_click(self, actions, before):
         """點完之後看畫面有沒有變：沒變就代表點歪了（差幾十像素），直接告訴他怎麼微調。"""
@@ -8659,6 +8771,7 @@ class FlowAgent(ProcedureMixin, Agent):
                           obstacle=self.obstacle_text(),
                           turn_move_hint=getattr(self, "turn_move_hint", "") or "",
                           brake_hint=getattr(self, "brake_hint", "") or "",
+                          two_part_hint=getattr(self, "two_part_hint", "") or "",
                           reward_hint=getattr(self, "reward_hint", "") or "",
                           no_award_hint=getattr(self, "no_award_hint", "") or "",
                           propose_hint=getattr(self, "propose_hint", "") or "",
@@ -9475,6 +9588,7 @@ class FlowAgent(ProcedureMixin, Agent):
         self._has_turn = any(isinstance(a, dict) and a.get("t") in ("look", "aim") for a in actions)
         if not self._has_turn:
             self.turn_move_hint = ""
+        self.two_part_hint = ""                 # 2026-10-12：拆兩段的提示只留一輪
         actions = [self.split_turn_move(a) for a in actions if isinstance(a, dict)]
         actions = [a for a in actions if a]
         actions = [self.snap_to_eyes(a) for a in actions if isinstance(a, dict)]
@@ -9541,7 +9655,7 @@ class FlowAgent(ProcedureMixin, Agent):
                             _r0 = self.gmap_look()
                     except Exception:  # noqa: BLE001
                         _r0 = None
-                    _real, _ = self.walk_guarded(kk, a.get("d", 0.5))
+                    _real, _ = self.walk_two_part(kk, a.get("d", 0.5), a)      # 2026-10-12：拆兩段、寧少勿多
                     a["實走"] = _real                # 2026-09-30：位置用實際走的秒數算（被叫停就沒走那麼遠）
                     try:
                         if _r0 is not None:
@@ -9549,6 +9663,12 @@ class FlowAgent(ProcedureMixin, Agent):
                             self.gmap_sample(_r0, self.gmap_look(), _real)
                     except Exception as e:  # noqa: BLE001
                         print(f"   陣列地圖取樣失敗：{e}")
+            elif a.get("t") == "look" and self.two_part_on():
+                # 2026-10-12：轉頭也拆兩段。先過一遍跟 rest 一樣的防線（幅度、擋視角…），還是 look 才拆
+                ga = self.guard_hold(self.guard_leave(self.guard_esc(self.guard_job(self.guard_pay_click(self.clamp_aim([a]))))))
+                if ga and isinstance(ga[0], dict) and ga[0].get("t") == "look" and self.look_two_part(ga[0]):
+                    continue
+                rest.extend(ga)
             else:
                 rest.append(a)
         self._busy = True
