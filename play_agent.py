@@ -424,16 +424,19 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
         limit, out_req, prompt_tok = int(m.group(1)), int(m.group(2)), int(m.group(3))
         room = limit - prompt_tok - 64
         new_content = content
+        dropped = 0
         if isinstance(content, list):
             idx = [i for i, c in enumerate(content) if isinstance(c, dict) and c.get("type") == "image_url"]
             if len(idx) > 1:
                 drop = set(idx[1:])
                 new_content = [c for i, c in enumerate(content) if i not in drop]
-                room += 900 * len(drop)          # 每張圖約 900
-        new_max = max(200, min(int(max_tokens), room))
-        if room < 200:
-            print(f"   ✖ 提示本身 {prompt_tok} token 就超過上限 {limit}，丟圖也救不回來")
+                dropped = len(drop)
+        # 2026-10-12 19:03 實測：把丟掉的圖當 900 token 加回預算會算太多（慢想的圖更大），重送還是 400。
+        # 保守：max_tokens 只看「上限 − 提示 − 64」；不夠 200 但有丟圖就給 200；沒圖可丟又不夠就放棄。
+        if room < 200 and dropped == 0:
+            print(f"   ✖ 提示本身 {prompt_tok} token 就超過上限 {limit}，沒圖可丟，放棄")
             raise
+        new_max = max(200, min(int(max_tokens), room))
         print(f"   ↻ 400 重送一次：max_tokens {max_tokens}→{new_max}，圖 {len(content) if isinstance(content, list) else 0} 項→{len(new_content) if isinstance(new_content, list) else 0} 項")
         return _stream_json(endpoint, model, system_text, new_content, new_max, deadline_at, temperature, effort)
 
