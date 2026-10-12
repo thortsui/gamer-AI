@@ -5202,7 +5202,7 @@ class FlowAgent(ProcedureMixin, Agent):
     #   ・其餘 → 記「完成」
     # 只記錄、只給他看，不加分不扣分。寫 記憶/任務紀錄.jsonl，面板最上面一行「任務完成 N 次」。
     TASK_LOG = "任務紀錄.jsonl"
-    TASK_NOT = ("正在傳送", "等待", "在醫院工作直到", "大廳", "載入", "前往")
+    TASK_NOT = ("正在傳送", "等待", "在醫院工作直到", "大廳", "載入", "前往", "輪班")   # 「輪班 3」是 OCR 把頂部字當任務
 
     @staticmethod
     def task_same(a, b):
