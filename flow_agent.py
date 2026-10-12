@@ -934,6 +934,8 @@ class FlowAgent(ProcedureMixin, Agent):
             rows.append("☠ " + self.death_note)
         if getattr(self, "stuck_note", ""):
             rows.append("🧱 " + self.stuck_note)
+        if getattr(self, "giveup_note", ""):
+            rows.append("🏳 " + self.giveup_note)          # 2026-10-12 使用者：任務沒完成要問他為什麼放棄
         return NL.join(rows) or "（還沒有檢討報告）"
 
     # ---------------- 記憶：去重、過濾廢話、依重要性回灌
@@ -1096,7 +1098,7 @@ class FlowAgent(ProcedureMixin, Agent):
 
     SNAP_FILES = ["學到的.md", "學習整理.md", "我理解的遊戲.md", "操作手冊.md", "地圖.json", "地圖.png",
                   "櫃檯配置.json", "站位.json", "步驟.json", "流程進度.json", "流程統計.json",
-                  "死亡檢討.md", "卡住檢討.md", "差異筆記.md", "自我回報.md", "任務指示.txt"]
+                  "死亡檢討.md", "卡住檢討.md", "放棄檢討.md", "差異筆記.md", "自我回報.md", "任務指示.txt"]
 
     def snapshot_save(self):
         """定期整包存檔：他累積的知識與紀錄複製一份到 存檔/時間戳/。"""
@@ -5251,6 +5253,62 @@ class FlowAgent(ProcedureMixin, Agent):
         else:
             self.stat["任務換掉"] = self.stat.get("任務換掉", 0) + 1
             print(f"   ↻ 任務換掉（{kind}）：「{old}」→「{new}」，{rounds} 輪" + ("，中間死過" if died else ""))
+            # 2026-10-12 使用者：「只要任務沒有成功也叫他檢討：為什麼他會選擇放棄？問他。」
+            if old and kind in ("換局", "重置") and not any(k in str(old) for k in self.TASK_NOT):
+                how = "你死了、重新開始" if died else ("你離開／重新進場" if reentered else ("你回到大廳" if lobby else "畫面換成別的"))
+                self.review_async("放棄檢討", self._giveup_review_llm, str(old), how, rounds)
+
+    GIVEUP_PROMPT = """任務「{task}」沒有完成就結束了（{how}；這件任務從出現到結束你花了 {rounds} 輪）。
+使用者要問你：**為什麼你選擇放棄它？**
+照上面的畫面與紀錄誠實回答：
+1) 你是在哪一輪、看到什麼之後，不再去做這件任務的（如果你覺得自己沒有放棄，就說你當時在做什麼、為什麼那不算放棄）
+2) 那之後你改做了什麼？為什麼覺得那件事比任務重要？
+3) 當時要做到什麼程度，才算沒有放棄？
+4) 下次再遇到同一件任務，你會怎麼做（具體到動作）？
+只輸出 JSON：{{"放棄的時候":"哪一輪、看到什麼(<=50字)","改做了什麼":"<=40字","為什麼":"<=60字","下次":"<=60字"}}"""
+
+    def _giveup_review_llm(self, task, how, rounds):
+        """背景執行緒：任務沒完成就結束 → 問他為什麼選擇放棄。只記錄、回灌到面板，不加分不扣分。"""
+        print(f"   🏳 放棄檢討：任務「{task}」沒完成（{how}，{rounds} 輪）→ 問他為什麼放棄")
+        content = []
+        try:
+            content += self.short_mem_content()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            _j = self.step_journal_text()
+            if _j:
+                content.append({"type": "text", "text": _j})
+        except Exception:  # noqa: BLE001
+            pass
+        content.append({"type": "text", "text": "最近做過的事：" + NL + NL.join(self.history[-15:]) + NL + NL
+                        + self.GIVEUP_PROMPT.format(task=task, how=how, rounds=rounds)})
+        raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(), content,
+                                   1200, time.time() + 90, 0.2, effort=慢想)
+        o = parse_json_loose(raw) or {}
+        when, did, why, nxt = (str(o.get(k) or "").strip() for k in ("放棄的時候", "改做了什麼", "為什麼", "下次"))
+        if not (why or nxt):
+            print("   🏳 放棄檢討沒解析出內容，這次跳過")
+            return
+        stamp = datetime.now().strftime("%m/%d %H:%M")
+        self.giveup_note = f"放棄：任務「{task}」（{how}，{rounds} 輪）——放棄的時候「{when}」；改做「{did}」；為什麼「{why}」；下次「{nxt}」"
+        try:
+            with open(os.path.join(self.dir, "放棄檢討.md"), "a", encoding="utf-8") as f:
+                f.write(f"## {stamp} 任務「{task}」沒完成（{how}，{rounds} 輪）" + NL
+                        + f"- 放棄的時候：{when}" + NL + f"- 改做了什麼：{did}" + NL
+                        + f"- 為什麼：{why}" + NL + f"- 下次：{nxt}" + NL + NL)
+        except OSError:
+            pass
+        if nxt:
+            self.add_note(f"（放棄檢討）{nxt}")
+        print(f"   🏳 {self.giveup_note}")
+        self.log({"時間": datetime.now().strftime("%H:%M:%S"), "模式": "放棄檢討", "任務": task,
+                  "怎麼結束": how, "輪": rounds, "放棄的時候": when, "改做了什麼": did, "為什麼": why, "下次": nxt})
+        self.stat["放棄檢討"] = self.stat.get("放棄檢討", 0) + 1
+        try:
+            self.record_problem(f"任務沒完成就結束：「{task}」（{how}）", tried=did, cause=why, source="放棄檢討")
+        except Exception:  # noqa: BLE001
+            pass
 
     def task_done_text(self):
         """面板最上面：今天完成了幾件任務（只有遊戲自己把右上角換成下一件才算）。"""
