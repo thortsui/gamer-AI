@@ -408,7 +408,38 @@ EFFORT_DEEP = 慢想          # 舊名字留著，指向慢想
 
 
 def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
-                temperature=0.2, effort=快思):
+                temperature=0.2, effort=快思, _retry=True):
+    # 2026-10-12：提示超過 65,536 會回 400「maximum context length is N tokens. However, you requested X output tokens
+    # and your prompt has Y tokens」。照它給的數字縮 max_tokens、丟掉第一張以外的圖，重送一次；還不行才放棄。
+    try:
+        return _stream_json(endpoint, model, system_text, content, max_tokens, deadline_at, temperature, effort)
+    except urllib.error.HTTPError as e:
+        if not (_retry and e.code == 400):
+            raise
+        msg = str(getattr(e, "_gamer_body", "") or "")
+        import re as _re
+        m = _re.search(r"maximum context length is (\d+) tokens.*?requested (\d+) output tokens.*?prompt[^\d]*(\d+)", msg, _re.S)
+        if not m:
+            raise
+        limit, out_req, prompt_tok = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        room = limit - prompt_tok - 64
+        new_content = content
+        if isinstance(content, list):
+            idx = [i for i, c in enumerate(content) if isinstance(c, dict) and c.get("type") == "image_url"]
+            if len(idx) > 1:
+                drop = set(idx[1:])
+                new_content = [c for i, c in enumerate(content) if i not in drop]
+                room += 900 * len(drop)          # 每張圖約 900
+        new_max = max(200, min(int(max_tokens), room))
+        if room < 200:
+            print(f"   ✖ 提示本身 {prompt_tok} token 就超過上限 {limit}，丟圖也救不回來")
+            raise
+        print(f"   ↻ 400 重送一次：max_tokens {max_tokens}→{new_max}，圖 {len(content) if isinstance(content, list) else 0} 項→{len(new_content) if isinstance(new_content, list) else 0} 項")
+        return _stream_json(endpoint, model, system_text, new_content, new_max, deadline_at, temperature, effort)
+
+
+def _stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
+                 temperature=0.2, effort=快思):
     think, eff, temp, topp = THINK_MODES.get(effort, THINK_MODES[快思])
     # 2026-09-28：微調 27B 的服務一次最多 8 張圖（--limit-mm-per-prompt），死亡檢討＝回放 8 張＋短期記憶縮圖 → 400。
     # 超過就從最舊的圖開始丟（連同緊貼在它前面的時間標籤），留最近的；上限可用環境變數 GAMER_MAX_IMAGES 改。
@@ -441,10 +472,11 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
         resp = urllib.request.urlopen(req, timeout=remaining)
     except urllib.error.HTTPError as e:            # 2026-10-12：400 以前只印「Bad Request」，看不到是哪裡超過
         try:
-            body = e.read().decode("utf-8", "replace")[:300]
+            body = e.read().decode("utf-8", "replace")[:400]
         except Exception:  # noqa: BLE001
             body = ""
-        print(f"   ✖ 模型回 HTTP {e.code}：{body}")
+        e._gamer_body = body
+        print(f"   ✖ 模型回 HTTP {e.code}：{body[:200]}")
         raise
     try:
         while True:
