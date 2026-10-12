@@ -5457,10 +5457,45 @@ class FlowAgent(ProcedureMixin, Agent):
         except Exception as e:  # noqa: BLE001
             rec["畫面"] = f"失敗：{str(e)[:30]}"
         ok_axes = False
+        prev_dx, prev_dy = getattr(self, "dx_per_deg", None), getattr(self, "dy_per_deg", None)
         try:
-            ok_axes = bool(self.calibrate_axes(f"開工測試：{why}"))
-        except Exception as e:  # noqa: BLE001
-            print(f"   量刻度失敗：{e}")
+            lobby = bool(self.in_lobby())
+        except Exception:  # noqa: BLE001
+            lobby = False
+        if lobby and prev_dx and prev_dy:
+            # 2026-10-12 18:15 實測：大廳畫面單調，量到 dx 7.5／dy 22.47（錯的）還蓋掉局內量的 2.5／3.37。大廳只重新定位，刻度沿用。
+            ok_axes = True
+            rec["備註"] = "大廳不量刻度，沿用局內量的"
+            print("   🧪 在大廳：不量刻度（畫面單調會量錯），沿用上次局內量的刻度")
+        else:
+            try:
+                ok_axes = bool(self.calibrate_axes(f"開工測試：{why}"))
+            except Exception as e:  # noqa: BLE001
+                print(f"   量刻度失敗：{e}")
+            # 跟上次差 1.8 倍以上＝這次量歪了（畫面單調、面板蓋住），不採用、改回舊值
+            bad = []
+            for name, prev in (("dx_per_deg", prev_dx), ("dy_per_deg", prev_dy)):
+                cur = getattr(self, name, None)
+                if prev and cur and (cur / prev > 1.8 or prev / cur > 1.8):
+                    bad.append(f"{name[:2]} {cur}→沿用 {prev}")
+                    setattr(self, name, prev)
+            if bad:
+                try:
+                    self.px_per_pct = max(1.5, min(15.0, round(self.dx_per_deg * self.DEG_PER_PCT, 1)))
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    path = os.path.join(self.dir, "視角校準.json")
+                    d = json.load(open(path, encoding="utf-8")) or {}
+                    if prev_dx:
+                        d.setdefault("水平", {})["每度dx"] = prev_dx
+                    if prev_dy:
+                        d.setdefault("垂直", {})["每度dy"] = prev_dy
+                    json.dump(d, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+                except Exception:  # noqa: BLE001
+                    pass
+                rec["備註"] = "量歪了不採用：" + "、".join(bad)
+                print(f"   🧪 這次量到的跟上次差太多，不採用：{'、'.join(bad)}")
         rec["每度dx"] = getattr(self, "dx_per_deg", None)
         rec["每度dy"] = getattr(self, "dy_per_deg", None)
         gid = getattr(self, "game_id", None)
