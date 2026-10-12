@@ -10661,6 +10661,10 @@ class FlowAgent(ProcedureMixin, Agent):
                                     + NL + NL + "【快思這一輪看到的完整面板】（禁令、上一步被擋了什麼、程式替你做了什麼、你的規則與知識都在裡面；排步驟前先讀）"
                                     + NL + self.panel_for_slow()
                                     + NL + NL + self.SLOW_ASK})
+            try:
+                content = self.fit_budget(self.sys_prompt(), content, 2500)    # 2026-10-12：慢想也先算 token（23:19、23:43 各 400 兩次才退回）
+            except Exception as e:  # noqa: BLE001
+                print(f"   慢想算 token 失敗（照原樣送）：{e}")
             _t0 = time.time()
             try:
                 raw, _trunc, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
