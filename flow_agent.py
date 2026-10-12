@@ -5214,11 +5214,13 @@ class FlowAgent(ProcedureMixin, Agent):
 
     def task_log(self, old, new):
         if self.task_same(old, new):
-            self._task_since = getattr(self, "_task_since", None) or (self.stat.get("輪數", 0), getattr(self, "death_count", 0))
+            self._task_since = getattr(self, "_task_since", None) or (self.stat.get("輪數", 0), getattr(self, "death_count", 0), getattr(self, "_enter_at", 0) or 0)
             return
-        since = getattr(self, "_task_since", None) or (self.stat.get("輪數", 0), getattr(self, "death_count", 0))
+        since = getattr(self, "_task_since", None) or (self.stat.get("輪數", 0), getattr(self, "death_count", 0), getattr(self, "_enter_at", 0) or 0)
         rounds = max(0, self.stat.get("輪數", 0) - since[0])
         died = getattr(self, "death_count", 0) > since[1]
+        # 程式常漏算死亡（「你死了」面板沒認出來），但 job 換了（成功進場）一定看得到：任務開始之後重新進場＝換局，不是完成
+        reentered = (getattr(self, "_enter_at", 0) or 0) > (since[2] if len(since) > 2 else 0)
         try:
             lobby = bool(self.in_lobby())
         except Exception:  # noqa: BLE001
@@ -5226,7 +5228,7 @@ class FlowAgent(ProcedureMixin, Agent):
         not_task = any(k in str(new) for k in self.TASK_NOT) or any(k in str(old) for k in self.TASK_NOT)
         if not old:
             kind = "開始"
-        elif lobby or not_task:
+        elif lobby or not_task or reentered:
             kind = "換局"
         elif died:
             kind = "重置"
@@ -5234,13 +5236,13 @@ class FlowAgent(ProcedureMixin, Agent):
             kind = "完成"
         rec = {"時間": datetime.now().strftime("%H:%M:%S"), "輪": self.stat.get("輪數", 0),
                "輪班": self.score.get("目前輪班"), "從": str(old)[:20], "到": str(new)[:20],
-               "判定": kind, "花了幾輪": rounds, "中間死過": died, "在大廳": lobby}
+               "判定": kind, "花了幾輪": rounds, "中間死過": died, "中間重進場": reentered, "在大廳": lobby}
         try:
             with open(os.path.join(self.dir, self.TASK_LOG), "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + NL)
         except OSError:
             pass
-        self._task_since = (self.stat.get("輪數", 0), getattr(self, "death_count", 0))
+        self._task_since = (self.stat.get("輪數", 0), getattr(self, "death_count", 0), getattr(self, "_enter_at", 0) or 0)
         if kind == "完成":
             self.stat["任務完成"] = self.stat.get("任務完成", 0) + 1
             self.task_done_log = (list(getattr(self, "task_done_log", []) or []) + [(rec["時間"], str(old)[:20], rounds)])[-6:]
