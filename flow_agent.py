@@ -5191,6 +5191,74 @@ class FlowAgent(ProcedureMixin, Agent):
                        + f"→ {r.get('結果', '')}")
         return NL.join(out)
 
+    # ---------------- 任務完成另外記錄（2026-10-12 使用者：「任務成功呢？例如完成任務這些的，也要另外記錄」）
+    # 右上角任務換成另一件事＝上一件事做完了（遊戲自己推進的，不是程式判的）。
+    # 但換掉不一定是完成：死掉回大廳、重新進場、OCR 讀歪（「檢查病的況」）都會換。所以：
+    #   ・字差不多（OCR 歪掉）→ 不算換
+    #   ・換的時候人在大廳、或新字是「正在傳送／等待／在醫院工作直到…」這種不是任務的字 → 記「換局」
+    #   ・上一件任務開始之後死過 → 記「重置」
+    #   ・其餘 → 記「完成」
+    # 只記錄、只給他看，不加分不扣分。寫 記憶/任務紀錄.jsonl，面板最上面一行「任務完成 N 次」。
+    TASK_LOG = "任務紀錄.jsonl"
+    TASK_NOT = ("正在傳送", "等待", "在醫院工作直到", "大廳", "載入", "前往")
+
+    @staticmethod
+    def task_same(a, b):
+        import difflib
+        a, b = str(a or "").strip(), str(b or "").strip()
+        if not a or not b:
+            return False
+        if a == b or (len(a) >= 4 and (a in b or b in a)):
+            return True
+        return difflib.SequenceMatcher(None, a, b).ratio() >= 0.6
+
+    def task_log(self, old, new):
+        if self.task_same(old, new):
+            self._task_since = getattr(self, "_task_since", None) or (self.stat.get("輪數", 0), getattr(self, "death_count", 0))
+            return
+        since = getattr(self, "_task_since", None) or (self.stat.get("輪數", 0), getattr(self, "death_count", 0))
+        rounds = max(0, self.stat.get("輪數", 0) - since[0])
+        died = getattr(self, "death_count", 0) > since[1]
+        try:
+            lobby = bool(self.in_lobby())
+        except Exception:  # noqa: BLE001
+            lobby = False
+        not_task = any(k in str(new) for k in self.TASK_NOT) or any(k in str(old) for k in self.TASK_NOT)
+        if not old:
+            kind = "開始"
+        elif lobby or not_task:
+            kind = "換局"
+        elif died:
+            kind = "重置"
+        else:
+            kind = "完成"
+        rec = {"時間": datetime.now().strftime("%H:%M:%S"), "輪": self.stat.get("輪數", 0),
+               "輪班": self.score.get("目前輪班"), "從": str(old)[:20], "到": str(new)[:20],
+               "判定": kind, "花了幾輪": rounds, "中間死過": died, "在大廳": lobby}
+        try:
+            with open(os.path.join(self.dir, self.TASK_LOG), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + NL)
+        except OSError:
+            pass
+        self._task_since = (self.stat.get("輪數", 0), getattr(self, "death_count", 0))
+        if kind == "完成":
+            self.stat["任務完成"] = self.stat.get("任務完成", 0) + 1
+            self.task_done_log = (list(getattr(self, "task_done_log", []) or []) + [(rec["時間"], str(old)[:20], rounds)])[-6:]
+            print(f"   ✅ 任務完成（第 {self.stat['任務完成']} 件）：「{old}」花了 {rounds} 輪 → 下一件「{new}」")
+            self.history.append(f"[{rec['時間']}] ✅ 任務「{old}」完成（花了 {rounds} 輪），下一件：「{new}」")
+        else:
+            self.stat["任務換掉"] = self.stat.get("任務換掉", 0) + 1
+            print(f"   ↻ 任務換掉（{kind}）：「{old}」→「{new}」，{rounds} 輪" + ("，中間死過" if died else ""))
+
+    def task_done_text(self):
+        """面板最上面：今天完成了幾件任務（只有遊戲自己把右上角換成下一件才算）。"""
+        n = self.stat.get("任務完成", 0)
+        log = list(getattr(self, "task_done_log", []) or [])
+        if not n:
+            return "📋 **任務完成：0 件**（右上角的任務被遊戲換成下一件才算完成；換局、死掉重來不算）"
+        last = "；".join(f"{t}「{nm}」{r} 輪" for t, nm, r in log[-3:])
+        return f"📋 **任務完成：{n} 件**（最近：{last}）"
+
     def top_notes_text(self):
         """2026-10-03 使用者：「記錄好 都做」——放在面板最上面的三件事。只告訴他，不替他做、不加賞罰。
         ① 量比例提醒（放在【上一步】最後面他沒看到）；② 他自己上次收工寫的檢討（以前只存檔、沒讀回來）；
@@ -5198,6 +5266,10 @@ class FlowAgent(ProcedureMixin, Agent):
         out = []
         try:
             out.append(self.acc_text())        # 2026-10-05 使用者：給他目標「先優先提高正確率」
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            out.append(self.task_done_text())  # 2026-10-12 使用者：任務完成要另外記錄
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -9044,6 +9116,10 @@ class FlowAgent(ProcedureMixin, Agent):
                                     f"（做完一步也可以自己用 下一步）")
             self.history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 右上角任務變成「{tk}」")
             self.add_note(f"（任務）右上角出現「{tk}」")
+            try:
+                self.task_log(getattr(self, "cur_task", "") or "", tk)   # 2026-10-12 使用者：任務完成要另外記錄
+            except Exception as e:  # noqa: BLE001
+                print(f"   任務紀錄寫不進去：{e}")
             self.cur_task = tk
         self.update_score(seen)
         if self.in_lobby() and self.flow != "開始上班" and "開始上班" in self.flows:
