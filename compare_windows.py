@@ -134,22 +134,30 @@ def main():
     args = ap.parse_args()
     d = os.path.join(HERE, "專案", args.game, "記憶")
     rows = load_jsonl(os.path.join(d, "行動日誌.jsonl"))
-    two = load_jsonl(os.path.join(d, "拆兩段紀錄.jsonl"))
-    tasks = load_jsonl(os.path.join(d, "任務紀錄.jsonl"))
+    two_all = load_jsonl(os.path.join(d, "拆兩段紀錄.jsonl"))
+    tasks_all = load_jsonl(os.path.join(d, "任務紀錄.jsonl"))
     thoughts = load_jsonl(os.path.join(d, "思考流程.jsonl"))
     days = split_days(rows)
     today = days[-1] if days else []
     tdays = split_days(thoughts)
     thoughts_today = tdays[-1] if tdays else []
+    # 拆兩段／任務紀錄也要按天切（2026-10-13 修：跨天之後把昨天的也算進今天）
+    twod = split_days(two_all)
+    taskd = split_days(tasks_all)
+    two = twod[-1] if twod else []
+    tasks = taskd[-1] if taskd else []
+    two_prev = twod[-2] if len(twod) >= 2 else []
+    tasks_prev = taskd[-2] if len(taskd) >= 2 else []
     cuts = sorted(tsec(c + ":00") for c in args.cut)
     labels = [x.strip() for x in args.labels.split(",") if x.strip()]
     wins = []
     if args.prev and len(days) >= 2:
-        wins.append(window_stats(days[-2], [], [], "上一次開跑（10/06 那天，沒有拆兩段／任務紀錄）"))
+        wins.append(window_stats(days[-2], two_prev, tasks_prev, "前一天整天", thoughts=(tdays[-2] if len(tdays) >= 2 else [])))
     edges = [None] + cuts + [None]
     for i in range(len(edges) - 1):
         lab = labels[i] if i < len(labels) else f"今天 第{i + 1}段"
         wins.append(window_stats(today, two, tasks, lab, edges[i], edges[i + 1], thoughts_today))
+    wins = [w for w in wins if w["輪數"]] or wins          # 空的時段（例如午夜切出來的）不列
     keys = [k for k in wins[0].keys() if k != "區段"]
     out = ["| 項目 | " + " | ".join(w["區段"] for w in wins) + " |", "|---|" + "---|" * len(wins)]
     for k in keys:
