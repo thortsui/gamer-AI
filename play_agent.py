@@ -1665,11 +1665,20 @@ class Agent:
             parts.append(f"換算：轉四分之一畫面≈dx {int(25/r)}、半個畫面≈dx {int(50/r)}；微調用 dx {max(30, int(5/r))}")
         self.look_hint = "；".join(parts) + "（本機遊玩實測）"
         try:
-            with open(os.path.join(self.dir, "視角校準.json"), "w", encoding="utf-8") as f:
-                json.dump({"時間": datetime.now().strftime("%m/%d %H:%M"), "樣本數": len(self.look_samples),
-                           "提示": self.look_hint,
-                           "樣本": [{"dx": d, "畫面轉%": round(p, 1)} for d, p in self.look_samples[-40:]]},
-                          f, ensure_ascii=False, indent=2)
+            # 2026-10-12：以前整個檔案重寫，把開機機械量到的 水平／垂直／視窗／視角 全部蓋掉，
+            # 所以每次重開都說「這個遊戲還沒量過刻度」、每次量到的又不一樣。現在只更新樣本那幾個欄位。
+            path = os.path.join(self.dir, "視角校準.json")
+            d = {}
+            try:
+                with open(path, encoding="utf-8") as f:
+                    d = json.load(f) or {}
+            except (OSError, json.JSONDecodeError):
+                d = {}
+            d.update({"時間": datetime.now().strftime("%m/%d %H:%M"), "樣本數": len(self.look_samples),
+                      "提示": self.look_hint,
+                      "樣本": [{"dx": dd, "畫面轉%": round(pp, 1)} for dd, pp in self.look_samples[-40:]]})
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
         except OSError:
             pass
         print(f"   📐 視角換算更新：{self.look_hint}")

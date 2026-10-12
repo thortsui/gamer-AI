@@ -3423,6 +3423,7 @@ class FlowAgent(ProcedureMixin, Agent):
             self.award("成功進場", "Roblox 紀錄顯示你加入了新的一場（job 換了）")
         except Exception:  # noqa: BLE001
             pass
+        self._startup_ok, self._startup_tries = False, 0     # 2026-10-12 使用者：每次進場先做開工測試①再想
         # 使用者 2026-09-17：**進場成功要他自己記下是怎麼進來的**。
         # 這是他卡最久的一件事，做成一次卻沒記＝下次還是從頭亂試。
         self._join_ask_until = self.stat.get("輪數", 0) + 6
@@ -5434,11 +5435,80 @@ class FlowAgent(ProcedureMixin, Agent):
         last = "；".join(f"{t}「{nm}」{r} 輪" for t, nm, r in log[-3:])
         return f"📋 **任務完成：{n} 件**（最近：{last}）"
 
+    # ---------------- 開工順序①：基礎操作的測量（2026-10-12 使用者：導入開始的測試（必須）→ 導入遊戲的個體文件 → 才開始思考與操作）
+    # 程式自己做：重新定位（畫面尺寸、碰不到的邊）→ 量刻度（左右一圈、上下全程、第幾人稱）→ 量比例（深度 1 單位＝幾步）。
+    # 開機做一次；每次成功進場（job 換了）再做一次。沒做完之前這一輪不叫模型。結果放在面板最上面【開工測試①】。
+    STARTUP_FILE = "開工測試.jsonl"
+    STARTUP_GAP = 180
+
+    def startup_tests(self, why):
+        if getattr(self, "_startup_ok", False) and time.time() - getattr(self, "_startup_at", 0) < self.STARTUP_GAP:
+            return True
+        if not self.screen_ok() or not self.win.activate():
+            print(f"   🧪 開工測試（{why}）：畫面拿不到，等下一輪")
+            return False
+        print(f"🧪 開工測試①（{why}）：重新定位 → 量刻度 → 量比例。做完才載入文件、才開始想。")
+        self._startup_at = time.time()
+        rec = {"時間": datetime.now().strftime("%H:%M:%S"), "輪": self.stat.get("輪數", 0), "為什麼": why}
+        try:
+            self.relocate_window()
+            b = self.win.client_bbox() or {}
+            rec["畫面"] = f"{b.get('width')}×{b.get('height')}"
+        except Exception as e:  # noqa: BLE001
+            rec["畫面"] = f"失敗：{str(e)[:30]}"
+        ok_axes = False
+        try:
+            ok_axes = bool(self.calibrate_axes(f"開工測試：{why}"))
+        except Exception as e:  # noqa: BLE001
+            print(f"   量刻度失敗：{e}")
+        rec["每度dx"] = getattr(self, "dx_per_deg", None)
+        rec["每度dy"] = getattr(self, "dy_per_deg", None)
+        gid = getattr(self, "game_id", None)
+        rec["視角"] = (gid.get("視角") if isinstance(gid, dict) else "") or ""
+        try:
+            gm = getattr(self, "gmap", None)
+            if self.gmap_on() and gm is not None:
+                self.gmap_measure()
+                rec["深度比例"] = getattr(gm, "scale", None)
+            else:
+                rec["深度比例"] = "陣列地圖沒開"
+        except Exception as e:  # noqa: BLE001
+            rec["深度比例"] = f"失敗：{str(e)[:30]}"
+        rec["完成"] = bool(ok_axes and rec.get("每度dx") and rec.get("每度dy"))
+        self._startup_rec = rec
+        self._startup_ok = rec["完成"]
+        try:
+            with open(os.path.join(self.dir, self.STARTUP_FILE), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + NL)
+        except OSError:
+            pass
+        self.stat["開工測試"] = self.stat.get("開工測試", 0) + 1
+        self.history.append(f"[{rec['時間']}] 🧪 程式替你做了開工測試①（{why}）：{self.startup_text(short=True)}")
+        print(f"   🧪 開工測試①{'完成' if rec['完成'] else '部分'}：{self.startup_text(short=True)}")
+        return self._startup_ok
+
+    def startup_text(self, short=False):
+        r = getattr(self, "_startup_rec", None)
+        if not r:
+            return "🧪 【開工測試①】還沒做——程式會自己做（重新定位、量刻度、量比例），做完才開始。"
+        dx, dy = r.get("每度dx"), r.get("每度dy")
+        sc = r.get("深度比例")
+        body = (f"畫面 {r.get('畫面')}｜每度 dx {dx if dx else '沒量到'}／dy {dy if dy else '沒量到（沿用舊值）'}"
+                f"｜{r.get('視角') or '人稱未知'}｜深度比例 {sc if sc else '沒量成（要你自己量比例）'}")
+        if short:
+            return body
+        return (f"🧪 【開工測試①{'完成' if r.get('完成') else '部分'} {r['時間'][:5]}（{r.get('為什麼')}）】{body}。"
+                "②這隻遊戲的文件在下面各段；③看完才想、才動。進場（job 換）會再做一次。")
+
     def top_notes_text(self):
         """2026-10-03 使用者：「記錄好 都做」——放在面板最上面的三件事。只告訴他，不替他做、不加賞罰。
         ① 量比例提醒（放在【上一步】最後面他沒看到）；② 他自己上次收工寫的檢討（以前只存檔、沒讀回來）；
         ③ 他寫「視角水平」但水平儀顯示歪了——把矛盾指給他看。"""
         out = []
+        try:
+            out.append(self.startup_text())    # 2026-10-12 使用者：開工順序①測量（必須）→②遊戲文件→③才想才動
+        except Exception:  # noqa: BLE001
+            pass
         try:
             out.append(self.acc_text())        # 2026-10-05 使用者：給他目標「先優先提高正確率」
         except Exception:  # noqa: BLE001
@@ -8679,6 +8749,20 @@ class FlowAgent(ProcedureMixin, Agent):
             self.localize_by_landmark()   # 看到綁了座標的地標就校正推算（程式與大模型兩條路都用）
         except Exception as e:  # noqa: BLE001
             print(f"   地標定位失敗：{e}")
+        if not getattr(self, "_startup_ok", False):
+            # 2026-10-12 使用者：導入開始的測試（必須）→ 之後才思考與操作
+            self._startup_tries = getattr(self, "_startup_tries", 0) + 1
+            try:
+                done = self.startup_tests("開工階段還沒完成" if self._startup_tries > 1 else "進場後重測")
+            except Exception as e:  # noqa: BLE001
+                print(f"   開工測試失敗：{e}")
+                done = False
+            if not done and self._startup_tries < 3:
+                time.sleep(3)
+                return
+            if not done:
+                print("   🧪 開工測試試了 3 次仍不完整 → 帶著「部分」開始，面板會寫哪一項沒量到")
+            self._startup_ok = True
         # 2026-09-15 程序化：現在專注的中任務有程式化步驟 → 程式自己做，這一輪不呼叫大模型
         try:
             if self.exec_mode_ready():
@@ -13327,6 +13411,10 @@ class FlowAgent(ProcedureMixin, Agent):
         print(f"   目前流程：{self.flow} 第 {self.step} 步")
         try:
             self.calibrate_all()
+            try:
+                self.startup_tests("開機")        # 2026-10-12 使用者：開工順序①基礎操作的測量（必須）
+            except Exception as e:  # noqa: BLE001
+                print(f"   開工測試失敗：{e}")
             self.gyro_zero("開機，把現在的姿勢當成出生基準")
             super().run()
         finally:
