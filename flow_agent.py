@@ -5500,6 +5500,65 @@ class FlowAgent(ProcedureMixin, Agent):
         return (f"🧪 【開工測試①{'完成' if r.get('完成') else '部分'} {r['時間'][:5]}（{r.get('為什麼')}）】{body}。"
                 "②這隻遊戲的文件在下面各段；③看完才想、才動。進場（job 換）會再做一次。")
 
+    # ---------------- 送出前算 token，超過 DGX 上限就自動修剪
+    # 2026-10-12：今天 system 42k＋面板 21k＋圖片 ≈ 66k > 65,536（max_model_len）→ 16:21 起每四輪有一輪 400 Bad Request 整輪作廢。
+    # 先用 DGX 的 /tokenize 算準（算不到就用 0.7 字/token 估），超過就：①丟掉第一張以外的圖 ②砍面板裡的說明段（照 TRIM_SECTIONS 順序）。
+    CTX_LIMIT = 65536
+    TRIM_SECTIONS = ["程序化執行", "互動不是只有 E", "道具欄", "什麼時候可以離開遊戲", "追蹤", "畫面外的東西在哪",
+                     "三、貼牆", "探索地圖", "你的關鍵動作", "你自己回推出來的成功做法", "按鈕簿", "你自己訂的改善規則"]
+
+    def count_tokens(self, text):
+        import urllib.request
+        try:
+            base = str(self.endpoint).rsplit("/v1", 1)[0]
+            body = json.dumps({"model": self.model, "prompt": text}).encode("utf-8")
+            req = urllib.request.Request(base + "/tokenize", data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=4) as r:
+                return int(json.loads(r.read().decode("utf-8")).get("count") or 0)
+        except Exception:  # noqa: BLE001
+            return int(len(text) * 0.7)
+
+    def fit_budget(self, system_text, content, max_tokens):
+        import re as _re
+        if not isinstance(content, list):
+            return content
+        texts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+        n_img = sum(1 for c in content if isinstance(c, dict) and c.get("type") == "image_url")
+        tok = self.count_tokens(str(system_text) + NL.join(texts))
+        budget = self.CTX_LIMIT - int(max_tokens) - 600
+        total = tok + n_img * 900
+        self._last_prompt_tokens = (tok, n_img)
+        if total <= budget:
+            return content
+        print(f"   ✂ 提示 {tok} token＋{n_img} 張圖（每張約 900）≈ {total} > 可用 {budget} → 先修剪再送")
+        out = list(content)
+        imgs = [i for i, c in enumerate(out) if isinstance(c, dict) and c.get("type") == "image_url"]
+        dropped = 0
+        while len(imgs) > 1 and total > budget:
+            out.pop(imgs[-1])
+            imgs.pop()
+            dropped += 1
+            total -= 900
+        cut = []
+        if total > budget:
+            tis = [i for i, c in enumerate(out) if isinstance(c, dict) and c.get("type") == "text"]
+            if tis:
+                ti = tis[-1]
+                t = str(out[ti].get("text") or "")
+                for name in self.TRIM_SECTIONS:
+                    if total <= budget:
+                        break
+                    m = _re.search(r"(?ms)^【" + _re.escape(name) + r"[^】]*】.*?(?=^【|\Z)", t)
+                    if m:
+                        t = t[:m.start()] + t[m.end():]
+                        cut.append(name)
+                        total -= int(len(m.group(0)) * 0.7)
+                out[ti] = dict(out[ti])
+                out[ti]["text"] = t
+        self.stat["面板修剪"] = self.stat.get("面板修剪", 0) + 1
+        print(f"   ✂ 修剪：丟圖 {dropped} 張、砍段 {len(cut)}（{'、'.join(cut)}）→ 約 {total}")
+        return out
+
     def top_notes_text(self):
         """2026-10-03 使用者：「記錄好 都做」——放在面板最上面的三件事。只告訴他，不替他做、不加賞罰。
         ① 量比例提醒（放在【上一步】最後面他沒看到）；② 他自己上次收工寫的檢討（以前只存檔、沒讀回來）；
@@ -9302,7 +9361,12 @@ class FlowAgent(ProcedureMixin, Agent):
         else:
             # 2026-10-05：快思開回推理，推理的 token 也算在上限裡，給到 1300 才不會「想完沒份寫 JSON」
             content_use, tokens_use = content, max(int(self.args.max_tokens), 1300)
-        raw, trunc, ttft, _ = stream_json(self.endpoint, self.model, self.sys_prompt(mode),
+        _sys_text = self.sys_prompt(mode)
+        try:
+            content_use = self.fit_budget(_sys_text, content_use, tokens_use)   # 2026-10-12：超過 65,536 就先修剪
+        except Exception as e:  # noqa: BLE001
+            print(f"   算 token 失敗（照原樣送）：{e}")
+        raw, trunc, ttft, _ = stream_json(self.endpoint, self.model, _sys_text,
                                           content_use,
                                           tokens_use, time.time() + dl, 0.2,
                                           # 2026-10-05 使用者：快思（每輪做決定的這一次）開回推理；其他小呼叫照舊不推理

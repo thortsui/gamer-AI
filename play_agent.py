@@ -437,7 +437,15 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
     text, ttft, usage, truncated = [], None, None, False
     reason = []                      # 模型的內部推理（reasoning_content）
     t0 = time.time()
-    resp = urllib.request.urlopen(req, timeout=remaining)
+    try:
+        resp = urllib.request.urlopen(req, timeout=remaining)
+    except urllib.error.HTTPError as e:            # 2026-10-12：400 以前只印「Bad Request」，看不到是哪裡超過
+        try:
+            body = e.read().decode("utf-8", "replace")[:300]
+        except Exception:  # noqa: BLE001
+            body = ""
+        print(f"   ✖ 模型回 HTTP {e.code}：{body}")
+        raise
     try:
         while True:
             remaining = deadline_at - time.time()
