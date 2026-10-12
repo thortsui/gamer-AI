@@ -936,6 +936,10 @@ class FlowAgent(ProcedureMixin, Agent):
             rows.append("🧱 " + self.stuck_note)
         if getattr(self, "giveup_note", ""):
             rows.append("🏳 " + self.giveup_note)          # 2026-10-12 使用者：任務沒完成要問他為什麼放棄
+        if getattr(self, "wall_note", ""):
+            rows.append("🧱 " + self.wall_note)            # 2026-10-12 使用者：卡牆也要檢討
+        if getattr(self, "over_note", ""):
+            rows.append("↩ " + self.over_note)             # 2026-10-12 使用者：走過頭也要檢討
         return NL.join(rows) or "（還沒有檢討報告）"
 
     # ---------------- 記憶：去重、過濾廢話、依重要性回灌
@@ -1098,7 +1102,7 @@ class FlowAgent(ProcedureMixin, Agent):
 
     SNAP_FILES = ["學到的.md", "學習整理.md", "我理解的遊戲.md", "操作手冊.md", "地圖.json", "地圖.png",
                   "櫃檯配置.json", "站位.json", "步驟.json", "流程進度.json", "流程統計.json",
-                  "死亡檢討.md", "卡住檢討.md", "放棄檢討.md", "差異筆記.md", "自我回報.md", "任務指示.txt"]
+                  "死亡檢討.md", "卡住檢討.md", "放棄檢討.md", "卡牆檢討.md", "走過頭檢討.md", "差異筆記.md", "自我回報.md", "任務指示.txt"]
 
     def snapshot_save(self):
         """定期整包存檔：他累積的知識與紀錄複製一份到 存檔/時間戳/。"""
@@ -1337,6 +1341,7 @@ class FlowAgent(ProcedureMixin, Agent):
         mid = self.grab_still(320)
         if frame_diff(before, mid) < 2.0:
             self._two_part_note(desc, f"走了 {real1:.1f}s 畫面沒變＝被擋住，後半段 {d2:.1f}s 不走", False)
+            self.event_review("卡牆", f"按 {k} 走了 {real1:.1f} 秒畫面完全沒變＝貼在牆／桌子／玻璃上")   # 2026-10-12 使用者：卡牆也要檢討
             return real1, "拆兩段：前半段畫面沒變，後半段不走"
         go, why = self.two_part_ask(desc, f"按 {k} {real1:.1f}s", f"按 {k} {d2:.1f}s", mid)
         if not go:
@@ -4933,6 +4938,8 @@ class FlowAgent(ProcedureMixin, Agent):
             if k == "w" and ("沒變" in reason or "貼到" in reason):
                 self.note_blocked_dir()
                 self.mark_wall()
+            if "沒變" in reason or "貼到" in reason or "障礙" in reason:
+                self.event_review("卡牆", f"按 {k} 想走 {d:.1f} 秒，第 {walked:.1f} 秒被叫停：{reason}")   # 2026-10-12 使用者：卡牆也要檢討
             self.brake_hint = (f"⚠ 上一輪你想走 {d:.1f} 秒，YOLO 眼睛在第 {walked:.1f} 秒把你叫停了：{reason}。"
                                f"（它每秒看 5 次，所以能在你撞上去或走過頭之前停下來。）" + NL)
         else:
@@ -5309,6 +5316,113 @@ class FlowAgent(ProcedureMixin, Agent):
             self.record_problem(f"任務沒完成就結束：「{task}」（{how}）", tried=did, cause=why, source="放棄檢討")
         except Exception:  # noqa: BLE001
             pass
+
+    # ---------------- 卡牆／走過頭也要檢討（2026-10-12 使用者：「他任務、走過頭、卡牆…都要檢討」）
+    # 跟卡住檢討同一條背景佇列、同樣慢想 90 秒；每一種 180 秒最多問一次。只記錄、回灌面板，不加分不扣分。
+    EVENT_PROMPTS = {
+        "卡牆": """你剛剛撞牆／貼牆了：{why}
+請檢討：1) 你是朝什麼走？走之前畫面上看得到那面牆（或桌子、玻璃、櫃子）嗎 2) 為什麼還是走過去 3) 現在要怎麼離開它（退幾秒、轉幾度、再往哪走） 4) 下次怎麼避免
+只輸出 JSON：{{"cause":"為什麼撞上(<=40字)","mistake":"錯在哪(<=40字)","avoid":"下次怎麼做(<=60字)","now":"現在怎麼離開(<=40字)"}}""",
+        "走過頭": """你剛剛做過頭了：{why}
+請檢討：1) 上一輪為什麼送那麼大的量 2) 做到七成的時候程式有給你看畫面，你那時看到什麼、為什麼沒喊停 3) 當時應該送多少 4) 下次怎麼做（寧願少、不要多）
+只輸出 JSON：{{"cause":"為什麼過頭(<=40字)","mistake":"錯在哪(<=40字)","avoid":"下次怎麼做(<=60字)","should":"當時該送多少(<=30字)"}}""",
+    }
+    EVENT_COOLDOWN = 180
+
+    def event_review(self, kind, why):
+        last = getattr(self, "_event_last", None)
+        if last is None:
+            last = self._event_last = {}
+        if time.time() - last.get(kind, 0) < self.EVENT_COOLDOWN:
+            return False
+        last[kind] = time.time()
+        return self.review_async(f"{kind}檢討", self._event_review_llm, kind, str(why))
+
+    def _event_review_llm(self, kind, why):
+        print(f"   📋 {kind}檢討：{why}")
+        content = []
+        try:
+            uri, _ = jpeg_data_uri(self.draw_eyes(draw_grid(self.grab_still(1024))), 70)
+            content.append({"type": "image_url", "image_url": {"url": uri}})
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            content += self.short_mem_content()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            tr = self.trace_text(30.0)
+        except Exception:  # noqa: BLE001
+            tr = ""
+        content.append({"type": "text", "text": "最近做過的事：" + NL + NL.join(self.history[-10:]) + NL + NL
+                        + ("【出事前三十秒你實際做了什麼】（程式一筆一筆記的）" + NL + tr + NL + NL if tr else "")
+                        + self.EVENT_PROMPTS[kind].format(why=why)})
+        raw, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(), content,
+                                   1000, time.time() + 90, 0.2, effort=慢想)
+        o = parse_json_loose(raw) or {}
+        cause, mistake, avoid = (str(o.get(k) or "").strip() for k in ("cause", "mistake", "avoid"))
+        extra = str(o.get("now") or o.get("should") or "").strip()
+        if not (cause or avoid):
+            print(f"   📋 {kind}檢討沒解析出內容，這次跳過")
+            return
+        lab = "現在怎麼離開" if kind == "卡牆" else "當時該送多少"
+        note = f"{kind}：原因「{cause}」；錯在「{mistake}」；下次「{avoid}」" + (f"；{lab}「{extra}」" if extra else "")
+        if kind == "卡牆":
+            self.wall_note = note
+        else:
+            self.over_note = note
+        try:
+            with open(os.path.join(self.dir, f"{kind}檢討.md"), "a", encoding="utf-8") as f:
+                f.write(f"## {datetime.now().strftime('%m/%d %H:%M')} {why}" + NL
+                        + f"- 原因：{cause}" + NL + f"- 錯在哪：{mistake}" + NL + f"- 下次怎麼做：{avoid}" + NL
+                        + (f"- {lab}：{extra}" + NL if extra else "") + NL)
+        except OSError:
+            pass
+        if avoid:
+            self.add_note(f"（{kind}檢討）{avoid}")
+        print(f"   📋 {note}")
+        self.log({"時間": datetime.now().strftime("%H:%M:%S"), "模式": f"{kind}檢討", "事件": why,
+                  "原因": cause, "錯誤": mistake, "避免": avoid, "補充": extra})
+        self.stat[f"{kind}檢討"] = self.stat.get(f"{kind}檢討", 0) + 1
+        try:
+            self.record_problem(f"{kind}：{why[:60]}", tried=mistake, cause=cause, source=f"{kind}檢討")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def detect_overshoot(self, actions):
+        """走過頭＝上一輪送了大量、這一輪馬上反方向。只看他自己送的動作，小幅度左右掃不算。"""
+        prev = getattr(self, "_prev_mv", None) or {}
+        cur = {}
+        for a in actions or []:
+            if not isinstance(a, dict):
+                continue
+            t = a.get("t")
+            if t == "key" and str(a.get("k", "")).lower() in ("w", "a", "s", "d"):
+                try:
+                    cur[str(a["k"]).lower()] = float(a.get("d", 0) or 0)
+                except (TypeError, ValueError):
+                    pass
+            elif t == "look":
+                try:
+                    cur["dx"], cur["dy"] = float(a.get("dx", 0) or 0), float(a.get("dy", 0) or 0)
+                except (TypeError, ValueError):
+                    pass
+        self._prev_mv = cur
+        if not prev or not cur:
+            return
+        why = ""
+        if prev.get("dx") and cur.get("dx") and abs(prev["dx"]) >= 100 and prev["dx"] * cur["dx"] < 0:
+            why = f"上一輪轉視角 dx {prev['dx']:+.0f}，這一輪馬上反方向 dx {cur['dx']:+.0f}＝上一輪轉過頭"
+        elif prev.get("dy") and cur.get("dy") and abs(prev["dy"]) >= 60 and prev["dy"] * cur["dy"] < 0:
+            why = f"上一輪上下轉 dy {prev['dy']:+.0f}，這一輪馬上反方向 dy {cur['dy']:+.0f}＝上一輪甩過頭"
+        elif prev.get("w", 0) >= 1.0 and cur.get("s", 0) > 0:
+            why = f"上一輪往前走 {prev['w']:.1f} 秒，這一輪馬上後退＝上一輪走過頭"
+        elif (prev.get("a", 0) >= 0.5 and cur.get("d", 0) > 0) or (prev.get("d", 0) >= 0.5 and cur.get("a", 0) > 0):
+            why = "上一輪往一邊橫移 0.5 秒以上，這一輪馬上往另一邊＝上一輪移過頭"
+        if why:
+            self.stat["走過頭"] = self.stat.get("走過頭", 0) + 1
+            print(f"   ↩ 走過頭：{why}")
+            self.event_review("走過頭", why)
 
     def task_done_text(self):
         """面板最上面：今天完成了幾件任務（只有遊戲自己把右上角換成下一件才算）。"""
@@ -9745,6 +9859,10 @@ class FlowAgent(ProcedureMixin, Agent):
         mv = [a for a in actions if a.get("t") == "key" and str(a.get("k", "")).lower() in ("w", "a", "s", "d")]
         if mv:
             self._prev_move = "、".join(f"按 {a.get('k')} {float(a.get('d', 0)):.1f}s" for a in mv[:2])
+        try:
+            self.detect_overshoot(actions)          # 2026-10-12 使用者：走過頭也要檢討
+        except Exception as e:  # noqa: BLE001
+            print(f"   走過頭偵測失敗：{e}")
         before = self.grab_still(320)
         # 追蹤目標：他這一輪講的東西，用來判斷「快到了要停」
         self._track = ""
@@ -9850,6 +9968,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 if not (dy > 0 and (getattr(self, "desk_lock", 0) >= 2 or self.at_desk_surface())):
                     self.pitch_edge = "下" if dy > 0 else "上"
                     self.pitch_edge_at = time.time()
+                    self.event_review("走過頭", f"往{'下' if dy > 0 else '上'}轉 dy {dy:+d}，畫面完全沒變＝鏡頭已經頂到{'地板' if dy > 0 else '天花板'}，轉過頭了")   # 2026-10-12
                 # 「往下轉但畫面沒變」不一定是頂到最下面——櫃檯作業中鏡頭被鎖住、
                 # 或畫面正對著桌面時也完全不會變。這種時候往回抬 90 就是把他推去看天花板。
                 if dy > 0 and (getattr(self, "desk_lock", 0) >= 2 or self.at_desk_surface()):
