@@ -3814,6 +3814,9 @@ class FlowAgent(ProcedureMixin, Agent):
         new = nm not in self.spaces
         self.space = nm
         self.spaces.setdefault(nm, {"建立": datetime.now().strftime("%m/%d %H:%M")})
+        # 2026-10-12 使用者：視角或場景切換後移動速度、刻度、比例可能改變 → 換空間下一輪先重做開工測試①
+        self._startup_ok, self._startup_tries = False, 0
+        print(f"   🧪 切到新空間「{nm}」→ 下一輪先重做開工測試①（刻度、比例可能不一樣）")
         if why:
             self.spaces[nm]["怎麼過去"] = str(why)[:60]
         self.spaces[nm]["最後進入"] = datetime.now().strftime("%m/%d %H:%M")
