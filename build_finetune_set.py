@@ -947,6 +947,14 @@ def main():
 
     data["A_text"] = build_A_text(data["A"])
     data["A_act"] = build_A_act()
+    # 2026-10-13 使用者：新增即時應用考題（互動怎麼算、緊急情況、找不知道在哪的東西）→ 考題_即時應用.py
+    from 考題_即時應用 import build_A_app
+    data["A_app"] = []
+    for r in build_A_app(chat):
+        txt = r["messages"][1]["content"] + r["messages"][2]["content"]
+        if has_game_word(txt):
+            drop("A_app", "含遊戲名詞"); continue
+        data["A_app"].append(r)
 
     for g, mem in mems:
 
@@ -998,7 +1006,7 @@ def main():
 
     json.dump(summary, open(os.path.join(OUT, "統計.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
-    names = {"A": "規則段落", "A_text": "背規則", "A_act": "動作有什麼", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
+    names = {"A": "規則段落", "A_text": "背規則", "A_act": "動作有什麼", "A_app": "即時應用", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
 
     for cls, s in summary.items():
 
