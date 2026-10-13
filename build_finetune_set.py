@@ -955,6 +955,9 @@ def main():
         if has_game_word(txt):
             drop("A_app", "含遊戲名詞"); continue
         data["A_app"].append(r)
+    # 2026-10-13 使用者：他自己整理的容易卡住的方式 → 問他解決方法 → 考題_卡住.py
+    from 考題_卡住 import build_A_stuck
+    data["A_stuck"] = build_A_stuck(chat, mask, has_game_word, HERE)
 
     for g, mem in mems:
 
@@ -1006,7 +1009,7 @@ def main():
 
     json.dump(summary, open(os.path.join(OUT, "統計.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
-    names = {"A": "規則段落", "A_text": "背規則", "A_act": "動作有什麼", "A_app": "即時應用", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
+    names = {"A": "規則段落", "A_text": "背規則", "A_act": "動作有什麼", "A_app": "即時應用", "A_stuck": "卡住解法", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
 
     for cls, s in summary.items():
 
