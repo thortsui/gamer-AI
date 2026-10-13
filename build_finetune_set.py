@@ -149,6 +149,7 @@ def drop(cls, why):
 
 # ---------------------------------------------------------------- A 規則段落
 def build_A():
+    """2026-10-13 使用者：訓練所有核心規則，但「夾到遊戲內專有名詞不要」→ 夾到遊戲名詞的段落整段丟；等級表一條一段；動作表分組。"""
     out = []
     for sub in ("共用", "基礎操作", "學習模組"):
         for p in sorted(glob.glob(os.path.join(CORE, sub, "*.md"))):
@@ -157,8 +158,31 @@ def build_A():
                 head, _, raw = raw[3:].partition("---")
                 if "停用: 是" in head:
                     continue
+            for n in NAMES:
+                raw = raw.replace(n, "玩家")
+            # 【】段落之外的本文（例如 90_動作表 整份是表格、沒有【】）：照「## 」標題切
+            pre = raw.split("\n【", 1)[0]
+            if len(pre) > 300 and "指令等級表" not in os.path.basename(p):
+                fname = os.path.basename(p).split("_", 1)[-1].rsplit(".", 1)[0]
+                # 動作表是一行一個動作（行首兩格＋{"t"），接續行縮更多；每 ~900 字一組
+                items = [x for x in re.split(r"\n(?=  \{\"t\")", pre) if x.strip()]
+                groups, cur = [], ""
+                for it in items:
+                    if cur and len(cur) + len(it) > 900:
+                        groups.append(cur); cur = ""
+                    cur += ("\n" if cur else "") + it.rstrip()
+                if cur:
+                    groups.append(cur)
+                for i, sec in enumerate(groups, 1):
+                    if len(sec) < 60:
+                        continue
+                    if has_game_word(sec):
+                        drop("A", "含遊戲名詞"); continue
+                    title = f"{fname} 第 {i}／{len(groups)} 組"
+                    out.append({"class": "A", "file": os.path.relpath(p, CORE), "title": title,
+                                "text": f"【{title}】\n{sec.strip()}"})
             if "指令等級表" in os.path.basename(p):
-                # 2026-10-13：等級表是「1. **標題**（日期）。內文」一條一條，沒有【】；一條就是一段
+                # 2026-10-13：等級表是「1. 標題（日期）。內文」一條一條，沒有【】；一條就是一段（不因遊戲名詞丟）
                 for m in re.finditer(r"^(\d+)\. (.*?)(?=^\d+\. |\Z)", raw, re.S | re.M):
                     body = m.group(2).strip()
                     tm = re.match(r"\*\*(.+?)\*\*", body)
@@ -179,6 +203,18 @@ def build_A():
                     drop("A", "含遊戲名詞"); continue
                 title = chunk[1:chunk.index("】")] if "】" in chunk else chunk[:20]
                 out.append({"class": "A", "file": os.path.relpath(p, CORE), "title": title, "text": chunk})
+    return out
+
+
+# ---------------------------------------------------------------- A_text 背規則（2026-10-13 使用者：訓練所有規則進去）
+SYS_RULE = "你是在玩 Roblox 的代理。有人問你某一條基礎操作規則，把那條規則完整說出來。"
+
+
+def build_A_text(a_rows):
+    out = []
+    for r in a_rows:
+        q = f"規則【{r['title']}】是什麼？" if "等級" not in r else f"指令等級表第 {r['等級']} 條（{r['title']}）是什麼？"
+        out.append(chat(SYS_RULE, q, r["text"], **{"class": "A_text", "file": r["file"], "title": r["title"]}))
     return out
 
 
@@ -408,6 +444,7 @@ def main():
         mems.append(("動物醫院(舊)", os.path.join(HERE, "專案", "動物醫院", "_舊_0924", "記憶")))   # 只拿 D 類反例
 
     data = {"A": build_A(), "B": [], "C": [], "D": [], "E": [], "F": [], "G": []}
+    data["A_text"] = build_A_text(data["A"])
     for g, mem in mems:
         if not os.path.isdir(mem):
             continue
@@ -433,7 +470,7 @@ def main():
         summary[cls] = {"總數": len(rows), "train": len(rows) - n_val, "val": n_val,
                         "依遊戲": dict(by_game), "丟掉": dict(stats[cls])}
     json.dump(summary, open(os.path.join(OUT, "統計.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    names = {"A": "規則段落", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
+    names = {"A": "規則段落", "A_text": "背規則", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
     for cls, s in summary.items():
         print(f"{cls} {names[cls]}：{s['總數']} 筆（train {s['train']}／val {s['val']}）"
               f"　依遊戲 {s['依遊戲']}　丟掉 {s['丟掉']}")

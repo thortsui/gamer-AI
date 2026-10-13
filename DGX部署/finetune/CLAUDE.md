@@ -38,6 +38,7 @@ docker compose run --rm merge        # 要拿去服務時才合併
   - A：`01_指令等級表.md` 一條一段（以前沒有【】整份被跳過），38 條收進 36 條；新段落 55 段用 `gen_rule_qa.py --src A_new.jsonl --append` 生成問答（QA_MODEL=gamer-27b-ft-run1，四路並行）追加到 A_qa。
   - F：加放棄／卡牆／走過頭三種檢討。
   - **G 四欄想（新）**：思考流程.jsonl 裡 `想` 是「因為｜所以要｜動作｜結果應該是」的輪，配步驟日誌畫面變化 ≥5、合規則、無遊戲名詞；system 提示寫明四欄格式。
+- **12:2x 使用者「訓練所有規則進去」**：A 類一段不丟（夾遊戲名詞也留）、動作表切 6 段、新增 **A_text 背規則**（問規則標題→答原文，×3）；CLASSES=A_qa,A_text,B,C,E,F,G。遊戲個體文件仍不燒。
 - `train_lora.py --cap C=2000,F=2000`（新參數，抽樣控制時間；C 4412／F 4903 筆太多），`.env`：RUN_NAME=run2、CLASSES=A_qa,B,C,E,F,G、REPEAT=A_qa=2,B=3,G=2。
 - 跑法同 run1：`docker compose run -d train` → `merge` → `quant` → `up -d serve`（served name `gamer-27b-ft-run2`）。
 - **看進度**：detached 跑的時候 `docker logs` 不會有進度條與 loss（stdout 緩衝），用 `docker exec --privileged train-run2 pip install -q py-spy && docker exec --privileged train-run2 py-spy dump --pid 1 --locals | grep update_step`（總步數＝筆數÷grad_accum×epochs），或看 `out/run2/ckpt/checkpoint-*`（每 200 步存）。

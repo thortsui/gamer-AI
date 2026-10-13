@@ -59,6 +59,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--src", default="", help="只對這個檔的段落生成（例如 A_new.jsonl），train/val 照 9:1 切")
     ap.add_argument("--append", action="store_true", help="追加到 A_qa_{train,val}.jsonl 而不是覆蓋")
+    ap.add_argument("--keep-game-words", action="store_true", help="2026-10-13 使用者：訓練所有規則進去 → 不因遊戲名詞丟問答")
     args = ap.parse_args()
     srcs = {}
     if args.src:
@@ -82,7 +83,7 @@ def main():
             qas = list(ex.map(lambda r: ask(r["text"]), rows))
         for i, (r, qa) in enumerate(zip(rows, qas), 1):
             for x in qa:
-                if has_game_word(x["q"]) or has_game_word(x["a"]):
+                if not args.keep_game_words and (has_game_word(x["q"]) or has_game_word(x["a"])):
                     n_drop += 1
                     continue
                 out.append(chat(SYS_STUDENT, x["q"], x["a"], **{"class": "A", "file": r["file"], "title": r["title"]}))
