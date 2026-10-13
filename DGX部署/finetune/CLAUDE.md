@@ -40,6 +40,7 @@ docker compose run --rm merge        # 要拿去服務時才合併
   - **G 四欄想（新）**：思考流程.jsonl 裡 `想` 是「因為｜所以要｜動作｜結果應該是」的輪，配步驟日誌畫面變化 ≥5、合規則、無遊戲名詞；system 提示寫明四欄格式。
 - `train_lora.py --cap C=2000,F=2000`（新參數，抽樣控制時間；C 4412／F 4903 筆太多），`.env`：RUN_NAME=run2、CLASSES=A_qa,B,C,E,F,G、REPEAT=A_qa=2,B=3,G=2。
 - 跑法同 run1：`docker compose run -d train` → `merge` → `quant` → `up -d serve`（served name `gamer-27b-ft-run2`）。
+- **看進度**：detached 跑的時候 `docker logs` 不會有進度條與 loss（stdout 緩衝），用 `docker exec --privileged train-run2 pip install -q py-spy && docker exec --privileged train-run2 py-spy dump --pid 1 --locals | grep update_step`（總步數＝筆數÷grad_accum×epochs），或看 `out/run2/ckpt/checkpoint-*`（每 200 步存）。
 
 ## 驗收
 1. `報告.json` 各類 val loss／ppl，跟訓練前的底模比（先跑一次 `--epochs 0` 拿基準）。
