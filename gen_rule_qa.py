@@ -22,7 +22,7 @@ sys.path.insert(0, HERE)
 from build_finetune_set import has_game_word, chat  # noqa: E402
 
 ENDPOINT = "http://192.168.0.126:8888/v1/chat/completions"
-MODEL = "qwen3.8-flash-next"
+MODEL = os.environ.get("QA_MODEL", "qwen3.8-flash-next")
 
 SYS = ("你在幫一個玩 Roblox 的 AI 代理出教材。給你一段它的基礎操作規則，請把這段規則拆成 4～6 組問答，"
        "讓它讀完就能在任何一款遊戲裡照做。要求：\n"
@@ -57,18 +57,30 @@ def ask(text, tries=3):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--src", default="", help="只對這個檔的段落生成（例如 A_new.jsonl），train/val 照 9:1 切")
+    ap.add_argument("--append", action="store_true", help="追加到 A_qa_{train,val}.jsonl 而不是覆蓋")
     args = ap.parse_args()
+    srcs = {}
+    if args.src:
+        rows = [json.loads(l) for l in open(os.path.join(OUT, args.src), encoding="utf-8")]
+        n_val = max(1, len(rows) // 10)
+        srcs = {"train": rows[n_val:], "val": rows[:n_val]}
     for split in ("train", "val"):
         src = os.path.join(OUT, f"A_{split}.jsonl")
-        if not os.path.exists(src):
+        if srcs:
+            rows = srcs[split]
+        elif os.path.exists(src):
+            rows = [json.loads(l) for l in open(src, encoding="utf-8")]
+        else:
             continue
-        rows = [json.loads(l) for l in open(src, encoding="utf-8")]
         if args.limit:
             rows = rows[: args.limit]
         out, n_drop = [], 0
         t0 = time.time()
-        for i, r in enumerate(rows, 1):
-            qa = ask(r["text"])
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(4) as ex:            # vLLM max-num-seqs 4，四段一起生成
+            qas = list(ex.map(lambda r: ask(r["text"]), rows))
+        for i, (r, qa) in enumerate(zip(rows, qas), 1):
             for x in qa:
                 if has_game_word(x["q"]) or has_game_word(x["a"]):
                     n_drop += 1
@@ -76,7 +88,7 @@ def main():
                 out.append(chat(SYS_STUDENT, x["q"], x["a"], **{"class": "A", "file": r["file"], "title": r["title"]}))
             print(f"[{split}] {i}/{len(rows)} {r['title'][:24]} → {len(qa)} 組（累計 {len(out)}，丟 {n_drop}）"
                   f"　{time.time() - t0:.0f}s", flush=True)
-        with open(os.path.join(OUT, f"A_qa_{split}.jsonl"), "w", encoding="utf-8") as f:
+        with open(os.path.join(OUT, f"A_qa_{split}.jsonl"), "a" if args.append else "w", encoding="utf-8") as f:
             for r in out:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         print(f"→ A_qa_{split}.jsonl：{len(out)} 筆（丟掉含遊戲名詞 {n_drop}）")

@@ -21,8 +21,9 @@ from transformers import (AutoModelForImageTextToText, AutoProcessor, Trainer, T
 from peft import LoraConfig, get_peft_model
 
 
-def load_rows(data_dir, classes, split, repeat):
+def load_rows(data_dir, classes, split, repeat, cap=None):
     rows = []
+    cap = cap or {}
     for cls in classes:
         p = os.path.join(data_dir, f"{cls}_{split}.jsonl")
         if not os.path.exists(p):
@@ -30,6 +31,9 @@ def load_rows(data_dir, classes, split, repeat):
             continue
         r = [json.loads(l) for l in open(p, encoding="utf-8")]
         r = [x for x in r if x.get("messages") and x["messages"][-1]["role"] == "assistant"]
+        if split == "train" and cap.get(cls) and len(r) > cap[cls]:
+            random.Random(0).shuffle(r)
+            r = r[: cap[cls]]          # 2026-10-13 run2：C／F 太多，抽一部分控制訓練時間
         k = repeat.get(cls, 1) if split == "train" else 1
         print(f"{cls}_{split}: {len(r)} 筆 ×{k}")
         rows += r * k
@@ -88,6 +92,7 @@ def main():
     ap.add_argument("--out", default="/out/run1")
     ap.add_argument("--classes", default="A_qa,B,C,E,F")
     ap.add_argument("--repeat", default="A_qa=2,B=4", help="訓練集重複倍數，例如 A_qa=2,B=4")
+    ap.add_argument("--cap", default="", help="訓練集每類最多幾筆（抽樣），例如 C=2500,F=2500")
     ap.add_argument("--epochs", type=float, default=2)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--r", type=int, default=16)
@@ -101,6 +106,7 @@ def main():
     torch.manual_seed(args.seed)
     classes = [c for c in args.classes.split(",") if c]
     repeat = {k: int(v) for k, v in (kv.split("=") for kv in args.repeat.split(",") if "=" in kv)}
+    cap = {k: int(v) for k, v in (kv.split("=") for kv in args.cap.split(",") if "=" in kv)}
     os.makedirs(args.out, exist_ok=True)
 
     print(f"載入 {args.model} …")
@@ -123,7 +129,7 @@ def main():
                                              target_modules=targets, task_type="CAUSAL_LM"))
     model.print_trainable_parameters()
 
-    train_rows = load_rows(args.data, classes, "train", repeat)
+    train_rows = load_rows(args.data, classes, "train", repeat, cap)
     val_rows = load_rows(args.data, classes, "val", {})
     if args.sample:
         train_rows, val_rows = train_rows[: args.sample], val_rows[: max(8, args.sample // 10)]

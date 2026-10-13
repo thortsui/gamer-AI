@@ -17,7 +17,8 @@ build_finetune_set.py — 從他的日誌撈 fine-tune 用的資料集（只讀�
   C 成功軌跡   關鍵動作.jsonl：成功前後那幾輪，畫面 → 動作 JSON
   D 錯誤→修正  犯錯紀錄.jsonl＋卡住／扣分／死亡檢討：畫面＋他做錯的 → 檢討寫的「下次」
   E 輸出格式   s 欄位正例（只寫看得到的）／反例（形容氣氛、推測）
-  F 學習方法   慢想、成功回推、卡住檢討、死亡檢討、程序：怎麼拆步驟、怎麼回推、怎麼檢討
+  F 學習方法   慢想、成功回推、卡住／死亡／放棄／卡牆／走過頭檢討、程序：怎麼拆步驟、怎麼回推、怎麼檢討
+  G 四欄想     思考流程.jsonl：畫面 → 因為｜所以要｜動作｜結果應該是 ＋ 動作 JSON（2026-10-13 run2 新增）
 輸出：訓練資料/finetune/<類>.jsonl（chat 格式）＋ 統計.json
 """
 import argparse
@@ -156,6 +157,20 @@ def build_A():
                 head, _, raw = raw[3:].partition("---")
                 if "停用: 是" in head:
                     continue
+            if "指令等級表" in os.path.basename(p):
+                # 2026-10-13：等級表是「1. **標題**（日期）。內文」一條一條，沒有【】；一條就是一段
+                for m in re.finditer(r"^(\d+)\. (.*?)(?=^\d+\. |\Z)", raw, re.S | re.M):
+                    body = m.group(2).strip()
+                    tm = re.match(r"\*\*(.+?)\*\*", body)
+                    title = tm.group(1) if tm else re.split(r"[（(。；;]", body)[0][:24]
+                    chunk = f"【{title}】{body}"
+                    if len(chunk) < 30:            # 等級表一條常常只有一句，門檻比【】段落低
+                        continue
+                    if has_game_word(chunk):
+                        drop("A", "含遊戲名詞"); continue
+                    out.append({"class": "A", "file": os.path.relpath(p, CORE), "title": title, "text": chunk,
+                                "等級": int(m.group(1))})
+                continue
             for chunk in re.split(r"\n(?=【)", raw):
                 chunk = chunk.strip()
                 if len(chunk) < 60 or not chunk.startswith("【"):
@@ -297,6 +312,25 @@ def build_F(game, mem):
                 drop("F", "回推含遊戲名詞"); continue
             out.append(chat(SYS_LEARN, "剛才成功了。回推：做了什麼、關鍵一步是哪一步、怎麼重現、差點失敗在哪。",
                             js, **{"class": "F", "kind": "成功回推", "game": game}))
+        elif m == "放棄檢討":
+            keys = [k for k in ("放棄的時候", "改做了什麼", "為什麼", "下次") if r.get(k)]
+            if len(keys) < 3:
+                drop("F", "檢討欄位不足"); continue
+            js = json.dumps({k: r[k] for k in keys}, ensure_ascii=False)
+            if has_game_word(js):
+                drop("F", "檢討含遊戲名詞"); continue
+            out.append(chat(SYS_LEARN, f"右上角的任務「{mask(r.get('任務', ''))}」沒完成就結束了（{mask(r.get('怎麼結束', ''))}）。"
+                            "檢討：放棄的時候在做什麼、改做了什麼、為什麼覺得那比較重要、下次怎麼做（每格短語）。",
+                            js, **{"class": "F", "kind": m, "game": game}))
+        elif m in ("卡牆檢討", "走過頭檢討"):
+            keys = [k for k in ("原因", "錯誤", "避免", "補充") if r.get(k)]
+            if len(keys) < 3:
+                drop("F", "檢討欄位不足"); continue
+            js = json.dumps({k: r[k] for k in keys}, ensure_ascii=False)
+            if has_game_word(js) or has_game_word(r.get("事件", "")):
+                drop("F", "檢討含遊戲名詞"); continue
+            out.append(chat(SYS_LEARN, f"{mask(r.get('事件', ''))}。檢討：原因、錯在哪、下次怎麼做、現在怎麼離開（每格短語）。",
+                            js, **{"class": "F", "kind": m, "game": game}))
         elif m in ("卡住檢討", "扣分檢討", "死亡檢討"):
             keys = [k for k in ("原因", "死因", "錯誤", "避免", "改善", "記憶") if r.get(k)]
             if len(keys) < 3:
@@ -321,6 +355,44 @@ def build_F(game, mem):
     return out
 
 
+# ---------------------------------------------------------------- G 四欄想（看畫面 → 四欄想 ＋ 動作）
+SYS_ACT4 = ("你是在玩 Roblox 的代理。看畫面描述，只輸出一個 JSON："
+            "{\"s\":\"看到什麼\",\"想\":\"因為:看到什麼｜所以要:目的｜動作:做什麼｜結果應該是:畫面會變怎樣\",\"a\":[動作...]}。"
+            "想 固定四欄短語，不寫其他連接詞與贅字；a 就是「動作」那一欄。")
+
+
+def build_G(game, mem):
+    """思考流程.jsonl 裡 想 已經是四欄的輪，配 步驟日誌 的畫面變化，只收做了有生效、合規則、沒遊戲名詞的。"""
+    out = []
+    delta = defaultdict(int)
+    for s in jl(os.path.join(mem, "步驟日誌.jsonl")):
+        m = re.search(r"畫面變化 (\d+)", str(s.get("結果", "")))
+        if m and s.get("輪") is not None:
+            delta[s["輪"]] = max(delta[s["輪"]], int(m.group(1)))
+    for r in jl(os.path.join(mem, "思考流程.jsonl")):
+        think, seen, done = str(r.get("想") or ""), r.get("看到", "") or "", r.get("做了", "") or ""
+        if think.count("｜") < 3 or not think.startswith("因為:"):
+            continue
+        if delta.get(r.get("輪"), 0) < 5:
+            drop("G", "畫面沒變"); continue
+        acts = parse_actions(done)
+        if not acts:
+            drop("G", "動作解析不了或沒動作"); continue
+        if not is_rule_ok(acts, seen):
+            drop("G", "違反規則"); continue
+        if has_game_word(think) or has_game_word(done):
+            drop("G", "輸出含遊戲名詞"); continue
+        cols = [c.strip() for c in think.split("｜")]
+        if len(cols) != 4 or any(len(c) > 40 for c in cols):
+            drop("G", "四欄不整齊或太長"); continue
+        user = (f"區：{mask(r.get('區', ''))}\n任務：{mask(r.get('任務', '')) or '無'}\n視角：{mask(r.get('視角', ''))}\n"
+                f"畫面：{mask(seen)}")
+        ans = {"s": mask(seen), "想": "｜".join(cols), "a": acts}
+        out.append(chat(SYS_ACT4, user, json.dumps(ans, ensure_ascii=False),
+                        **{"class": "G", "game": game, "輪": r.get("輪")}))
+    return out
+
+
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
@@ -335,7 +407,7 @@ def main():
     if not args.game:
         mems.append(("動物醫院(舊)", os.path.join(HERE, "專案", "動物醫院", "_舊_0924", "記憶")))   # 只拿 D 類反例
 
-    data = {"A": build_A(), "B": [], "C": [], "D": [], "E": [], "F": []}
+    data = {"A": build_A(), "B": [], "C": [], "D": [], "E": [], "F": [], "G": []}
     for g, mem in mems:
         if not os.path.isdir(mem):
             continue
@@ -347,6 +419,7 @@ def main():
         data["D"] += build_D(g, mem)
         data["E"] += build_E(g, mem)
         data["F"] += build_F(g, mem)
+        data["G"] += build_G(g, mem)
 
     summary = {}
     for cls, rows in data.items():
@@ -360,7 +433,7 @@ def main():
         summary[cls] = {"總數": len(rows), "train": len(rows) - n_val, "val": n_val,
                         "依遊戲": dict(by_game), "丟掉": dict(stats[cls])}
     json.dump(summary, open(os.path.join(OUT, "統計.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    names = {"A": "規則段落", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法"}
+    names = {"A": "規則段落", "B": "狀態判斷", "C": "成功軌跡", "D": "錯誤→修正", "E": "輸出格式", "F": "學習方法", "G": "四欄想"}
     for cls, s in summary.items():
         print(f"{cls} {names[cls]}：{s['總數']} 筆（train {s['train']}／val {s['val']}）"
               f"　依遊戲 {s['依遊戲']}　丟掉 {s['丟掉']}")

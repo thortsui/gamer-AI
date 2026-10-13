@@ -22,7 +22,7 @@ services:
     command: >
       python /app/train_lora.py --model ${BASE_MODEL:-Qwen/Qwen3.8-27B} --data /data --out /out/${RUN_NAME:-run1}
       --classes ${CLASSES:-A_qa,B,C,E,F} --epochs ${EPOCHS:-2} --lr ${LR:-1e-4} --r ${LORA_R:-16}
-      --max-len ${MAX_LEN:-3072} --grad-accum ${GRAD_ACCUM:-16} --repeat ${REPEAT:-A_qa=2,B=4}
+      --max-len ${MAX_LEN:-3072} --grad-accum ${GRAD_ACCUM:-16} --repeat ${REPEAT:-A_qa=2,B=4} --cap "${CAP:-}"
   # 拿合併後的權重當 gamer AI 的大腦（跟 Flash-Next 互斥：開這個前先 stop.sh 那個）
   #   docker compose up -d serve      # 佔 8888，代理不用改設定；served name 用 gamer-27b-ft-<run>
   #   SERVE_DIR=nvfp4（ModelOpt 壓縮版，vLLM 自動偵測 quant）或 merged（bf16，要另外加 --quantization fp8）

@@ -32,6 +32,15 @@ docker compose run --rm merge        # 要拿去服務時才合併
 ```
 試跑：`docker compose run --rm train python /app/train_lora.py --sample 200 --epochs 1 --out /out/smoke`
 
+## run2（2026-10-13）：把 10/12 的新規則燒進去
+使用者 10/13 說「規則太多了」、要微調；查過千問開源沒有比 27B 更強又放得下的（Flash-Next 180B 實測訓不了），留在 Qwen3.8-27B 從底模重訓。
+- 資料集差異（Windows 端 `build_finetune_set.py`，備份 `.bak_1013`）：
+  - A：`01_指令等級表.md` 一條一段（以前沒有【】整份被跳過），38 條收進 36 條；新段落 55 段用 `gen_rule_qa.py --src A_new.jsonl --append` 生成問答（QA_MODEL=gamer-27b-ft-run1，四路並行）追加到 A_qa。
+  - F：加放棄／卡牆／走過頭三種檢討。
+  - **G 四欄想（新）**：思考流程.jsonl 裡 `想` 是「因為｜所以要｜動作｜結果應該是」的輪，配步驟日誌畫面變化 ≥5、合規則、無遊戲名詞；system 提示寫明四欄格式。
+- `train_lora.py --cap C=2000,F=2000`（新參數，抽樣控制時間；C 4412／F 4903 筆太多），`.env`：RUN_NAME=run2、CLASSES=A_qa,B,C,E,F,G、REPEAT=A_qa=2,B=3,G=2。
+- 跑法同 run1：`docker compose run -d train` → `merge` → `quant` → `up -d serve`（served name `gamer-27b-ft-run2`）。
+
 ## 驗收
 1. `報告.json` 各類 val loss／ppl，跟訓練前的底模比（先跑一次 `--epochs 0` 拿基準）。
 2. `樣本.txt` 肉眼看 A_qa／B 的回答有沒有照規則、有沒有冒出遊戲名詞。
