@@ -109,7 +109,7 @@ def build_system(game, cat):
              + NL.join(f"{i + 1}. {l}" for i, l in enumerate(limits)) + NL
              + "「看到」只寫畫面上真的看得到的東西：物件、文字、方位、數字；不形容氣氛、不推測。" + NL
              + "所有文字欄位都是表格式短語（欄:值｜欄:值），不寫連接詞與贅字。")
-    groups = ["文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "自訂"]
+    groups = ["校準", "文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "自訂"]
     tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g))
                        for g in groups if catalog_lines(cat, g))
     return (f"{identity}" + NL
@@ -118,6 +118,8 @@ def build_system(game, cat):
             + rules + NL * 2
             + "你有這些工具（格式 用法｜用途）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
             + tool_txt + NL * 2
+            + "【開工先量】（使用者定的）每次登入／重進、或畫面大小變了，第一件事：量畫面 看目前刻度、量刻度 讓程式帶你量每度 dx／dy。"
+              "之後每一次 視角／移動 工具的回傳都會附「預期 vs 實測」，對不上就重量；工具出來的結果要跟你腦中的一致才能繼續。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
@@ -389,11 +391,133 @@ class Tools:
             pydirectinput.moveTo(cx, cy)
             time.sleep(0.08)
 
+    # ---- 實測（2026-10-15 使用者：他要能確保工具出來的結果跟他腦中的一致 → 每次轉視角都量畫面實際位移）
+    @staticmethod
+    def shift_x(a, b):
+        """兩張圖的水平位移（b 相對 a），回傳佔畫面寬的比例（右轉鏡頭＝景物往左＝負）。"""
+        if a is None or b is None:
+            return None
+        ga = a.convert("L").resize((320, 180))
+        gb = b.convert("L").resize((320, 180))
+        pa, pb = ga.tobytes(), gb.tobytes()
+        W, H = 320, 180
+        def col(p, x):
+            return sum(p[y * W + x] for y in range(0, H, 6))
+        ca = [col(pa, x) for x in range(W)]
+        cb = [col(pb, x) for x in range(W)]
+        best, best_s = None, 0
+        for s in range(-150, 151, 2):
+            n = 0
+            tot = 0
+            for x in range(0, W, 2):
+                xx = x + s
+                if 0 <= xx < W:
+                    tot += abs(ca[x] - cb[xx])
+                    n += 1
+            if n < 60:
+                continue
+            v = tot / n
+            if best is None or v < best:
+                best, best_s = v, s
+        return best_s / W          # 景物往左移＝負（右轉鏡頭）
+
     def _look(self, deg, axis, sign, lo, hi, default):
         deg = max(lo, min(hi, num(deg, default)))
         px = deg * (self.dx_deg if axis == "x" else self.dy_deg) * sign
+        before = self.grab()
         self._drag(px if axis == "x" else 0, px if axis == "y" else 0)
-        return f"轉了 {deg:.0f} 度（{'dx' if axis == 'x' else 'dy'} {px:.0f}）"
+        if self.image_path or not self.live:
+            return f"轉了 {deg:.0f} 度（{'dx' if axis == 'x' else 'dy'} {px:.0f}）"
+        time.sleep(0.25)
+        after = self.grab()
+        d = self.diff(before, after)
+        if axis == "x":
+            sh = self.shift_x(before, after)
+            sh_txt = f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬" if sh is not None else ""
+            try:
+                self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
+            except Exception:  # noqa: BLE001
+                pass
+            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}。"
+                    "跟你腦中的對不上就 量刻度 重量")
+        return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}"
+                + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + "。對不上就 量刻度 重量")
+
+    # ---- 校準（2026-10-15 使用者：他一開始還是需要量測所有的數據，確保工具出來的結果和他腦中的一致）
+    def cal_screen(self):
+        bbox = None
+        try:
+            from play_agent import RobloxWindow
+            if self.win is None:
+                self.win = RobloxWindow()
+            bbox = self.win.client_bbox()
+        except Exception:  # noqa: BLE001
+            pass
+        im = self.grab()
+        size = f"{im.width}×{im.height}" if im is not None else "抓不到"
+        return (f"畫面 {size}（視窗 {bbox}）｜目前刻度：每度 dx {self.dx_deg}、每度 dy {self.dy_deg}"
+                f"｜來源 記憶/視角校準.json｜轉 90 度＝dx {90 * self.dx_deg:.0f}、抬頭 30 度＝dy {30 * self.dy_deg:.0f}")
+
+    def cal_scale(self):
+        """程式帶他量：水平一圈（轉到畫面回起點）→ 每度 dx；垂直掃到頂、掃到底 → 每度 dy。寫進 視角校準.json。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能量刻度"
+        start = self.grab()
+        if start is None:
+            return "抓不到畫面"
+        # 水平：每步 dx 60，轉到跟起點最像的位置
+        step, total, best, best_total, diffs = 60, 0, None, None, []
+        for i in range(1, 41):
+            self._drag(step, 0)
+            total += step
+            time.sleep(0.2)
+            cur = self.grab()
+            d = self.diff(start, cur)
+            diffs.append(d)
+            if i >= 6 and (best is None or d < best):
+                best, best_total = d, total
+            if i >= 8 and d < 6 and d <= min(diffs[:-1]) * 0.6:
+                break
+            if total >= 1500:
+                break
+        loop_dx = best_total or total
+        dx_deg = round(loop_dx / 360.0, 2)
+        # 垂直：先往上掃到頂（畫面不再變），再往下掃到底，算全程
+        up = 0
+        for _ in range(14):
+            b = self.grab()
+            self._drag(0, -80)
+            time.sleep(0.15)
+            if self.diff(b, self.grab()) < 1.5:
+                break
+            up += 80
+        down = 0
+        for _ in range(20):
+            b = self.grab()
+            self._drag(0, 80)
+            time.sleep(0.15)
+            if self.diff(b, self.grab()) < 1.5:
+                break
+            down += 80
+        full_dy = max(down, 80)
+        dy_deg = round(full_dy / 178.0, 2)
+        self._drag(0, -full_dy // 2)        # 回到中間
+        self.dx_deg, self.dy_deg = dx_deg, dy_deg
+        p = os.path.join(self.gdir, "記憶", "視角校準.json")
+        try:
+            cal = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cal = {}
+        now = datetime.now().strftime("%m/%d %H:%M")
+        cal["水平"] = {"一圈dx": loop_dx, "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now}
+        cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "機械掃描（工具版 量刻度）", "時間": now}
+        cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=1)
+        self._append("大任務.md", f"量刻度：一圈 dx {loop_dx}（每度 {dx_deg}）、全程 dy {full_dy}（每度 {dy_deg}）")
+        return (f"量好了：水平一圈 dx {loop_dx} → 每度 dx {dx_deg}；垂直全程 dy {full_dy} → 每度 dy {dy_deg}；"
+                f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
+                "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
     def look_left(self, 度=""):
         return self._look(度, "x", -1, 5, 180, 30)
@@ -456,8 +580,9 @@ class Tools:
         p = self.pending_click
         if not p:
             return "沒有預約中的點擊。先用 點 或 點字 預約"
-        if not str(審核).strip():
-            return "確認點 要寫審核結果（例如 不花錢｜不換職業｜不離開｜是我要的按鈕）"
+        chk = str(審核).strip()
+        if not chk or chk in ("審核", "審核結果") or len(chk) < 6:
+            return "確認點 要寫真的審核內容，逐條：不花錢｜不換職業｜不離開｜這是什麼按鈕。不能照抄「審核」兩個字"
         if time.time() - p["時間"] > 180:
             self.pending_click = None
             return "預約超過 3 分鐘，畫面可能變了，取消；要點就重新預約"
