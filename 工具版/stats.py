@@ -121,6 +121,23 @@ def main():
     for i in range(2, len(seq)):
         if seq[i] == seq[i - 1] == seq[i - 2] and seq[i][0] in MOVE + LOOK:
             idle += 1
+    # 05:00 他連轉右 23 次（度數不同）、「看到」九輪一字不差：同一方向連轉 ≥5 次、或「看到」連續 ≥5 輪相同，也算空轉
+    run, spin = 1, 0
+    for i in range(1, len(seq)):
+        if seq[i][0] == seq[i - 1][0] and seq[i][0] in ("視角左", "視角右"):
+            run += 1
+            if run == 5:
+                spin += 1
+        else:
+            run = 1
+    same, stuck_seen = 1, 0
+    for i in range(1, len(recs)):
+        if recs[i]["看到"] and recs[i]["看到"] == recs[i - 1]["看到"]:
+            same += 1
+            if same == 5:
+                stuck_seen += 1
+        else:
+            same = 1
 
     def rate(ok):
         return f"{ok[0]}/{ok[1]}（{ok[0] / ok[1] * 100:.0f}%）" if ok[1] else "0/0"
@@ -129,7 +146,8 @@ def main():
           + (f"，實測位移平均 {statistics.mean(shifts):.0f}% 畫面寬" if shifts else ""))
     print(f"按 E 有反應率：{rate(e_ok)}｜點擊：" + "、".join(f"{k} {v}" for k, v in click.items()) + (f"，確認後有反應 {rate(click_ok)}" if click_ok[1] else "") if (e_ok[1] or click) else "按 E／點擊：還沒用過")
     print(f"大任務：設 {big_set}、完成 {big_done}｜遊戲任務完成：{task_done} 件｜死亡重生：{respawn} 次")
-    print(f"失誤：" + ("、".join(f"{k} {v}" for k, v in fails.items()) or "無") + f"｜空轉（連三輪同一動作）：{idle} 次")
+    print(f"失誤：" + ("、".join(f"{k} {v}" for k, v in fails.items()) or "無")
+          + f"｜空轉：連三輪同一動作 {idle} 次、同方向連轉 5 次以上 {spin} 次、「看到」連續 5 輪沒變 {stuck_seen} 次")
     top = "、".join(f"{k} {v}" for k, v in use.most_common(12))
     print(f"工具使用：{sum(use.values())} 次｜{top}")
     doc = sum(v for k, v in use.items() if k in ("遊戲介紹", "讀文件", "我的記憶", "工具說明", "工具清單"))

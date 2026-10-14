@@ -433,12 +433,16 @@ class Tools:
         deg = max(lo, min(hi, num(deg, default)))
         px = deg * (self.dx_deg if axis == "x" else self.dy_deg) * sign
         before = self.grab()
+        words_before = self._words(before) if (self.live and not self.image_path) else {}
         self._drag(px if axis == "x" else 0, px if axis == "y" else 0)
         if self.image_path or not self.live:
             return f"轉了 {deg:.0f} 度（{'dx' if axis == 'x' else 'dy'} {px:.0f}）"
         time.sleep(0.25)
         after = self.grab()
         d = self.diff(before, after)
+        hud = self._fixed_words(words_before, self._words(after))
+        hud_txt = ("；轉前轉後都釘在畫面同一位置的字（HUD／面板上的字，不是場景裡的東西，轉頭對不正、要用 點字 或走近）："
+                   + "、".join(f"「{w}」({x:.2f},{y:.2f})" for w, (x, y) in hud[:6])) if hud else ""
         if axis == "x":
             sh = self.shift_x(before, after)
             sh_txt = f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬" if sh is not None else ""
@@ -446,10 +450,39 @@ class Tools:
                 self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
             except Exception:  # noqa: BLE001
                 pass
-            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}。"
+            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{hud_txt}。"
                     "跟你腦中的對不上就 量刻度 重量")
         return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + "。對不上就 量刻度 重量")
+
+    def _words(self, im):
+        """畫面上的字 → {字: (x, y)}（給轉頭前後比對用；05:00 他對著右側 0.87 固定不動的「蓋印表格」字連轉右 23 次）。"""
+        try:
+            import local_text
+            res = local_text._win_read(im) or []
+        except Exception:  # noqa: BLE001
+            return {}
+        W, H = im.size
+        out = {}
+        for r in res:
+            try:
+                box, txt = r[0], str(r[1]).strip()
+                if len(txt) < 2:
+                    continue
+                xs = [p[0] for p in box]
+                ys = [p[1] for p in box]
+                out[txt] = ((min(xs) + max(xs)) / 2 / W, (min(ys) + max(ys)) / 2 / H)
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    @staticmethod
+    def _fixed_words(a, b):
+        fixed = []
+        for w, (x, y) in a.items():
+            if w in b and abs(b[w][0] - x) < 0.02 and abs(b[w][1] - y) < 0.02:
+                fixed.append((w, (x, y)))
+        return fixed
 
     # ---- 校準（2026-10-15 使用者：他一開始還是需要量測所有的數據，確保工具出來的結果和他腦中的一致；
     #        「還是要按照之前我要求的幾個數值逐一回報」：畫面尺寸、每度 dx、每度 dy、深度比例、第幾人稱）
