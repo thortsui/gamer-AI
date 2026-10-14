@@ -575,25 +575,36 @@ class Tools:
         loop_dx = best_total or total
         dx_deg = round(loop_dx / 360.0, 2)
         # 垂直：先往上掃到頂（畫面不再變），再往下掃到底，算全程
-        up = 0
-        for _ in range(14):
-            b = self.grab()
-            self._drag(0, -80)
-            time.sleep(0.15)
-            if self.diff(b, self.grab()) < 1.5:
-                break
-            up += 80
-        down = 0
-        for _ in range(20):
-            b = self.grab()
-            self._drag(0, 80)
-            time.sleep(0.15)
-            if self.diff(b, self.grab()) < 1.5:
-                break
-            down += 80
-        full_dy = max(down, 80)
+        # 04:09 量到全程 dy 1600（每度 8.99，前兩次 560／3.15）：掃到底時畫面還有別人在動、diff 降不到 1.5 → 掃滿 20 步。
+        # 改成「連續兩步變化都很小」就算到底，而且全程最多 1000。
+        def sweep(sign, max_steps):
+            moved, small = 0, 0
+            for _ in range(max_steps):
+                b = self.grab()
+                self._drag(0, sign * 80)
+                time.sleep(0.15)
+                d = self.diff(b, self.grab())
+                if d < 3.0:
+                    small += 1
+                    if small >= 2:
+                        break
+                else:
+                    small = 0
+                    moved += 80
+            return moved
+        sweep(-1, 14)
+        full_dy = min(max(sweep(+1, 13), 80), 1000)
         dy_deg = round(full_dy / 178.0, 2)
         self._drag(0, -full_dy // 2)        # 回到中間
+        # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
+        note = ""
+        old_dx, old_dy = self.dx_deg, self.dy_deg
+        if old_dx and not (1 / 1.8 <= dx_deg / old_dx <= 1.8):
+            note += f"水平量到每度 {dx_deg}、跟上次 {old_dx} 差超過 1.8 倍 → 不採用、沿用 {old_dx}；"
+            dx_deg = old_dx
+        if old_dy and not (1 / 1.8 <= dy_deg / old_dy <= 1.8):
+            note += f"垂直量到每度 {dy_deg}、跟上次 {old_dy} 差超過 1.8 倍 → 不採用、沿用 {old_dy}；"
+            dy_deg = old_dy
         self.dx_deg, self.dy_deg = dx_deg, dy_deg
         p = os.path.join(self.gdir, "記憶", "視角校準.json")
         try:
@@ -607,7 +618,7 @@ class Tools:
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
         self._append("大任務.md", f"量刻度：一圈 dx {loop_dx}（每度 {dx_deg}）、全程 dy {full_dy}（每度 {dy_deg}）")
-        return (f"量好了：水平一圈 dx {loop_dx} → 每度 dx {dx_deg}；垂直全程 dy {full_dy} → 每度 dy {dy_deg}；"
+        return (note + f"量好了：水平一圈 dx {loop_dx} → 每度 dx {dx_deg}；垂直全程 dy {full_dy} → 每度 dy {dy_deg}；"
                 f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
                 "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
