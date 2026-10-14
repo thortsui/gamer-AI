@@ -1,5 +1,6 @@
 ﻿# 等run3起代理.ps1（2026-10-14）：每 60 秒看 DGX 8888 有沒有 gamer-27b-ft-run3，
 # 有了就用 10/12 的參數啟動代理玩動物醫院（run3 實戰 A/B）。獨立程序，不靠 Claude Code 活著。
+# ⚠ -Until 是「HH:mm」：還沒過就算今天（21:35 啟動、Until 23:00 → 只跑 1.4 小時）；要跑到隔天就填一個已經過了的時刻（例如 20:00）。
 #   Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','等run3起代理.ps1' -WindowStyle Hidden
 param(
     [string]$Game  = "動物醫院",

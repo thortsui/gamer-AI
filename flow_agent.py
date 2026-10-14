@@ -41,6 +41,7 @@ import pydirectinput  # noqa: E402
 from local_vision import Eyes  # noqa: E402
 from local_text import TextEyes  # noqa: E402
 import zh_text  # noqa: E402  繁簡／OCR 形近字的容錯比對（2026-09-18）
+import shorthand  # noqa: E402  動作速記「前進(0.6)」「視角左(100)」→ dict（2026-10-14 使用者：減少他要接龍的字數）
 import builtins  # noqa: E402
 
 # 2026-09-29 使用者：「他需要知道自己上一步按了什麼、為什麼要用這個按鈕、和他原本想要怎麼做」。
@@ -256,6 +257,12 @@ esc 是**開關**：按一下開選單、再按一下關。所以選單開著的
 自己列步驟（列步驟／下一步）、學到的寫進 n。
 
 動作（一次最多 2 個，座標 0~1）：
+  **速記（省字，2026-10-14）**：a 裡可以直接寫字串「名字(量)」，不用包成 dict，舊寫法也照樣可以。
+      走：前進(0.6) 後退(0.5) 左移(0.5) 右移(0.5)（括號＝秒，不寫＝0.5）　跳
+      轉：視角左(100) 視角右(100) 視角上(40) 視角下(40)（括號＝像素，跟 dx／dy 同刻度、同上限）
+      按：按(e) 按(e,1.5) 長按(e) 點(0.5,0.4) 點字(開始遊戲) 等(1) 捲(-3)
+      工具：沒參數就只寫名字（水平歸零、這步做完、量比例…）；一個名字參數就放括號（走到記過的(門口)、鎖定(cat)、換快思(為什麼)）
+      例：{{"a":["前進(0.6)","視角左(100)"]}}
   {{"t":"click","x":.5,"y":.4,"g":"點的東西"}}  {{"t":"hold","k":"e","g":"互動對象"}}
   {{"t":"aim","x":.6,"y":.5,"g":"目標"}}        {{"t":"key","k":"w","d":1.0}}（w a s d space e esc tab 1-9）
   {{"t":"look","dx":150,"dy":0}}（**dy 沒事就填 0**；dx 一次最多 {max_dx}、dy 最多 {max_dy}；實測拖 {ppp} 像素≈畫面轉 1%，四分之一畫面≈dx {quarter}）
@@ -465,6 +472,7 @@ ASK = """【程式確認：你現在看的是什麼視窗】{where}
 {{"s":"看到什麼(<=12字)","區":"哪一區(<=8字)","task":"右上角任務原文（沒有就空字串）",
  "想":"因為:看到什麼｜所以要:目的｜動作:做什麼｜結果應該是:畫面會變怎樣","a":[動作...最多2個]}}
 「想」是表格不是句子（2026-10-12 使用者）：固定四欄 因為｜所以要｜動作｜結果應該是，用｜隔開、每欄短語、不寫其他連接詞贅字；a 就是「動作」那一欄，照表執行。
+a 可用速記省字：前進(0.6)、視角左(100)、長按(e)、點字(字)。
 只有要換流程才加 "flow"、真的學到新東西才加 "n"(<=25字)、真的比對出差異才加 "diff"(<=30字)；否則這三個都不要寫。"""
 
 
@@ -7470,6 +7478,7 @@ class FlowAgent(ProcedureMixin, Agent):
                 + '**不要自己亂改計畫**，送 {"t":"換快思"} 讓會思考的那一層重新切步驟。' + NL
                 + '只輸出 JSON：{"s":"看到什麼(<=14字)","區":"你現在在哪一區(<=8字)",'
                   '"想":"因為:看到什麼｜所以要:目的｜動作:做什麼｜結果應該是:畫面會變怎樣","a":[動作…最多2個],"task":"右上角任務原文"}（想＝表格：固定四欄 因為｜所以要｜動作｜結果應該是，短語、不寫其他連接詞贅字；a 照「動作」那欄執行）'
+                  'a 可用速記省字：前進(0.6)、視角左(100)、長按(e)、點字(字)。'
                 + NL + "**a 不可以是空的**——真的沒事做就送 "
                 + '{"t":"換快思"}。')
 
@@ -9384,7 +9393,8 @@ class FlowAgent(ProcedureMixin, Agent):
                     + (self.short_mem_text(3)[:600] + NL if self.short_mem_text(3) else "")
                     + (self.improve_text(2) + NL if self.improve_text(2) else "")
                     + '只輸出 JSON：{"s":"看到什麼(<=14字)","區":"你現在在哪一區(<=8字)",'
-                      '"想":"因為:看到什麼｜所以要:目的｜動作:做什麼｜結果應該是:畫面會變怎樣","a":[動作…最多2個],"task":"右上角任務原文"}（想＝表格：固定四欄 因為｜所以要｜動作｜結果應該是，短語、不寫其他連接詞贅字；a 照「動作」那欄執行）')
+                      '"想":"因為:看到什麼｜所以要:目的｜動作:做什麼｜結果應該是:畫面會變怎樣","a":[動作…最多2個],"task":"右上角任務原文"}（想＝表格：固定四欄 因為｜所以要｜動作｜結果應該是，短語、不寫其他連接詞贅字；a 照「動作」那欄執行）'
+                  'a 可用速記省字：前進(0.6)、視角左(100)、長按(e)、點字(字)。')
             content_use = [{"type": "image_url", "image_url": {"url": uri}},
                            {"type": "text", "text": fast}]
             tokens_use = 400
@@ -9412,6 +9422,15 @@ class FlowAgent(ProcedureMixin, Agent):
         self.tick("快思")
         self.log_panel(mode, content_use, raw)
         o = parse_json_loose(raw) or {}
+        self._shorthand_note = ""
+        try:
+            _sh = shorthand.expand_reply(o)      # 2026-10-14 使用者：速記「前進(0.6)」「視角左(100)」先翻成原本的 dict
+            if _sh:
+                self.stat["速記"] = self.stat.get("速記", 0) + len(_sh)
+                self._shorthand_note = shorthand.describe(_sh)
+                print("   ✍ 速記：" + self._shorthand_note[:240])
+        except Exception as e:  # noqa: BLE001
+            print(f"   速記翻譯失敗：{e}")
         if getattr(self, "_reflex_check", False) and "ok" not in o:
             # 檢查輪只回 ok：他沒包成 JSON（只寫 true／false）也認得；兩個都沒有就當沒做成
             _r = str(raw or "").lower()
@@ -9430,12 +9449,16 @@ class FlowAgent(ProcedureMixin, Agent):
             short = ("看畫面，現在馬上做一件事。" + NL
                      + "【對正提示】" + self.align_hint() + NL
                      + "【左右牆距】" + self.path_center() + NL
-                     + "只輸出 JSON：{\"s\":\"看到什麼(<=12字)\",\"a\":[動作...最多2個]}")
+                     + "只輸出 JSON：{\"s\":\"看到什麼(<=12字)\",\"a\":[動作...最多2個]}（a 可用速記：前進(0.6)、視角左(100)、長按(e)）")
             raw2, _, _, _ = stream_json(self.endpoint, self.model, self.sys_prompt(),
                                         [{"type": "image_url", "image_url": {"url": uri}},
                                          {"type": "text", "text": short}], 400, time.time() + 10.0, 0.3,
                                         effort=反射)
             o2 = parse_json_loose(raw2) or {}
+            try:
+                shorthand.expand_reply(o2)
+            except Exception:  # noqa: BLE001
+                pass
             self.tick("反射重問")
             if o2.get("a"):
                 print("   ↻ 快思沒講完，用反射（不思考）重問後拿到動作")
