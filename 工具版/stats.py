@@ -115,6 +115,8 @@ def main():
                 task_done += 1
             elif name == "死亡重生":
                 respawn += 1
+            if name in ("點字", "確認點") and re.search(r"再玩一次|重生|復活|Respawn", body + arg):
+                respawn += 1          # 他自己點「再玩一次／重生」＝死過一次
     idle = 0
     for i in range(2, len(seq)):
         if seq[i] == seq[i - 1] == seq[i - 2] and seq[i][0] in MOVE + LOOK:
