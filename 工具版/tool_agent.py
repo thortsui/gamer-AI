@@ -118,7 +118,8 @@ def build_system(game, cat):
             + rules + NL * 2
             + "你有這些工具（格式 用法｜用途）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
             + tool_txt + NL * 2
-            + "【開工先量】（使用者定的）每次登入／重進、或畫面大小變了，第一件事：量畫面 看目前刻度、量刻度 讓程式帶你量每度 dx／dy。"
+            + "【開工先量，逐一回報】（使用者定的）每次登入／重進／切空間、或畫面大小變了，第一件事送 開工測試：程式逐項量 ①畫面尺寸 ②每度 dx ③每度 dy ④深度比例，"
+              "⑤第幾人稱由你看畫面用 回報人稱 回報。五項都有才算開工完成，面板【開工數值】會一直顯示量了沒。"
               "之後每一次 視角／移動 工具的回傳都會附「預期 vs 實測」，對不上就重量；工具出來的結果要跟你腦中的一致才能繼續。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
@@ -443,7 +444,91 @@ class Tools:
         return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + "。對不上就 量刻度 重量")
 
-    # ---- 校準（2026-10-15 使用者：他一開始還是需要量測所有的數據，確保工具出來的結果和他腦中的一致）
+    # ---- 校準（2026-10-15 使用者：他一開始還是需要量測所有的數據，確保工具出來的結果和他腦中的一致；
+    #        「還是要按照之前我要求的幾個數值逐一回報」：畫面尺寸、每度 dx、每度 dy、深度比例、第幾人稱）
+    startup = {}      # 開工數值：畫面／每度dx／每度dy／深度比例／人稱／時間
+
+    def startup_text(self):
+        s = self.startup
+        if not s:
+            return "還沒量。登入／重進第一件事：開工測試（程式逐項量：①畫面尺寸 ②每度 dx ③每度 dy ④深度比例；⑤人稱你看畫面回報）"
+        return (f"①畫面 {s.get('畫面', '?')}｜②每度 dx {s.get('每度dx', '?')}｜③每度 dy {s.get('每度dy', '?')}"
+                f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜量於 {s.get('時間', '?')}")
+
+    @staticmethod
+    def zoom_factor(a, b):
+        """走一步之後畫面中央放大了幾倍（深度比例）：拿 a 的中央區放大 k 倍跟 b 比，挑最像的 k。"""
+        if a is None or b is None:
+            return None
+        from PIL import Image
+        ga = a.convert("L").resize((320, 180))
+        gb = b.convert("L").resize((320, 180))
+        W, H = 320, 180
+        pb = gb.crop((80, 45, 240, 135)).tobytes()
+        best, best_k = None, 1.0
+        for k10 in range(10, 21):
+            k = k10 / 10.0
+            w, h = 160 / k, 90 / k
+            box = (int(160 - w / 2), int(90 - h / 2), int(160 + w / 2), int(90 + h / 2))
+            pa = ga.crop(box).resize((160, 90), Image.BILINEAR).tobytes()
+            v = sum(abs(x - y) for x, y in zip(pa, pb)) / len(pb)
+            if best is None or v < best:
+                best, best_k = v, k
+        return best_k
+
+    def cal_depth(self):
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能量比例"
+        before = self.grab()
+        self._key("w", 1.0)
+        time.sleep(0.3)
+        after = self.grab()
+        d = self.diff(before, after)
+        if d < 2:
+            return "走 1 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
+        k = self.zoom_factor(before, after)
+        self.startup["深度比例"] = f"走1秒中央放大{k:.1f}倍"
+        p = os.path.join(self.gdir, "記憶", "視角校準.json")
+        try:
+            cal = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cal = {}
+        cal["深度"] = {"走1秒放大倍數": k, "方法": "中央區放大比對（工具版 量比例）", "時間": datetime.now().strftime("%m/%d %H:%M")}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=1)
+        return f"深度比例：走 1 秒畫面中央放大 {k:.1f} 倍（畫面變化 {d:.0f}）。之後估「前方幾步」用這個換算"
+
+    def cal_startup(self):
+        """開工測試：逐項量、逐項回報（使用者要求的幾個數值）。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能開工測試"
+        im = self.grab()
+        r1 = self.cal_screen()
+        self.startup["畫面"] = f"{im.width}×{im.height}" if im is not None else "?"
+        r2 = self.cal_scale()
+        self.startup["每度dx"], self.startup["每度dy"] = self.dx_deg, self.dy_deg
+        r3 = self.cal_depth()
+        self.startup["時間"] = datetime.now().strftime("%H:%M")
+        self.startup.pop("人稱", None)
+        line = f"🧪 開工測試：{self.startup_text()}"
+        print("   " + line)
+        self._append("開工數值.md", self.startup_text())
+        return ("開工測試逐項回報：" + NL
+                + f"① 畫面尺寸：{self.startup['畫面']}（{r1}）" + NL
+                + f"② 每度 dx：{self.dx_deg}；③ 每度 dy：{self.dy_deg}（{r2}）" + NL
+                + f"④ 深度比例：{self.startup.get('深度比例', '沒量到')}（{r3}）" + NL
+                + "⑤ 第幾人稱：你看現在的畫面回報——看得到自己背影＝第三人稱，畫面中央有準心＝第一人稱 → 送 回報人稱(第幾人稱)。"
+                  "五項都有了才算開工完成；之後每次視角／移動回傳的實測跟這些對不上就重量")
+
+    def cal_persp(self, 人稱=""):
+        v = str(人稱).strip()
+        if not v:
+            return "要寫 第一人稱 或 第三人稱"
+        self.startup["人稱"] = v
+        self._append("開工數值.md", f"人稱:{v}")
+        print(f"   🧪 人稱回報：{v}｜開工數值：{self.startup_text()}")
+        return f"記下：{v}。開工數值現在：{self.startup_text()}"
+
     def cal_screen(self):
         bbox = None
         try:
@@ -876,7 +961,8 @@ def main():
         big = tools.big
         big_txt = (f"「{big['名稱']}」｜成功條件：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
                    if big else "（還沒設。先用 設大任務(名稱,成功條件) 定一個，再做事）")
-        panel = ("【目前的大任務】" + big_txt + NL * 2
+        panel = ("【開工數值】" + tools.startup_text() + NL
+                 + "【目前的大任務】" + big_txt + NL * 2
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
                  + "【這個大任務到目前為止】" + NL + (NL.join(history[-6:]) or "（剛開始）") + NL * 2
                  + "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
