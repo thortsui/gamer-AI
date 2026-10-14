@@ -1,0 +1,70 @@
+{
+ "args": {
+  "model": "Qwen/Qwen3.8-27B",
+  "data": "/data",
+  "out": "/out/run3",
+  "classes": "A_qa,A_text,A_act,A_app,A_stuck,B,C,E,F,G",
+  "repeat": "A_qa=2,A_text=3,A_act=3,A_app=2,A_stuck=2,B=3,G=2",
+  "cap": "C=2000,F=2000",
+  "epochs": 2.0,
+  "lr": 0.0001,
+  "r": 16,
+  "alpha": 32,
+  "max_len": 3072,
+  "grad_accum": 16,
+  "seed": 7,
+  "sample": 0
+ },
+ "val": {
+  "A_qa": {
+   "val_loss": 2.1781,
+   "ppl": 8.83,
+   "n": 121
+  },
+  "A_text": {
+   "val_loss": 1.6819,
+   "ppl": 5.38,
+   "n": 23
+  },
+  "A_act": {
+   "val_loss": 1.5905,
+   "ppl": 4.91,
+   "n": 6
+  },
+  "A_app": {
+   "val_loss": 0.3464,
+   "ppl": 1.41,
+   "n": 35
+  },
+  "A_stuck": {
+   "val_loss": 0.0366,
+   "ppl": 1.04,
+   "n": 36
+  },
+  "B": {
+   "val_loss": 0.0766,
+   "ppl": 1.08,
+   "n": 27
+  },
+  "C": {
+   "val_loss": 0.1852,
+   "ppl": 1.2,
+   "n": 200
+  },
+  "E": {
+   "val_loss": 0.0,
+   "ppl": 1.0,
+   "n": 60
+  },
+  "F": {
+   "val_loss": 1.323,
+   "ppl": 3.75,
+   "n": 200
+  },
+  "G": {
+   "val_loss": 0.4329,
+   "ppl": 1.54,
+   "n": 54
+  }
+ }
+}

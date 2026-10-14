@@ -48,6 +48,8 @@ docker compose run --rm merge        # 要拿去服務時才合併
 - `chain_run3.sh`（nohup，log 在 `chain_run3.log`）：等 `train-run2` 結束 → drop_caches → `docker compose run -d --name train-run3 train`。run2 **不先** merge／quant（adapter 留在 out/run2，之後要比對再 `RUN_NAME=run2 docker compose run --rm merge`）。
 - run3 訓完：看 out/run3/報告.json 與 樣本.txt 跟 run2 比 → `docker compose run --rm merge` → `docker compose run --rm quant` → `docker compose up -d serve`（served name `gamer-27b-ft-run3`）→ flow_agent 模型名改 run3。
 - 跑法同 run1：`docker compose run -d train` → `merge` → `quant` → `up -d serve`（served name `gamer-27b-ft-run2`）。
+- **結果**：run2 10/13 21:13 訓完、run3 10/14 07:04 訓完（都 exit 0）。val loss：A_qa 2.178／A_text 1.682／A_act 1.591／A_app 0.346／A_stuck 0.037／B 0.077／C 0.185／F 1.323／G 0.433（run2：2.195／1.717／1.823／–／–／0.072／0.193／1.292／0.433）。報告副本在本機 `訓練資料/finetune/報告/`。
+- 10/14 21:11 `chain_merge3.sh`（nohup，log `chain_merge3.log`）：merge → drop_caches → quant → `up -d serve`（gamer-27b-ft-run3）。之後要換 run 就改 `.env` 的 RUN_NAME 再 `down serve`／`up -d serve`。
 - **看進度**：detached 跑的時候 `docker logs` 不會有進度條與 loss（stdout 緩衝），用 `docker exec --privileged train-run2 pip install -q py-spy && docker exec --privileged train-run2 py-spy dump --pid 1 --locals | grep update_step`（總步數＝筆數÷grad_accum×epochs），或看 `out/run2/ckpt/checkpoint-*`（每 200 步存）。
 
 ## 驗收
