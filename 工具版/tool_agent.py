@@ -714,11 +714,13 @@ class Tools:
         n = int(num(格, -3))
         n = max(-5, min(5, n))
         if self.live:
-            import pydirectinput
-            pydirectinput.scroll(n)
+            import ctypes
+            for _ in range(abs(n)):          # pydirectinput 沒有 scroll（04:0x 執行失敗 4 次）→ 用 Win32 滾輪事件
+                ctypes.windll.user32.mouse_event(0x0800, 0, 0, 120 if n > 0 else -120, 0)
+                time.sleep(0.05)
         else:
             print(f"   [dry-run] 捲 {n}")
-        return f"捲了 {n} 格"
+        return f"捲了 {n} 格（正＝往上／拉近，負＝往下／拉遠）"
 
     def wait(self, 秒=""):
         d = max(0.2, min(5.0, num(秒, 1.0)))
@@ -747,6 +749,35 @@ class Tools:
     def fix_paywall(self):
         return "付費視窗：" + self.key_press("esc", 0.1) + "（鐵律：不花錢）"
 
+    def _place(self):
+        try:
+            gj = json.load(open(os.path.join(self.gdir, "遊戲.json"), encoding="utf-8"))
+            return gj.get("大廳place") or next(iter(gj.get("places", {})), None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def fix_return(self):
+        """回到遊戲：用深層連結直接開這隻遊戲（04:0x 他 esc→l→enter 之後掉到 Roblox 平台頁，點封面卡片 6 次都沒進去）。"""
+        place = self._place()
+        if not place:
+            return "遊戲.json 沒有 place，不知道要開哪隻"
+        if not self.live:
+            return f"[dry-run] 會開 roblox://experiences/start?placeId={place}"
+        try:
+            os.startfile(f"roblox://experiences/start?placeId={place}")
+        except Exception as e:  # noqa: BLE001
+            return f"開深層連結失敗：{e}"
+        time.sleep(40)
+        try:
+            from play_agent import RobloxWindow
+            self.win = RobloxWindow()
+            self.win.find()
+            self.win.activate()
+        except Exception:  # noqa: BLE001
+            pass
+        self._append("大任務.md", f"回到遊戲：深層連結 place {place}")
+        return f"已用深層連結開 place {place}（等了 40 秒）。下一輪看畫面：應該在這隻遊戲的大廳或進場畫面；不是就再叫一次"
+
     def fix_rejoin(self):
         self.key_press("esc", 0.1)
         time.sleep(0.5 if self.live else 0)
@@ -754,8 +785,9 @@ class Tools:
         time.sleep(0.5 if self.live else 0)
         self.key_press("enter", 0.1)
         if self.live:
-            time.sleep(8)
-        return "退出重進：esc→l→enter，等了 8 秒；新畫面下一輪給你"
+            time.sleep(6)
+        r = self.fix_return()           # 離開之後一定掉到 Roblox 平台頁，直接用深層連結拉回同一隻遊戲
+        return "退出重進：esc→l→enter 離開，然後 " + r
 
     def fix_respawn(self):
         if self.live:
