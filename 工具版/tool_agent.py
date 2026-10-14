@@ -150,6 +150,13 @@ def parse_call(item, cat):
     if name not in byname:
         return None, str(item)
     keys = list(byname[name]["參數"].keys())
+    if raw and raw.strip().startswith("{"):             # 他有時寫 點字({"字":"X"})：括號裡是 JSON 就直接當參數
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                return name, {k: str(v) for k, v in obj.items()}
+        except json.JSONDecodeError:
+            pass
     args = [x.strip() for x in re.split(r"[,，、]", raw)] if raw and raw.strip() else []
     params = {}
     if len(keys) == 1 and args:
@@ -900,6 +907,23 @@ class Tools:
 
 
 # ---------------------------------------------------------------- 主迴圈
+def repair_json(raw):
+    """他兩種常見的壞 JSON（01:3x 統計 11/120 輪）：
+    1. 「想」欄寫成 …｜結果應該是": "畫面會變…"  → 引號提早關掉；把 結果應該是": " 改回 結果應該是:
+    2. 一輪吐兩個 JSON 物件 → 取最後一個完整的。"""
+    s = str(raw or "")
+    s = re.sub(r'結果應該是"\s*:\s*"', "結果應該是:", s)
+    objs = re.findall(r"\{.*?\}(?=\s*\{|\s*$)", s, flags=re.S)
+    if len(objs) > 1:
+        for cand in reversed(objs):
+            try:
+                json.loads(cand)
+                return cand
+            except json.JSONDecodeError:
+                continue
+    return s
+
+
 def img_uri(im, width=1024):
     im = im.resize((width, int(width * im.height / im.width)))
     buf = io.BytesIO()
@@ -973,7 +997,7 @@ def main():
         dt = time.time() - t0
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
-        o = parse_json_loose(raw) or {}
+        o = parse_json_loose(repair_json(raw)) or {}
         seen, think = str(o.get("看到") or o.get("s") or "")[:60], str(o.get("想") or "")[:200]
         calls = o.get("用") or o.get("a") or []
         if isinstance(calls, str):
