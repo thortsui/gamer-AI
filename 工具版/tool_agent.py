@@ -31,8 +31,37 @@ sys.path.insert(0, ROOT)
 NL = "\n"
 
 # ---------------------------------------------------------------- 目錄與 system
-def load_catalog():
-    return json.load(open(os.path.join(HERE, "工具目錄.json"), encoding="utf-8"))
+def custom_path(game):
+    return os.path.join(ROOT, "專案", game, "記憶", "工具版", "自訂工具.json")
+
+
+def load_catalog(game=None):
+    """目錄＋他自己定義的工具（新工具）＋他補的用途（補用途）。
+
+    2026-10-15 使用者：「遇到他自己不知道或工具沒列出來的問題，他就要去思考該動用哪個工具，
+    並且把它列入這個工具之後的使用名單」→ 他定義的存在 專案/<遊戲>/記憶/工具版/自訂工具.json，
+    每次開機與每一輪都合併進清單。
+    """
+    cat = json.load(open(os.path.join(HERE, "工具目錄.json"), encoding="utf-8"))
+    if not game:
+        return cat
+    try:
+        cus = json.load(open(custom_path(game), encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        cus = {"新工具": [], "補用途": []}
+    byname = {t["名稱"]: t for t in cat["工具"]}
+    for t in cus.get("新工具", []):
+        if t.get("名稱") and t["名稱"] not in byname:
+            entry = {"名稱": t["名稱"], "類別": "自訂", "用途": t.get("用途", ""), "用法": t["名稱"],
+                     "參數": {}, "回傳": "照做法裡的工具一個一個做、各自的回傳", "實作": "組合",
+                     "做法": t.get("做法", ""), "自訂": True}
+            cat["工具"].append(entry)
+            byname[t["名稱"]] = entry
+    for u in cus.get("補用途", []):
+        t = byname.get(u.get("工具"))
+        if t and u.get("情況"):
+            t["用途"] = t["用途"] + f"；也用在：{u['情況']}"
+    return cat
 
 
 def catalog_lines(cat, 類別=None):
@@ -41,6 +70,8 @@ def catalog_lines(cat, 類別=None):
         if 類別 and t["類別"] != 類別:
             continue
         tag = "" if t["實作"] != "未實作" else "（未實作）"
+        if t.get("自訂"):
+            tag = "（你自己定義的）"
         out.append(f"{t['用法']}｜{t['用途']}{tag}")
     return out
 
@@ -66,17 +97,33 @@ def build_system(game, cat):
         gj = {}
     gname = gj.get("全名") or game
     goal = read_text(os.path.join(gdir, "記憶", "任務指示.txt")).strip() or "（使用者還沒交代目標）"
-    rules = ("鐵律：不准花任何錢（Robux、金幣、購買、解鎖、升級、付費復活）；看到付費視窗只能用 付費視窗 工具關掉。" + NL
+    limits = ["不准花任何錢：Robux、金幣、購買、解鎖、升級、付費復活、任何「Buy／Purchase／$」按鈕；看到付費視窗只能用 付費視窗 工具關掉"]
+    if gj.get("禁止換職業"):
+        limits.append("不准換職業：不點「職業」按鈕、不點護士／醫生／實習生那類選項")
+    if gj.get("禁止上下轉頭"):
+        limits.append("不准上下轉頭")
+    limits.append("不准離開這隻遊戲去玩別的；只有卡死才用 退出重進，而且要回到同一隻遊戲")
+    limits.append("點選類的頁面（選單、按鈕、面板）：**任何點擊都是兩步**——點 或 點字 只是預約，程式不會馬上點；"
+                  "下一輪你會拿到放大的目標圖，必須再看一次並審核上面每一條絕對限制，確定才送 確認點(審核)，不對就 取消點。沒有確認就永遠不會點下去")
+    rules = ("【絕對限制】（使用者定的，違反就是錯，沒有例外）" + NL
+             + NL.join(f"{i + 1}. {l}" for i, l in enumerate(limits)) + NL
              + "「看到」只寫畫面上真的看得到的東西：物件、文字、方位、數字；不形容氣氛、不推測。" + NL
              + "所有文字欄位都是表格式短語（欄:值｜欄:值），不寫連接詞與贅字。")
-    groups = ["文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程"]
-    tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g)) for g in groups)
+    groups = ["文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "自訂"]
+    tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g))
+                       for g in groups if catalog_lines(cat, g))
     return (f"{identity}" + NL
             + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
             + "使用者給你的目標：" + NL + goal + NL * 2
             + rules + NL * 2
             + "你有這些工具（格式 用法｜用途）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
             + tool_txt + NL * 2
+            + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
+              "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
+            + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
+              "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
+              "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
+              "定義完它就在清單裡、下一輪就能叫。" + NL * 2
             + "每一輪只輸出一個 JSON：" + cat["輸出格式"] + NL
             + "「用」最多 3 個，照順序做；字串「名稱(參數)」或 {\"工具\":\"名稱\",\"參數\":{...}} 都可以。"
               "不知道怎麼做就先叫文件類工具看一眼，再動。")
@@ -229,17 +276,19 @@ class Tools:
             res = local_text._win_read(im)
         except Exception as e:  # noqa: BLE001
             return f"OCR 不可用：{e}"
+        W, H = im.size
         out = []
         for r in (res or []):
             try:
-                if isinstance(r, dict):
-                    txt = r.get("text") or r.get("字") or ""
-                    cx, cy = r.get("cx", r.get("x", 0)), r.get("cy", r.get("y", 0))
-                else:
-                    txt, cx, cy = str(r[0]), r[1], r[2]
-                out.append(f"「{txt}」({float(cx):.2f},{float(cy):.2f})")
+                box, txt = r[0], str(r[1]).strip()          # local_text._win_read：[(box, text, score)]，box 是像素四角
+                if not txt:
+                    continue
+                xs = [p[0] for p in box]
+                ys = [p[1] for p in box]
+                cx, cy = (min(xs) + max(xs)) / 2 / W, (min(ys) + max(ys)) / 2 / H
+                out.append(f"「{txt}」({cx:.2f},{cy:.2f})")
             except Exception:  # noqa: BLE001
-                out.append(str(r)[:40])
+                continue
         return "、".join(out[:40]) or "畫面上沒讀到字"
 
     def see_find(self, 標籤=""):
@@ -373,10 +422,54 @@ class Tools:
         k = str(鍵).strip().lower() or "e"
         return self._move(k, num(秒, 1.5), 0.5, 4.0)
 
-    def click_xy(self, x="", y=""):
+    # ---- 點擊兩步（2026-10-15 01:0x 使用者：點選類的頁面，無論要點什麼都必須再檢查一次才能點，包含絕對禁忌的審核）
+    TABOO = ("robux", "buy", "purchase", "$", "購買", "解鎖", "升級", "復活", "付費", "職業", "護士", "醫生", "實習")
+    pending_click = None
+
+    def _near_text(self, fx, fy):
+        txt = self.see_text()
+        near = []
+        for m in re.finditer(r"「([^」]*)」\(([\d.]+),([\d.]+)\)", txt):
+            if abs(float(m.group(2)) - fx) < 0.12 and abs(float(m.group(3)) - fy) < 0.06:
+                near.append(m.group(1))
+        return near
+
+    def click_xy(self, x="", y="", 字=""):
         fx, fy = num(x, -1), num(y, -1)
         if not (0 <= fx <= 1 and 0 <= fy <= 1):
             return "座標要 0~1"
+        near = self._near_text(fx, fy)
+        hit = [w for w in self.TABOO if any(w in n.lower() for n in near)]
+        if hit:
+            self.pending_click = None
+            return f"拒絕預約：目標附近的字 {near} 碰到絕對限制（{'、'.join(hit)}）。不點。"
+        im = self.grab()
+        if im is not None:
+            W, H = im.size
+            box = (max(0, int(fx * W) - 220), max(0, int(fy * H) - 90), min(W, int(fx * W) + 220), min(H, int(fy * H) + 90))
+            self.extra_images = [(f"預約要點的位置 ({fx:.2f},{fy:.2f}) 放大圖", im.crop(box))]
+        self.pending_click = {"x": fx, "y": fy, "字": str(字 or ""), "附近的字": near, "時間": time.time()}
+        return (f"已預約點 ({fx:.2f},{fy:.2f}){'「' + str(字) + '」' if 字 else ''}；附近的字：{near or '無'}。"
+                "**還沒點**。下一輪看放大圖，逐條審核絕對限制（不花錢／不換職業／不離開），確定才送 確認點(審核)，不對就 取消點")
+
+    def click_confirm(self, 審核=""):
+        p = self.pending_click
+        if not p:
+            return "沒有預約中的點擊。先用 點 或 點字 預約"
+        if not str(審核).strip():
+            return "確認點 要寫審核結果（例如 不花錢｜不換職業｜不離開｜是我要的按鈕）"
+        if time.time() - p["時間"] > 180:
+            self.pending_click = None
+            return "預約超過 3 分鐘，畫面可能變了，取消；要點就重新預約"
+        self._append("點擊審核.md", f"點({p['x']:.2f},{p['y']:.2f}){p['字']}｜附近:{p['附近的字']}｜審核:{審核}")
+        self.pending_click = None
+        return "確認通過 → " + self._do_click(p["x"], p["y"])
+
+    def click_cancel(self):
+        self.pending_click = None
+        return "取消了預約的點擊"
+
+    def _do_click(self, fx, fy):
         before = self.grab()
         if self.live:
             import pydirectinput
@@ -398,7 +491,7 @@ class Tools:
         m = re.search(r"「([^」]*" + re.escape(key) + r"[^」]*)」\(([\d.]+),([\d.]+)\)", txt)
         if not m:
             return f"畫面上沒有「{key}」。讀到的字：{txt[:200]}"
-        return f"找到「{m.group(1)}」→ " + self.click_xy(m.group(2), m.group(3))
+        return f"找到「{m.group(1)}」→ " + self.click_xy(m.group(2), m.group(3), 字=m.group(1))
 
     def scroll(self, 格=""):
         n = int(num(格, -3))
@@ -453,7 +546,7 @@ class Tools:
         for w in ("重生", "繼續", "Respawn", "Continue"):
             r = self.click_text(w)
             if r.startswith("找到"):
-                return "死亡重生：" + r
+                return "死亡重生：" + r + "（一樣要 確認點 才會點）"
         return "死亡重生：等了 5 秒，畫面上沒有重生／繼續的字；讀字看看"
 
     def fix_lost(self):
@@ -496,12 +589,93 @@ class Tools:
     def flow_give_up(self, 為什麼=""):
         return self._append("放棄.md", f"放棄:{為什麼}")
 
+    # ---- 大任務（2026-10-15 使用者：每次導入的只有前面那些加上目前的大任務，執行完再清空接下一個）
+    big = None            # {"名稱","成功條件","開始輪"}
+    big_queue = []
+    clear_flag = False    # 主迴圈看到就把這個任務期間的紀錄清掉
+
+    def flow_big_set(self, 名稱="", 成功條件=""):
+        if not str(名稱).strip():
+            return "要給名稱"
+        self.big = {"名稱": str(名稱).strip(), "成功條件": str(成功條件).strip(), "開始": datetime.now().strftime("%H:%M")}
+        self._append("大任務.md", f"開始:{self.big['名稱']}｜成功條件:{self.big['成功條件']}")
+        return f"目前的大任務＝「{self.big['名稱']}」（成功條件：{self.big['成功條件'] or '沒寫'}）"
+
+    def flow_big_queue(self, 名稱=""):
+        names = [x.strip() for x in re.split(r"[,，、→]", str(名稱)) if x.strip()]
+        self.big_queue += names
+        return "排好了：" + " → ".join(self.big_queue)
+
+    def flow_big_done(self, 結果=""):
+        name = self.big["名稱"] if self.big else "（沒設大任務）"
+        self._append("大任務.md", f"完成:{name}｜結果:{結果}")
+        self.clear_flag = True
+        if self.big_queue:
+            nxt = self.big_queue.pop(0)
+            self.big = {"名稱": nxt, "成功條件": "", "開始": datetime.now().strftime("%H:%M")}
+            return f"「{name}」完成。這個任務的紀錄已清空。下一個大任務＝「{nxt}」（成功條件自己用 設大任務 補）"
+        self.big = None
+        return f"「{name}」完成。紀錄已清空。還沒有下一個，用 設大任務 定一個。"
+
+    # ---- 自訂工具（2026-10-15 使用者：工具沒列出來的問題 → 想該用哪個工具，列入之後的使用名單）
+    def _load_custom(self):
+        try:
+            return json.load(open(custom_path(self.game), encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {"新工具": [], "補用途": []}
+
+    def _save_custom(self, cus):
+        with open(custom_path(self.game), "w", encoding="utf-8") as f:
+            json.dump(cus, f, ensure_ascii=False, indent=1)
+        self.cat = load_catalog(self.game)       # 下一輪清單就有
+
+    def tool_new(self, 名稱="", 用途="", 做法=""):
+        name = str(名稱).strip()
+        if not name or not str(做法).strip():
+            return "要給 名稱、用途、做法（做法＝現有工具用 → 接起來）"
+        if any(t["名稱"] == name for t in self.cat["工具"]):
+            return f"已經有「{name}」了；要補情況用 補用途"
+        steps = [s.strip() for s in re.split(r"[→>；;]", str(做法)) if s.strip()]
+        bad = [s for s in steps if parse_call(s, self.cat)[0] is None]
+        if bad:
+            return "做法裡這些不是現有工具：" + "、".join(bad) + "。做法只能用清單上的工具。"
+        cus = self._load_custom()
+        cus.setdefault("新工具", []).append({"名稱": name, "用途": str(用途).strip(), "做法": "→".join(steps),
+                                            "時間": datetime.now().strftime("%m/%d %H:%M")})
+        self._save_custom(cus)
+        return f"新工具「{name}」定義好了（用途：{用途}；做法：{'→'.join(steps)}），已列入清單，下一輪就能叫"
+
+    def tool_add_use(self, 工具="", 情況=""):
+        name = str(工具).strip()
+        if not any(t["名稱"] == name for t in self.cat["工具"]):
+            return f"沒有「{name}」這個工具"
+        if not str(情況).strip():
+            return "要寫情況"
+        cus = self._load_custom()
+        cus.setdefault("補用途", []).append({"工具": name, "情況": str(情況).strip(),
+                                            "時間": datetime.now().strftime("%m/%d %H:%M")})
+        self._save_custom(cus)
+        return f"「{name}」的用途補上：{情況}。清單下一輪就會寫上"
+
+    def run_compound(self, t):
+        steps = [s for s in str(t.get("做法", "")).split("→") if s.strip()]
+        outs = []
+        for s in steps:
+            name, params = parse_call(s, self.cat)
+            if not name:
+                outs.append(f"{s}→看不懂")
+                continue
+            outs.append(f"{s}→{self.run(name, params)}")
+        return f"「{t['名稱']}」：" + "；".join(outs)
+
     # ---- 派工
     def run(self, name, params):
         t = next((t for t in self.cat["工具"] if t["名稱"] == name), None)
         if not t:
             return f"沒有「{name}」這個工具"
         impl = t["實作"]
+        if impl == "組合":
+            return self.run_compound(t)
         if impl == "未實作":
             return f"「{name}」目錄有列、程式還沒做（未實作）。先用別的工具。"
         fn = getattr(self, impl, None)
@@ -546,17 +720,23 @@ def main():
     live = bool(args.live) and not args.image
     from play_agent import stream_json, parse_json_loose, LAST_REASONING
 
-    cat = load_catalog()
-    system = build_system(args.game, cat)
+    cat = load_catalog(args.game)
     tools = Tools(args.game, cat, live=live, image_path=args.image or None)
     model = detect_model(args.endpoint)
+    system = build_system(args.game, cat)
     log_path = os.path.join(tools.mdir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     print(f"[工具版] 遊戲 {args.game}｜大腦 {model}｜{'LIVE 真的按' if live else 'dry-run 只印'}｜system {len(system)} 字｜工具 {len(cat['工具'])} 個")
     print(f"   紀錄 {log_path}")
 
-    history = []        # 最近幾輪摘要
+    history = []        # 這個大任務期間的輪次摘要（大任務完成就清空）
     tool_returns = ""   # 上一輪工具回傳
+    task_round = 0
     for rnd in range(1, args.rounds + 1):
+        if os.path.exists(os.path.join(ROOT, "stop.txt")):          # 停止：worktree 根目錄放 stop.txt
+            print("[stop.txt] 結束")
+            break
+        cat = tools.cat                                   # 他定義的新工具／補用途會讓清單變
+        system = build_system(args.game, cat)
         im = tools.grab()
         if im is None:
             print(f"[{rnd}] 抓不到畫面（Roblox 不在前景？），等 3 秒")
@@ -567,8 +747,13 @@ def main():
             content.append({"type": "text", "text": f"（看四周：{tag}）"})
             content.append({"type": "image_url", "image_url": {"url": img_uri(shot, 640)}})
         tools.extra_images = []
-        panel = ("【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
-                 + "【最近三輪】" + NL + (NL.join(history[-3:]) or "（第一輪）") + NL * 2
+        task_round += 1
+        big = tools.big
+        big_txt = (f"「{big['名稱']}」｜成功條件：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
+                   if big else "（還沒設。先用 設大任務(名稱,成功條件) 定一個，再做事）")
+        panel = ("【目前的大任務】" + big_txt + NL * 2
+                 + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
+                 + "【這個大任務到目前為止】" + NL + (NL.join(history[-6:]) or "（剛開始）") + NL * 2
                  + "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
         content.append({"type": "text", "text": panel})
         t0 = time.time()
@@ -595,6 +780,11 @@ def main():
             print(f"   ▶ {name} {params} → {r[:120].replace(NL, ' ')}")
         tool_returns = NL.join(rets)
         history.append(f"[{rnd}] 看到:{seen}｜想:{think[:80]}｜用:{'、'.join(did) or '無'}")
+        if tools.clear_flag:                              # 大任務完成：這個任務期間的紀錄全部清空
+            tools.clear_flag = False
+            history, task_round = [], 0
+            tool_returns = "（上一個大任務已完成、紀錄清空）" + NL + tool_returns
+            print("   🧹 大任務完成，紀錄清空")
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({"時間": datetime.now().strftime("%H:%M:%S"), "輪": rnd, "秒": round(dt, 1),
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
