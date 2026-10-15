@@ -110,6 +110,19 @@ def build_system(game, cat):
              + NL.join(f"{i + 1}. {l}" for i, l in enumerate(limits)) + NL
              + "「看到」只寫畫面上真的看得到的東西：物件、文字、方位、數字；不形容氣氛、不推測。" + NL
              + "所有文字欄位都是表格式短語（欄:值｜欄:值），不寫連接詞與贅字。")
+    # 2026-10-15 22:5x 使用者：「讓他自己開始跑大檢討」→ 他寫的大檢討裡「明天開場要做什麼」「要改的習慣」每次開機帶進來（他自己的話）
+    review_txt = ""
+    try:
+        big = open(os.path.join(gdir, "記憶", "工具版", "大檢討.md"), encoding="utf-8").read()
+        keep = []
+        for sec in ("明天開場要做什麼", "要改的習慣", "卡法歸納"):
+            mm = re.search(r"## " + sec + r"\n(.*?)(?=\n## |\Z)", big, flags=re.S)
+            if mm:
+                keep.append(f"〔{sec}〕" + NL + mm.group(1).strip()[:900])
+        if keep:
+            review_txt = "【你自己上次收工寫的大檢討（你自己寫的，照著做）】" + NL + NL.join(keep) + NL * 2
+    except OSError:
+        pass
     groups = ["校準", "文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "自訂"]
     tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g))
                        for g in groups if catalog_lines(cat, g))
@@ -117,6 +130,7 @@ def build_system(game, cat):
             + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
             + "使用者給你的目標：" + NL + goal + NL * 2
             + rules + NL * 2
+            + review_txt
             + "你有這些工具（格式 範例｜用途；括號裡是範例值，**填你自己的數字和內容，不要照抄範例或參數名**）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
             + tool_txt + NL * 2
             + "【開工先量，逐一回報】（使用者定的）每次登入／重進／切空間、或畫面大小變了，第一件事送 開工測試：程式逐項量 ①畫面尺寸 ②每度 dx ③每度 dy ④深度比例，"
@@ -300,7 +314,8 @@ class Tools:
         m = os.path.join(self.gdir, "記憶")
         table = {"玩法摘要": "玩法摘要.md", "成功做法": "成功檢討.md", "卡住檢討": "卡住檢討.md", "死亡檢討": "死亡檢討.md",
                  "操作手冊": "操作手冊.md", "遇到的問題": "遇到的問題.md", "因果": "因果.md", "學到的": "學到的.md",
-                 "地圖": "研究筆記.md", "筆記": os.path.join("工具版", "筆記.md")}
+                 "地圖": "研究筆記.md", "筆記": os.path.join("工具版", "筆記.md"),
+                 "大檢討": os.path.join("工具版", "大檢討.md"), "卡法": os.path.join("工具版", "卡法.md")}
         key = str(類別).strip()
         f = next((v for k, v in table.items() if key and key in k), None)
         if not f:

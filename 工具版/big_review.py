@@ -1,0 +1,164 @@
+# -*- coding: utf-8 -*-
+"""大檢討（2026-10-15 22:5x 使用者：「先停掉，讓他自己開始跑大檢討」）。
+
+代理停著的時候跑一次：把今天整天的紀錄給他（統計、檢討、大任務、開工數值、點擊審核、他自己記的、工具使用率），
+用最高推理強度、不限時間，要他自己寫大檢討。他列出來的 新工具／補用途／記卡法／記筆記 會真的寫進他的記憶與工具清單
+（跟他在遊戲裡叫工具一樣），大檢討全文存 記憶/工具版/大檢討.md，下次開機 system 會帶「明天開場要做什麼」那段。
+
+用法：python 工具版/big_review.py --game 動物醫院 [--date 2026-10-15] [--effort 慢想] [--max-tokens 6000]
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from collections import Counter
+from datetime import datetime
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)
+NL = "\n"
+
+
+def read(p, tail=None):
+    try:
+        s = open(p, encoding="utf-8").read()
+    except OSError:
+        return ""
+    if tail:
+        s = NL.join(s.splitlines()[-tail:])
+    return s
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--game", default="動物醫院")
+    ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
+    ap.add_argument("--effort", default="慢想")
+    ap.add_argument("--max-tokens", type=int, default=6000)
+    ap.add_argument("--endpoint", default="http://192.168.0.126:8888/v1")
+    a = ap.parse_args()
+    import tool_agent as T
+    from play_agent import stream_json, parse_json_loose, LAST_REASONING
+
+    m = os.path.join(ROOT, "專案", a.game, "記憶", "工具版")
+    cat = T.load_catalog(a.game)
+    tools = T.Tools(a.game, cat, live=False)
+    stats = subprocess.run([sys.executable, os.path.join(HERE, "stats.py"), "--game", a.game, "--date", a.date],
+                           capture_output=True, text=True, encoding="utf-8").stdout
+    # 工具使用率
+    use = Counter()
+    recs = [json.loads(l) for l in open(os.path.join(m, a.date + ".jsonl"), encoding="utf-8")]
+    for r in recs:
+        for ret in r["回傳"]:
+            mm = re.match(r"● (\S+?)(?:\(|\s→)", ret)
+            if mm:
+                use[mm.group(1)] += 1
+    unused = [t["名稱"] for t in cat["工具"] if use.get(t["名稱"], 0) == 0]
+    use_txt = "、".join(f"{k} {v}" for k, v in use.most_common()) + NL + "一次都沒用過：" + "、".join(unused)
+    # 檢討：全部太多，給分組計數＋最後 80 條
+    reviews = [l for l in read(os.path.join(m, "檢討.md")).splitlines() if l.strip()]
+    kw = Counter()
+    for l in reviews:
+        for k in ("撞牆", "貼牆", "沒對正", "E", "按E", "沒反應", "面板", "HUD", "蓋印表格", "門", "走過頭", "轉", "讀字", "箭頭", "付費", "死", "理智"):
+            if k in l:
+                kw[k] += 1
+    rev_txt = f"今天檢討共 {len(reviews)} 條；關鍵字出現次數：" + "、".join(f"{k} {v}" for k, v in kw.most_common()) + NL + NL.join(reviews[-80:])
+    # 卡最久：同一「看到」連續輪、同工具連續
+    seen_runs = Counter()
+    last, run = None, 0
+    for r in recs:
+        s = (r["看到"] or "")[:30]
+        if s == last:
+            run += 1
+        else:
+            if run >= 4:
+                seen_runs[last] += 1
+            last, run = s, 1
+    stuck_txt = "「看到」連續 5 輪以上沒變的畫面：" + "；".join(f"{k}（{v} 次）" for k, v in seen_runs.most_common(10))
+    # 他自己記的
+    mine = ""
+    for f in ("筆記.md", "地點.md", "因果.md", "卡法.md", "大任務.md", "開工數值.md", "點擊審核.md"):
+        body = read(os.path.join(m, f), tail=40)
+        if body:
+            mine += f"【{f}】" + NL + body + NL
+    custom = read(T.custom_path(a.game))
+    goal = read(os.path.join(ROOT, "專案", a.game, "記憶", "任務指示.txt"))
+    tool_list = NL.join(T.catalog_lines(cat))
+
+    system = (f"你是 gamer AI，正在學 Roblox「{a.game}」。現在遊戲停著，你在做今天的大檢討——不是玩，是回頭看自己一整天。" + NL
+              + "使用者給你的目標：" + goal.strip() + NL
+              + "規則：只寫畫面與紀錄裡真的有的事，不推測；表格式短語；每一條都要能照著做。" + NL
+              + "你有這些工具（之後玩的時候可以叫）：" + NL + tool_list)
+    user = ("【今天的統計】" + NL + stats + NL
+            + "【工具使用率】" + NL + use_txt + NL + NL
+            + "【卡最久的畫面】" + NL + stuck_txt + NL + NL
+            + "【你今天寫的檢討】" + NL + rev_txt + NL + NL
+            + "【你自己記的東西】" + NL + mine + NL
+            + "【你自己定義過的工具】" + NL + (custom or "（沒有）") + NL + NL
+            + "請做大檢討，只輸出一個 JSON，欄位：" + NL
+            + '{"今天做了什麼":"<=150字","卡最久的三件事":[{"情況":"","卡了多久或幾次":"","為什麼":"","當時該怎麼做":""}],'
+              '"大任務為什麼沒完成":"<=200字（對照統計：按E有反應率、點擊、死亡、大任務完成/放棄次數、文件類工具 0 次）",'
+              '"卡法歸納":[{"卡法":"","原因":"","解法":"用現有工具寫出順序，例如 退(0.4)→轉(180)→讀字"}],'
+              '"明天開場要做什麼":["第一步","第二步","…（具體到工具名與參數，含開工測試、驗開工、要不要先 讀文件/我的記憶、大任務怎麼設怎麼結案）"],'
+              '"新工具":[{"名稱":"","用途":"","做法":"現有工具用 → 接起來"}],'
+              '"補用途":[{"工具":"","情況":""}],'
+              '"記卡法":[{"情況":"","解法":""}],'
+              '"記筆記":["一句一條，表格式，確定的事才寫"],'
+              '"要改的習慣":["例如：E 一律先長按 1.5 秒再試短按；右上角黑底白字是任務不是按鈕；填 false 當輪就檢討"]}')
+    t0 = time.time()
+    print(f"[大檢討] system {len(system)} 字、user {len(user)} 字、effort {a.effort}、max_tokens {a.max_tokens}…")
+    raw, trunc, ttft, _ = stream_json(a.endpoint, T.detect_model(a.endpoint), system,
+                                      [{"type": "text", "text": user}], a.max_tokens, time.time() + 900, 0.3, effort=a.effort)
+    dt = time.time() - t0
+    reason = LAST_REASONING.get("text", "")
+    o = parse_json_loose(T.repair_json(raw)) or {}
+    print(f"[大檢討] {dt:.0f}s 截斷={trunc} 推理 {len(reason)} 字 輸出 {len(raw)} 字 解析{'成功' if o else '失敗'}")
+
+    # 把他列的東西真的寫進他的記憶／工具清單（跟他在遊戲裡叫工具一樣）
+    applied = []
+    for t in o.get("新工具") or []:
+        if isinstance(t, dict):
+            applied.append("新工具 → " + tools.tool_new(t.get("名稱", ""), t.get("用途", ""), t.get("做法", "")))
+    for t in o.get("補用途") or []:
+        if isinstance(t, dict):
+            applied.append("補用途 → " + tools.tool_add_use(t.get("工具", ""), t.get("情況", "")))
+    for t in o.get("記卡法") or []:
+        if isinstance(t, dict):
+            applied.append("記卡法 → " + tools.mem_stuck(t.get("情況", ""), t.get("解法", "")))
+    for t in o.get("記筆記") or []:
+        if isinstance(t, str) and t.strip():
+            applied.append("記筆記 → " + tools.mem_note(t))
+
+    out = [f"# 大檢討 {a.date}（{datetime.now().strftime('%m/%d %H:%M')}，{a.effort}，{dt:.0f} 秒）", ""]
+    for k in ("今天做了什麼", "卡最久的三件事", "大任務為什麼沒完成", "卡法歸納", "明天開場要做什麼", "新工具", "補用途", "記卡法", "記筆記", "要改的習慣"):
+        v = o.get(k)
+        if v is None:
+            continue
+        out.append(f"## {k}")
+        if isinstance(v, list):
+            for x in v:
+                out.append("- " + (json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else str(x)))
+        else:
+            out.append(str(v))
+        out.append("")
+    out.append("## 程式替你寫進記憶／工具清單的")
+    out += ["- " + x for x in applied] or ["（沒有）"]
+    out.append("")
+    out.append("## 他的內部推理（節錄）")
+    out.append((reason or "")[:3000])
+    p = os.path.join(m, "大檢討.md")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(NL.join(out))
+    with open(os.path.join(m, f"大檢討_{a.date}.json"), "w", encoding="utf-8") as f:
+        json.dump({"輸出": o, "原文": raw, "推理": reason, "秒": dt}, f, ensure_ascii=False, indent=1)
+    print(f"[大檢討] 存 {p}")
+    print(NL.join(out[:60]))
+
+
+if __name__ == "__main__":
+    main()
