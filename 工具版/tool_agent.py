@@ -908,6 +908,47 @@ class Tools:
             return "度數太小（<3 度）沒意義"
         return self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15)
 
+    def look_slow(self, 方向=""):
+        """慢慢轉（2026-10-15 18:0x 使用者）：一次 3 度慢慢轉，直到跳出 UI（畫面上出現原本沒有的字，例如 E 提示）
+        或畫面有比較大的變動（由本機視覺判斷：OCR 新字＋前後幀差異），最多轉一圈。"""
+        d = str(方向).strip().lower()
+        sign = -1 if d in ("左", "l", "left", "-") else (1 if d in ("右", "r", "right", "+", "") else None)
+        if sign is None:
+            return "慢慢轉 要給方向：左 或 右，例如 慢慢轉(右)"
+        if self.image_path or not self.live:
+            return f"[dry-run] 會往{'右' if sign > 0 else '左'}每次 3 度慢慢轉，直到出現新字或畫面大變"
+        step_px = 3 * self.dx_deg * sign
+        start = self.grab()
+        if start is None:
+            return "抓不到畫面"
+        base_words = set(self._words(start).keys())
+        prev = start
+        turned = 0
+        reason = ""
+        for i in range(120):                      # 120 × 3 度 = 一圈
+            self._drag(step_px, 0)
+            turned += 3
+            time.sleep(0.12)
+            cur = self.grab()
+            if cur is None:
+                reason = "抓不到畫面"
+                break
+            d_step = self.diff(prev, cur)
+            words = self._words(cur)
+            new = [w for w in words if w not in base_words and len(w.strip()) >= 1]
+            if new:
+                reason = "跳出原本沒有的字（UI）：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:5])
+                break
+            if d_step >= 35:
+                reason = f"畫面大幅變動（這 3 度前後差 {d_step:.0f}）"
+                break
+            prev = cur
+        else:
+            reason = "轉滿 360 度沒有新字、也沒有大變動"
+        self._append("刻度樣本.md", f"慢慢轉{'右' if sign > 0 else '左'} {turned} 度｜停：{reason[:60]}")
+        return (f"慢慢轉{'右' if sign > 0 else '左'}：轉了 {turned} 度（每次 3 度）後停下，原因：{reason}。"
+                "現在的畫面下一輪給你；要繼續就再叫一次")
+
     def look_left(self, 度=""):
         return self.look_turn(-num(度, 30))
 
