@@ -705,7 +705,8 @@ class Tools:
         end = self.grab()
         d = self.diff(start, end)
         sh = self.shift_x(start, end)
-        back = d < 10 and sh is not None and abs(sh) < 0.04
+        # 11:3x 實測：轉一圈後位移 +1% 但整張差 23（場上有別的玩家在動）被判 ✗ → 只看水平位移，差異值只當參考
+        back = sh is not None and abs(sh) < 0.04
         implied = round(abs(total) / 360.0, 2)
         if sh is not None and abs(sh) >= 0.04:
             hint = (f"終點畫面比起點{'偏左' if sh < 0 else '偏右'} {abs(sh) * 100:.0f}% 畫面寬＝轉{'過頭' if sh < 0 else '不夠'}；"
