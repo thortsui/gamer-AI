@@ -1383,7 +1383,8 @@ class Tools(ExtraTools):
 def repair_json(raw):
     """他兩種常見的壞 JSON（01:3x 統計 11/120 輪）：
     1. 「想」欄寫成 …｜結果應該是": "畫面會變…"  → 引號提早關掉；把 結果應該是": " 改回 結果應該是:
-    2. 一輪吐兩個 JSON 物件 → 取最後一個完整的。"""
+    2. 一輪吐兩個 JSON 物件 → 取最後一個完整的。
+    3. 10/16 01:0x（3/42 輪）：整個物件寫完只少最後的 } 或 ] → 數括號（略過字串內）補上。"""
     s = str(raw or "")
     s = re.sub(r'結果應該是"\s*:\s*"', "結果應該是:", s)
     objs = re.findall(r"\{.*?\}(?=\s*\{|\s*$)", s, flags=re.S)
@@ -1394,6 +1395,36 @@ def repair_json(raw):
                 return cand
             except json.JSONDecodeError:
                 continue
+    try:
+        json.loads(s.strip())
+        return s
+    except json.JSONDecodeError:
+        pass
+    body = s.strip()
+    start = body.find("{")
+    if start >= 0:
+        stack, in_str, esc = [], False, False
+        for ch in body[start:]:
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]" and stack:
+                stack.pop()
+        if stack and not in_str:
+            cand = body[start:] + "".join(reversed(stack))
+            try:
+                json.loads(cand)
+                return cand
+            except json.JSONDecodeError:
+                pass
     return s
 
 
