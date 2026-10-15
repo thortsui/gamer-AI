@@ -921,7 +921,31 @@ class Tools:
         start = self.grab()
         if start is None:
             return "抓不到畫面"
+        # 起點讀兩次當基準（OCR 對 HUD 的讀法會抖：「蓋印表格」→「/ 、印表」、理智數字每秒變、「$ 20」空格不同）
         base_words = set(self._words(start).keys())
+        time.sleep(0.15)
+        base_words |= set(self._words(self.grab() or start).keys())
+
+        def is_new(w):
+            n = re.sub(r"[\s,，、.．:：/／|｜%$\-—_]+", "", w)
+            if not n or re.fullmatch(r"[\d%$.,:/ ]+", w.strip()):      # 純數字／百分比／金額＝HUD 計數器
+                return False
+            if len(n) < 2 and n.upper() != "E":                         # 單字只認 E（互動提示）
+                return False
+            try:
+                import zh_text
+                for b in base_words:
+                    bn = re.sub(r"[\s,，、.．:：/／|｜%$\-—_]+", "", b)
+                    if not bn:
+                        continue
+                    if n in bn or bn in n or zh_text.similar(n, bn) >= 0.6:
+                        return False
+            except Exception:  # noqa: BLE001
+                for b in base_words:
+                    if n in b or b in n:
+                        return False
+            return True
+
         prev = start
         turned = 0
         reason = ""
@@ -935,7 +959,7 @@ class Tools:
                 break
             d_step = self.diff(prev, cur)
             words = self._words(cur)
-            new = [w for w in words if w not in base_words and len(w.strip()) >= 1]
+            new = [w for w in words if is_new(w)]
             if new:
                 reason = "跳出原本沒有的字（UI）：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:5])
                 break
