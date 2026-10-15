@@ -123,9 +123,19 @@ def build_system(game, cat):
             review_txt = "【你自己上次收工寫的大檢討（你自己寫的，照著做）】" + NL + NL.join(keep) + NL * 2
     except OSError:
         pass
-    groups = ["校準", "文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "自訂"]
+    groups = ["校準", "文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "學習", "自訂"]
     tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g))
                        for g in groups if catalog_lines(cat, g))
+    # 他自己整理的規則（學習整理）與他自己改的提示（改提示）——都是他的話，每輪帶著
+    mine_txt = ""
+    for fname, title in (("學習整理.md", "【你自己整理的規則（學習整理）】"), ("我的提示.md", "【你自己寫的提示（改提示）】")):
+        try:
+            body = open(os.path.join(gdir, "記憶", "工具版", fname), encoding="utf-8").read().strip()
+            if body:
+                mine_txt += title + NL + body[:900] + NL * 2
+        except OSError:
+            pass
+    review_txt = mine_txt + review_txt
     return (f"{identity}" + NL
             + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
             + "使用者給你的目標：" + NL + goal + NL * 2
@@ -230,7 +240,10 @@ def num(v, default):
 
 
 # ---------------------------------------------------------------- 工具實作
-class Tools:
+from tools_extra import ExtraTools  # noqa: E402  舊版的學習／記憶／程序／追蹤 全部包成工具（2026-10-15 23:0x）
+
+
+class Tools(ExtraTools):
     def __init__(self, game, cat, live=False, image_path=None):
         self.game, self.cat, self.live = game, cat, live
         self.gdir = os.path.join(ROOT, "專案", game)
@@ -315,7 +328,12 @@ class Tools:
         table = {"玩法摘要": "玩法摘要.md", "成功做法": "成功檢討.md", "卡住檢討": "卡住檢討.md", "死亡檢討": "死亡檢討.md",
                  "操作手冊": "操作手冊.md", "遇到的問題": "遇到的問題.md", "因果": "因果.md", "學到的": "學到的.md",
                  "地圖": "研究筆記.md", "筆記": os.path.join("工具版", "筆記.md"),
-                 "大檢討": os.path.join("工具版", "大檢討.md"), "卡法": os.path.join("工具版", "卡法.md")}
+                 "大檢討": os.path.join("工具版", "大檢討.md"), "卡法": os.path.join("工具版", "卡法.md"),
+                 "按鈕簿": os.path.join("工具版", "按鈕簿.json"), "站位": os.path.join("工具版", "站位.md"),
+                 "流程": os.path.join("工具版", "流程.md"), "成功做法": os.path.join("工具版", "成功做法.md"),
+                 "死亡": os.path.join("工具版", "死亡檢討.md"), "學習整理": os.path.join("工具版", "學習整理.md"),
+                 "慢想": os.path.join("工具版", "慢想.md"), "互動物": os.path.join("工具版", "互動物.md"),
+                 "標點": os.path.join("工具版", "標點.md"), "地點": os.path.join("工具版", "地點.md")}
         key = str(類別).strip()
         f = next((v for k, v in table.items() if key and key in k), None)
         if not f:
@@ -1414,6 +1432,7 @@ def main():
     cat = load_catalog(args.game)
     tools = Tools(args.game, cat, live=live, image_path=args.image or None)
     model = detect_model(args.endpoint)
+    tools.endpoint, tools.model = args.endpoint, model
     system = build_system(args.game, cat)
     log_path = os.path.join(tools.mdir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     print(f"[工具版] 遊戲 {args.game}｜大腦 {model}｜{'LIVE 真的按' if live else 'dry-run 只印'}｜system {len(system)} 字｜工具 {len(cat['工具'])} 個"
@@ -1443,6 +1462,16 @@ def main():
             content.append({"type": "image_url", "image_url": {"url": img_uri(shot, 640)}})
         tools.extra_images = []
         task_round += 1
+        watch_txt = ""
+        if tools.watch_labels:                           # 追蹤(標籤)：每輪開頭眼睛找一次
+            try:
+                watch_txt = "【追蹤】" + tools.see_find(",".join(tools.watch_labels)) + NL
+            except Exception as e:  # noqa: BLE001
+                watch_txt = f"【追蹤】眼睛出錯：{e}" + NL
+        plan_txt = ""
+        if tools.plan:
+            plan_txt = ("【慢想排的】（你自己 " + tools.plan["時間"] + " 排的）" + "→".join(tools.plan["序列"])
+                        + "｜第一步：" + "→".join(tools.plan["細步驟"]) + NL)
         big = tools.big
         big_txt = (f"「{big['名稱']}」｜成功條件：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
                    if big else "（還沒設。先用 設大任務(名稱,成功條件) 定一個，再做事）")
@@ -1451,7 +1480,8 @@ def main():
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
         reviews_txt = (NL.join("- " + r for r in tools.reviews[-3:]) + NL * 2) if tools.reviews else ""
         panel = ("【開工數值】" + tools.startup_text() + NL
-                 + "【目前的大任務】" + big_txt + NL * 2
+                 + "【目前的大任務】" + big_txt + NL
+                 + plan_txt + watch_txt + NL
                  + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
                  + (("【最近的檢討】（你自己寫的，照著做）" + NL + reviews_txt) if reviews_txt else "")
@@ -1460,7 +1490,7 @@ def main():
         content.append({"type": "text", "text": panel})
         t0 = time.time()
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
-                                          time.time() + args.deadline, 0.2, effort=args.effort)
+                                          time.time() + args.deadline, 0.2, effort=(tools.effort_override or args.effort))
         dt = time.time() - t0
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
@@ -1494,6 +1524,7 @@ def main():
             rets.append(f"● {name}{'(' + ','.join(str(v) for v in params.values()) + ')' if params else ''} → {r}")
             print(f"   ▶ {name} {params} → {r[:120].replace(NL, ' ')}")
         tool_returns = NL.join(rets)
+        tools.remember_round(rnd, seen, think, did, rets)
         history.append(f"[{rnd}] 看到:{seen}｜想:{think[:80]}｜用:{'、'.join(did) or '無'}"
                        + (f"｜上一輪實際:{actual}｜符合:{match}" if prev else ""))
         m_reason = re.search(r"因為[:：]\s*(.*?)(?:｜|\|)", think)

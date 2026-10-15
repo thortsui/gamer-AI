@@ -1,0 +1,283 @@
+# -*- coding: utf-8 -*-
+"""舊版（flow_agent／play_agent）有的學習與記憶機制，全部包成工具等他叫（2026-10-15 23:0x 使用者：
+「把學習這些的也包裝成一個個的工具，之前的 AI 有的所有東西全部包裝成工具等他使用」）。
+
+這裡是 Tools 的 mixin：學習（大檢討／死亡檢討／成功回推／學習整理／慢想／進步日誌／思考強度／教眼睛）、
+記憶（記遊戲／記按鈕／忘記按鈕／記站位／記流程／記互動物／記觸碰物／標點／切空間／記自己／改提示）、
+程序（錄成程序→就是 新工具；執行程序＝叫那個名字）、看（追蹤／停止追蹤／放大／拆兩段）。
+靠水平儀與座標地圖的（鎖定／走到／設目標／走到記過的／我在／到標點／修水平／水平歸零／量牆距）與看介紹／wiki／訓練眼睛／錄影檢討
+先標未實作，目錄有列、叫了回「未實作」。
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from collections import deque
+from datetime import datetime
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+NL = "\n"
+
+
+class ExtraTools:
+    rounds = deque(maxlen=60)        # 最近幾輪：{"輪","看到","想","用","回傳"}（死亡檢討／成功回推／錄成程序用）
+    watch_labels = []                # 追蹤(標籤)：每輪開頭 YOLO 找一次放進面板
+    effort_override = None           # 思考強度(強度)
+    plan = None                      # 慢想排的大動作序列
+    endpoint = "http://192.168.0.126:8888/v1"
+    model = ""
+
+    # ---------------- 共用
+    def _ask(self, system, user, effort="慢想", max_tokens=2500, deadline=300):
+        from play_agent import stream_json, parse_json_loose, LAST_REASONING
+        import tool_agent as T
+        raw, trunc, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), system,
+                                       [{"type": "text", "text": user}], max_tokens, time.time() + deadline, 0.3, effort=effort)
+        LAST_REASONING["text"] = ""
+        return parse_json_loose(T.repair_json(raw)) or {}, raw
+
+    def remember_round(self, rnd, seen, think, did, rets):
+        self.rounds.append({"輪": rnd, "看到": seen, "想": think, "用": list(did), "回傳": [r[:160] for r in rets]})
+
+    def _recent_text(self, n=12):
+        return NL.join(f"[{r['輪']}] 看到:{r['看到'][:60]}｜想:{r['想'][:90]}｜用:{'、'.join(r['用']) or '無'}｜回傳:{' / '.join(x[:60] for x in r['回傳'])}"
+                       for r in list(self.rounds)[-n:]) or "（還沒有紀錄）"
+
+    def _identity(self):
+        return f"你是 gamer AI，正在學 Roblox「{self.game}」。只寫紀錄裡真的有的事，表格式短語，每條都要能照著做。"
+
+    # ---------------- 學習
+    def learn_big_review(self):
+        """大檢討：把今天整天的紀錄給你自己回顧（會花 3～6 分鐘，遊戲這段沒人操作）。"""
+        date = datetime.now().strftime("%Y-%m-%d")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "big_review.py"), "--game", self.game, "--date", date,
+                            "--endpoint", self.endpoint], capture_output=True, text=True, encoding="utf-8")
+        big = ""
+        try:
+            big = open(os.path.join(self.mdir, "大檢討.md"), encoding="utf-8").read()
+        except OSError:
+            pass
+        m = re.search(r"## 明天開場要做什麼\n(.*?)(?=\n## |\Z)", big, flags=re.S)
+        return ("大檢討寫好了（記憶/工具版/大檢討.md，之後開機會帶進來）。你排的開場：" + NL + (m.group(1).strip() if m else "（沒解析到）")
+                if big else "大檢討失敗：" + (r.stderr or r.stdout)[-300:])
+
+    def learn_death_review(self):
+        """死亡檢討：剛死掉就叫，回顧死前最近 15 輪。"""
+        o, raw = self._ask(self._identity(),
+                           "你剛剛死了（理智歸零或倒下）。這是死前最近幾輪：" + NL + self._recent_text(15) + NL * 2
+                           + '只輸出 JSON：{"死前在做什麼":"<=40字","死因":"<=40字","錯在哪":"<=60字","下次從哪一步開始改":"用工具寫，例如 先 我的記憶(卡法) 再 走(0.5)","要記的規則":"一句"}',
+                           effort="慢想", max_tokens=1200, deadline=240)
+        if not o:
+            return "死亡檢討沒解析出來"
+        line = "｜".join(f"{k}:{v}" for k, v in o.items() if isinstance(v, str))
+        self._append("死亡檢討.md", line)
+        self.reviews.append("死亡檢討：" + line)
+        if o.get("要記的規則"):
+            self.mem_note(str(o["要記的規則"]))
+        return "死亡檢討記下了：" + line
+
+    def learn_success(self, 做成了什麼=""):
+        """成功回推：剛做成一件事（E 有反應、任務字換了、進了門）就叫，把最近幾輪回推成可重複的步驟。"""
+        o, raw = self._ask(self._identity(),
+                           f"你剛做成了：{做成了什麼}。這是最近幾輪：" + NL + self._recent_text(12) + NL * 2
+                           + '把它回推成下次可以直接照做的步驟。只輸出 JSON：{"做成的事":"","關鍵是哪一步":"","步驟":["工具(參數)","…"],"下次怎麼更快":""}',
+                           effort="中想", max_tokens=1000, deadline=180)
+        if not o:
+            return "成功回推沒解析出來"
+        steps = o.get("步驟") or []
+        line = f"做成:{o.get('做成的事', 做成了什麼)}｜關鍵:{o.get('關鍵是哪一步', '')}｜步驟:{'→'.join(map(str, steps))}｜更快:{o.get('下次怎麼更快', '')}"
+        self._append("成功做法.md", line)
+        return "成功做法記下了：" + line + "。想變成一個工具就 新工具(名稱,用途," + "→".join(map(str, steps)) + ")"
+
+    def learn_organize(self):
+        """學習整理：把筆記／卡法／因果／檢討濃縮成最多 12 條規則，之後每輪開機帶著。"""
+        def rd(f, n=80):
+            try:
+                return NL.join(open(os.path.join(self.mdir, f), encoding="utf-8").read().splitlines()[-n:])
+            except OSError:
+                return ""
+        raw_notes = "【筆記】" + rd("筆記.md") + NL + "【卡法】" + rd("卡法.md") + NL + "【因果】" + rd("因果.md") + NL + "【檢討】" + rd("檢討.md", 60)
+        o, raw = self._ask(self._identity(),
+                           "以下是你自己寫的筆記、卡法、因果、檢討（很多重複）。濃縮成最多 12 條確定的規則，每條 <=30 字、表格式、能照做。" + NL + raw_notes[:9000] + NL
+                           + '只輸出 JSON：{"規則":["…"]}', effort="慢想", max_tokens=1500, deadline=300)
+        rules = [str(x) for x in (o.get("規則") or []) if str(x).strip()]
+        if not rules:
+            return "學習整理沒整理出東西"
+        with open(os.path.join(self.mdir, "學習整理.md"), "w", encoding="utf-8") as f:
+            f.write(f"# 學習整理（{datetime.now().strftime('%m/%d %H:%M')}，你自己整理的）" + NL + NL.join("- " + r for r in rules) + NL)
+        return f"整理成 {len(rules)} 條（記憶/工具版/學習整理.md，之後開機帶著）：" + "；".join(rules[:6]) + "…"
+
+    def learn_slow_think(self, 問題=""):
+        """慢想：不趕時間地想接下來的大動作序列（xhigh）。"""
+        big = self.big or {}
+        o, raw = self._ask(self._identity(),
+                           f"目前的大任務：{big.get('名稱', '（沒設）')}｜成功條件：{big.get('成功條件', '')}" + NL
+                           + (f"你想的問題：{問題}" + NL if 問題 else "")
+                           + "最近幾輪：" + NL + self._recent_text(10) + NL
+                           + '排出接下來的大動作序列與第一步的細步驟。只輸出 JSON：{"大動作序列":["…","…"],"第一步細步驟":["工具(參數)","…"],"為什麼這樣排":"<=60字"}',
+                           effort="慢想", max_tokens=1500, deadline=300)
+        if not o:
+            return "慢想沒解析出來"
+        self.plan = {"序列": [str(x) for x in (o.get("大動作序列") or [])], "細步驟": [str(x) for x in (o.get("第一步細步驟") or [])],
+                     "為什麼": str(o.get("為什麼這樣排", "")), "時間": datetime.now().strftime("%H:%M")}
+        self._append("慢想.md", "序列:" + "→".join(self.plan["序列"]) + "｜第一步:" + "→".join(self.plan["細步驟"]) + "｜" + self.plan["為什麼"])
+        return "慢想排好了（之後面板【慢想排的】會一直顯示）：" + "→".join(self.plan["序列"]) + "；第一步：" + "→".join(self.plan["細步驟"])
+
+    def learn_daily_report(self):
+        """進步日誌：程式把今天的數字＋大檢討摘要寫成一份（不叫模型）。"""
+        date = datetime.now().strftime("%Y-%m-%d")
+        stats = subprocess.run([sys.executable, os.path.join(HERE, "stats.py"), "--game", self.game, "--date", date],
+                               capture_output=True, text=True, encoding="utf-8").stdout
+        big = ""
+        try:
+            big = open(os.path.join(self.mdir, "大檢討.md"), encoding="utf-8").read()[:2500]
+        except OSError:
+            pass
+        d = os.path.join(self.mdir, "進步日誌")
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, date + ".md")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(f"# 進步日誌 {date}" + NL + NL + "## 數字" + NL + stats + NL + "## 大檢討摘要" + NL + big)
+        return f"進步日誌寫好：記憶/工具版/進步日誌/{date}.md" + NL + stats[:600]
+
+    def learn_effort(self, 強度=""):
+        """思考強度：低／中／高（每一輪的推理深度）。"""
+        v = str(強度).strip()
+        table = {"低": "快思推理", "中": "中想", "高": "慢想", "快": "快思推理", "慢": "慢想", "反射": "反射"}
+        if v not in table:
+            return "思考強度 要給 低／中／高（低＝快、字少；高＝想久、每輪 60 秒以上）"
+        self.effort_override = table[v]
+        return f"之後每輪用「{v}」（{table[v]}）；想改回來再叫一次"
+
+    def learn_teach_eyes(self, 看到="", 其實是=""):
+        """教眼睛：YOLO 認錯了（看到 X 其實是 Y）→ 記進眼睛更正，收工訓練用。"""
+        if not str(其實是).strip():
+            return "教眼睛 要寫 看到,其實是，例如 教眼睛(chair,coffee machine)"
+        p = os.path.join(self.gdir, "記憶", "眼睛更正.jsonl")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"時間": datetime.now().strftime("%m/%d %H:%M"), "看到": 看到, "其實是": 其實是, "來源": "工具版"}, ensure_ascii=False) + NL)
+        return f"記下：眼睛把「{看到}」看成「{其實是}」（記憶/眼睛更正.jsonl；訓練眼睛 還沒做，先累積）"
+
+    # ---------------- 記憶（舊版有的）
+    def mem_game(self, 名稱="", 作者="", 封面特徵="", 進入步驟=""):
+        p = os.path.join(self.gdir, "記憶", "工具版", "遊戲身分.json")
+        d = {"名稱": 名稱, "作者": 作者, "封面特徵": 封面特徵, "進入步驟": 進入步驟, "時間": datetime.now().strftime("%m/%d %H:%M")}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        return "記住這隻遊戲的身分：" + json.dumps(d, ensure_ascii=False) + "（回到遊戲／退出重進會對照）"
+
+    def mem_button(self, 名稱="", x="", y="", 效果=""):
+        p = os.path.join(self.mdir, "按鈕簿.json")
+        try:
+            book = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            book = {}
+        if not str(名稱).strip():
+            return "記按鈕 要給名稱，例如 記按鈕(立即開始,0.62,0.80,進場)"
+        last = self.pending_click or {}
+        fx = x if str(x).strip() else last.get("x", "")
+        fy = y if str(y).strip() else last.get("y", "")
+        book[str(名稱)] = {"x": fx, "y": fy, "效果": 效果, "時間": datetime.now().strftime("%m/%d %H:%M")}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(book, f, ensure_ascii=False, indent=1)
+        return f"按鈕簿記下「{名稱}」({fx},{fy}) 效果:{效果}。之後 我的記憶(按鈕簿) 看得到，直接 點(x,y)"
+
+    def mem_forget_button(self, 名稱=""):
+        p = os.path.join(self.mdir, "按鈕簿.json")
+        try:
+            book = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return "按鈕簿是空的"
+        if str(名稱) in book:
+            del book[str(名稱)]
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(book, f, ensure_ascii=False, indent=1)
+            return f"刪了「{名稱}」"
+        return f"按鈕簿沒有「{名稱}」"
+
+    def mem_stance(self, 名稱="", 樣子=""):
+        return self._append("站位.md", f"{名稱}｜{樣子}｜（這版沒座標，只記名字和樣子，之後用 我的記憶(站位) 回想）")
+
+    def mem_flow(self, 名字="", 步驟=""):
+        steps = [s.strip() for s in re.split(r"[→>；;,，]", str(步驟)) if s.strip()]
+        if not str(名字).strip() or not steps:
+            return "記流程 要給 名字,步驟（用 → 隔開）"
+        return self._append("流程.md", f"{名字}｜" + "→".join(steps)) + "。想一次做完就 新工具(" + 名字 + ",用途," + "→".join(steps) + ")"
+
+    def mem_interact(self, 名稱="", 功能="", 用法=""):
+        return self._append("互動物.md", f"{名稱}｜功能:{功能}｜用法:{用法}")
+
+    def mem_touch(self, 名稱="", 功能="", 用法=""):
+        return self._append("觸碰物.md", f"{名稱}｜站上去:{功能}｜{用法}")
+
+    def mem_landmark(self, 名稱="", 樣子="", 方向=""):
+        return self._append("標點.md", f"{名稱}｜樣子:{樣子}｜方向:{方向}｜（這版沒座標地圖，只記文字）")
+
+    def mem_space(self, 名稱="", 為什麼=""):
+        self._append("空間.md", f"切到:{名稱}｜{為什麼}")
+        self.startup.pop("驗證", None)
+        return f"切到空間「{名稱}」：開工數值要重驗（驗開工）"
+
+    def mem_self(self, 樣子=""):
+        return self._append("自己的樣子.md", str(樣子)) + "。之後靠看不看得到自己判斷第一／第三人稱"
+
+    def mem_prompt(self, 內容=""):
+        """改提示：他自己寫、每輪開機帶進 system 的一段（最多 600 字）。"""
+        p = os.path.join(self.mdir, "我的提示.md")
+        s = str(內容).strip()[:600]
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(s)
+        return f"你的提示改成（{len(s)} 字，之後每輪帶著）：{s[:80]}…"
+
+    # ---------------- 程序
+    def proc_record(self, 名稱="", 用途="", 幾輪=""):
+        """錄成程序：把最近 N 輪真的做過的動作串錄成一個新工具。"""
+        n = int(float(幾輪 or 3))
+        acts = []
+        for r in list(self.rounds)[-n:]:
+            acts += [a for a in r["用"] if a and not a.startswith(("檢討", "讀字", "找東西", "記", "這步", "設大", "大任務"))]
+        if not acts:
+            return "最近幾輪沒有可錄的動作"
+        return self.tool_new(名稱, 用途 or f"最近 {n} 輪做過的串", "→".join(acts))
+
+    # ---------------- 看
+    def see_watch(self, 標籤=""):
+        labels = [x.strip() for x in re.split(r"[,，、]", str(標籤)) if x.strip()]
+        if not labels:
+            return "追蹤 要給英文標籤，例如 追蹤(cat,door)"
+        self.watch_labels = labels[:4]
+        return "開始每輪追蹤：" + "、".join(self.watch_labels) + "（面板【追蹤】每輪告訴你它在哪、多大）"
+
+    def see_unwatch(self):
+        self.watch_labels = []
+        return "停止追蹤"
+
+    def see_zoom(self, x="", y=""):
+        import tool_agent as T
+        fx, fy = T.num(x, -1), T.num(y, -1)
+        if not (0 <= fx <= 1 and 0 <= fy <= 1):
+            return "放大 要給 x,y（0~1）"
+        im = self.grab()
+        if im is None:
+            return "抓不到畫面"
+        W, H = im.size
+        box = (max(0, int(fx * W) - 240), max(0, int(fy * H) - 135), min(W, int(fx * W) + 240), min(H, int(fy * H) + 135))
+        self.extra_images.append((f"放大 ({fx:.2f},{fy:.2f})", im.crop(box)))
+        return f"放大了 ({fx:.2f},{fy:.2f}) 附近，下一輪附圖給你"
+
+    def move_two_part(self, 秒=""):
+        """拆兩段：先走七成、停下來抓一張給你看，要不要走剩下三成你下一輪決定。"""
+        import tool_agent as T
+        d = max(0.4, min(2.0, T.num(秒, 1.0)))
+        first = round(d * 0.7, 2)
+        r = self.move_w(first)
+        im = self.grab()
+        if im is not None:
+            self.extra_images.append((f"走了七成（{first} 秒）後的畫面", im))
+        return f"拆兩段：先走 {first} 秒（{r}）；剩下 {round(d - first, 2)} 秒看下一輪的圖再決定要不要 走({round(d - first, 2)})"
+
+    # ---------------- 未實作（舊版靠水平儀／座標地圖／瀏覽器的）
+    def not_impl(self, *a, **k):
+        return "這個工具舊版有、這版還沒做（未實作）：它靠水平儀／座標地圖／瀏覽器。先用 看四周、找東西、估距、記地點 代替"
