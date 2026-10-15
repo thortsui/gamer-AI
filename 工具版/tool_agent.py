@@ -587,7 +587,9 @@ class Tools(ExtraTools):
             hud_txt += "；轉頭時畫面上這幾塊完全沒動（釘在畫面上的 HUD／面板，不是場景）：" + "、".join(f"({x:.2f},{y:.2f})" for x, y in fixed[:6])
         if axis == "x":
             sh = self.shift_x(before, after)
-            sh_txt = f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬" if sh is not None else ""
+            # 10/16 03:3x：他一直把「景物往左移」讀成「鏡頭往左轉」寫進檢討（刻度反）→ 量測後面標鏡頭實際轉向
+            sh_txt = (f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬"
+                      + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) if sh is not None else ""
             try:
                 self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
             except Exception:  # noqa: BLE001
@@ -745,6 +747,10 @@ class Tools(ExtraTools):
         if d < 2:
             return "走 1 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
         k = self.zoom_factor(before, after)
+        if k <= 1.05 or d < 15:
+            # 10/16 03:1x：貼牆走畫面變化 6～7、放大 1.0～1.1 倍也被寫進校準檔 → 這種不算量到
+            return (f"走 1 秒中央只放大 {k:.2f} 倍、畫面變化 {d:.0f}＝幾乎沒往前（貼牆／被擋／原地），這次不算，校準檔沒改；"
+                    "換前方有空間的地方再量比例")
         self.startup["深度比例"] = f"走1秒中央放大{k:.1f}倍"
         p = os.path.join(self.gdir, "記憶", "視角校準.json")
         try:
