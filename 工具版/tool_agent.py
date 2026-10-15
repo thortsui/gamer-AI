@@ -1384,7 +1384,8 @@ def repair_json(raw):
     """他兩種常見的壞 JSON（01:3x 統計 11/120 輪）：
     1. 「想」欄寫成 …｜結果應該是": "畫面會變…"  → 引號提早關掉；把 結果應該是": " 改回 結果應該是:
     2. 一輪吐兩個 JSON 物件 → 取最後一個完整的。
-    3. 10/16 01:0x（3/42 輪）：整個物件寫完只少最後的 } 或 ] → 數括號（略過字串內）補上。"""
+    3. 10/16 01:0x（3/42 輪）：整個物件寫完只少最後的 } 或 ] → 數括號（略過字串內）補上。
+    4. 10/16 02:2x：結尾多一個 }（Extra data）→ 取第一個完整物件；結尾多了 "（]"}）→ 從尾巴退幾個字再補括號。"""
     s = str(raw or "")
     s = re.sub(r'結果應該是"\s*:\s*"', "結果應該是:", s)
     objs = re.findall(r"\{.*?\}(?=\s*\{|\s*$)", s, flags=re.S)
@@ -1403,29 +1404,44 @@ def repair_json(raw):
     body = s.strip()
     start = body.find("{")
     if start >= 0:
-        stack, in_str, esc = [], False, False
-        for ch in body[start:]:
-            if in_str:
-                if esc:
-                    esc = False
-                elif ch == "\\":
-                    esc = True
-                elif ch == '"':
-                    in_str = False
-            elif ch == '"':
-                in_str = True
-            elif ch in "{[":
-                stack.append("}" if ch == "{" else "]")
-            elif ch in "}]" and stack:
-                stack.pop()
-        if stack and not in_str:
-            cand = body[start:] + "".join(reversed(stack))
-            try:
-                json.loads(cand)
+        try:                                              # 結尾多餘的 } 或字：取第一個完整物件
+            obj, _ = json.JSONDecoder().raw_decode(body[start:])
+            if isinstance(obj, dict):
+                return json.dumps(obj, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+        for cut in range(0, 6):                           # 尾巴退 0～5 字再補括號
+            cand = _close_brackets(body[start:len(body) - cut] if cut else body[start:])
+            if cand:
                 return cand
-            except json.JSONDecodeError:
-                pass
     return s
+
+
+def _close_brackets(frag):
+    """數括號（略過字串內）補上缺的結尾；補完能解析就回傳，否則 None。"""
+    stack, in_str, esc = [], False, False
+    for ch in frag:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    if not in_str:
+        cand = frag + "".join(reversed(stack))
+        try:
+            if isinstance(json.loads(cand), dict):
+                return cand
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def img_uri(im, width=1024):
