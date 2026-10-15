@@ -120,6 +120,7 @@ def build_system(game, cat):
             + tool_txt + NL * 2
             + "【開工先量，逐一回報】（使用者定的）每次登入／重進／切空間、或畫面大小變了，第一件事送 開工測試：程式逐項量 ①畫面尺寸 ②每度 dx ③每度 dy ④深度比例，"
               "⑤第幾人稱由你看畫面用 回報人稱 回報。五項都有才算開工完成，面板【開工數值】會一直顯示量了沒。"
+              "刻度對不對要**自己驗**：算好一圈要送多少 dx，用 驗一圈(dx) 看有沒有回到原點，對了再 定刻度(每度dx)。"
               "之後每一次 視角／移動 工具的回傳都會附「預期 vs 實測」，對不上就重量；工具出來的結果要跟你腦中的一致才能繼續。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
@@ -636,6 +637,59 @@ class Tools:
         self._append("開工數值.md", f"人稱:{v}")
         print(f"   🧪 人稱回報：{v}｜開工數值：{self.startup_text()}")
         return f"記下：{v}。開工數值現在：{self.startup_text()}"
+
+    def cal_loop(self, dx=""):
+        """驗一圈：他自己算「轉 360 度要送多少 dx」填進來（不寫＝照目前刻度 360×每度dx），程式拖完比對起點畫面，
+        回報有沒有回到原點、偏多少（2026-10-15 11:1x 使用者：「他自己需要試試看，按照他的計算，測試轉 360 度是否回到原點，製作成工具」）。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能驗一圈"
+        total = num(dx, None)
+        if total is None:
+            total = 360 * self.dx_deg
+            src = f"照目前刻度 360×{self.dx_deg}"
+        else:
+            src = "照你填的"
+        total = int(round(total))
+        if not (200 <= abs(total) <= 3000):
+            return f"dx {total} 不合理（一圈通常 500～1500）"
+        start = self.grab()
+        if start is None:
+            return "抓不到畫面"
+        self._drag(total, 0)
+        time.sleep(0.4)
+        end = self.grab()
+        d = self.diff(start, end)
+        sh = self.shift_x(start, end)
+        back = d < 10 and sh is not None and abs(sh) < 0.04
+        implied = round(abs(total) / 360.0, 2)
+        if sh is not None and abs(sh) >= 0.04:
+            hint = (f"終點畫面比起點{'偏左' if sh < 0 else '偏右'} {abs(sh) * 100:.0f}% 畫面寬＝轉{'過頭' if sh < 0 else '不夠'}；"
+                    f"你填的每度 dx {implied} 要{'調小' if sh < 0 else '調大'}一點再驗")
+        else:
+            hint = "終點畫面跟起點幾乎重合"
+        try:
+            self._append("刻度樣本.md", f"驗一圈 dx {total}（{src}）｜跟起點差 {d:.0f}｜位移 {(sh or 0) * 100:+.0f}%｜{'回到原點' if back else '沒回到原點'}")
+        except Exception:  # noqa: BLE001
+            pass
+        return (f"驗一圈：送了 dx {total}（{src}，等於每度 {implied}）→ 跟起點畫面差 {d:.0f}、位移 {(sh or 0) * 100:+.0f}% 畫面寬 → "
+                + ("**回到原點**，刻度對" if back else "**沒回到原點**；" + hint)
+                + "。確定對了就用 定刻度(每度dx) 寫進校準檔")
+
+    def cal_set(self, 每度dx=""):
+        v = num(每度dx, None)
+        if v is None or not (0.5 <= v <= 20):
+            return "定刻度 要給每度 dx（0.5～20），例如 定刻度(2.5)"
+        self.dx_deg = round(v, 2)
+        p = os.path.join(self.gdir, "記憶", "視角校準.json")
+        try:
+            cal = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cal = {}
+        cal["水平"] = {"一圈dx": int(round(v * 360)), "每度dx": self.dx_deg, "方法": "他自己驗一圈後定的", "時間": datetime.now().strftime("%m/%d %H:%M")}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=1)
+        self.startup["每度dx"] = self.dx_deg
+        return f"每度 dx 改成 {self.dx_deg}（一圈 {int(round(v * 360))}），已寫進校準檔；之後 轉(90) 會送 dx {90 * self.dx_deg:.0f}"
 
     def cal_screen(self):
         bbox = None
