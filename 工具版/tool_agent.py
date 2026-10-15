@@ -577,6 +577,9 @@ class Tools:
                 out[txt] = ((min(xs) + max(xs)) / 2 / W, (min(ys) + max(ys)) / 2 / H)
             except Exception:  # noqa: BLE001
                 continue
+        if not hasattr(self, "_seen_words"):
+            self._seen_words = set()
+        self._seen_words |= set(out.keys())          # 這段對話讀過的字（慢慢轉拿來當 HUD 基準）
         return out
 
     @staticmethod
@@ -925,10 +928,14 @@ class Tools:
         base_words = set(self._words(start).keys())
         time.sleep(0.15)
         base_words |= set(self._words(self.grab() or start).keys())
+        # 19:4x 四次都被 HUD 字停下（「輪班 1」「拍照」「3Ø%」「~ 0」「$2e」）：起點兩次 OCR 沒讀到它們。
+        # 改：這段對話裡讀過的所有字都算基準（HUD 字之前一定出現過）；新字要連續兩步都讀到才算（OCR 閃一下不算）
+        base_words |= set(getattr(self, "_seen_words", set()))
 
         def is_new(w):
-            n = re.sub(r"[\s,，、.．:：/／|｜%$\-—_]+", "", w)
-            if not n or re.fullmatch(r"[\d%$.,:/ ]+", w.strip()):      # 純數字／百分比／金額＝HUD 計數器
+            n = re.sub(r"[\s,，、.．:：/／|｜%$\-—_~]+", "", w)
+            digits = sum(ch.isdigit() or ch in "%$ØO○~.,:/" for ch in n)
+            if not n or digits >= max(1, len(n) / 2):                  # 一半以上是數字符號＝HUD 計數器（含 Ø、~ 誤讀）
                 return False
             if len(n) < 2 and n.upper() != "E":                         # 單字只認 E（互動提示）
                 return False
@@ -949,6 +956,7 @@ class Tools:
         prev = start
         turned = 0
         reason = ""
+        pending = set()
         for i in range(120):                      # 120 × 3 度 = 一圈
             self._drag(step_px, 0)
             turned += 3
@@ -959,7 +967,9 @@ class Tools:
                 break
             d_step = self.diff(prev, cur)
             words = self._words(cur)
-            new = [w for w in words if is_new(w)]
+            cand = {re.sub(r"[\s,，、.．:：/／|｜%$\-—_~]+", "", w): w for w in words if is_new(w)}
+            new = [cand[k] for k in cand if k in pending]       # 連續兩步都讀到才算新字
+            pending = set(cand.keys())
             if new:
                 reason = "跳出原本沒有的字（UI）：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:5])
                 break
