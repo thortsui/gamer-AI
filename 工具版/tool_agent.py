@@ -123,6 +123,9 @@ def build_system(game, cat):
               "量完**必須驗**：送 驗開工（程式照你的數值轉一圈、上下來回、走退來回，三項都回到原點才算開工完成）；"
               "哪一項 ✗ 就照指示重量再驗。也可以自己算一圈 dx 用 驗一圈(dx) 驗，對了 定刻度(每度dx)。開工沒驗完不要做別的事。"
               "之後每一次 視角／移動 工具的回傳都會附「預期 vs 實測」，對不上就重量；工具出來的結果要跟你腦中的一致才能繼續。" + NL
+            + "【每個行為三件事】（使用者定的）每一輪的「想」要寫清楚 ①做這個行為的原因（因為）②這個行為應該有的結果（結果應該是）；"
+              "下一輪看到新畫面，先在「上一輪實際」寫 ③實際的結果、在「符合」填 true／false。"
+              "**實際跟預期不同就直接開檢討**：同一輪叫 檢討(原因,預期,實際,錯在哪,下次)，不要跳過、不要等。符合才繼續下一步。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
@@ -1091,6 +1094,17 @@ class Tools:
     def flow_give_up(self, 為什麼=""):
         return self._append("放棄.md", f"放棄:{為什麼}")
 
+    # ---- 檢討（2026-10-15 12:1x 使用者：每個行為列 原因／應有的結果／實際結果，實際跟預期不同就直接開檢討）
+    reviews = []
+
+    def flow_review(self, 原因="", 預期="", 實際="", 錯在哪="", 下次=""):
+        if not str(錯在哪).strip() or not str(下次).strip():
+            return "檢討 要寫滿：原因、預期、實際、錯在哪、下次怎麼做（五格）"
+        line = f"原因:{原因}｜預期:{預期}｜實際:{實際}｜錯在哪:{錯在哪}｜下次:{下次}"
+        self.reviews.append(line)
+        self._append("檢討.md", line)
+        return "檢討記下了（之後每輪面板【最近的檢討】會提醒你）：" + line
+
     # ---- 大任務（2026-10-15 使用者：每次導入的只有前面那些加上目前的大任務，執行完再清空接下一個）
     big = None            # {"名稱","成功條件","開始輪"}
     big_queue = []
@@ -1253,6 +1267,9 @@ def main():
     history = []        # 這個大任務期間的輪次摘要（大任務完成就清空）
     tool_returns = ""   # 上一輪工具回傳
     task_round = 0
+    prev = None         # 上一輪的 原因／預期／做了（12:1x 使用者：三件事＋不符就檢討）
+    missed_review = False
+    match_stat = {"符合": 0, "不符": 0, "不符沒檢討": 0}
     for rnd in range(1, args.rounds + 1):
         if os.path.exists(os.path.join(ROOT, "stop.txt")):          # 停止：worktree 根目錄放 stop.txt
             print("[stop.txt] 結束")
@@ -1273,9 +1290,15 @@ def main():
         big = tools.big
         big_txt = (f"「{big['名稱']}」｜成功條件：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
                    if big else "（還沒設。先用 設大任務(名稱,成功條件) 定一個，再做事）")
+        prev_txt = ("原因：" + prev.get("原因", "？") + "｜預期結果：" + prev.get("預期", "？") + "｜做了：" + prev.get("做了", "無")
+                    + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
+        remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
+        reviews_txt = (NL.join("- " + r for r in tools.reviews[-3:]) + NL * 2) if tools.reviews else ""
         panel = ("【開工數值】" + tools.startup_text() + NL
                  + "【目前的大任務】" + big_txt + NL * 2
+                 + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
+                 + (("【最近的檢討】（你自己寫的，照著做）" + NL + reviews_txt) if reviews_txt else "")
                  + "【這個大任務到目前為止】" + NL + (NL.join(history[-6:]) or "（剛開始）") + NL * 2
                  + "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
         content.append({"type": "text", "text": panel})
@@ -1286,11 +1309,24 @@ def main():
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
         o = parse_json_loose(repair_json(raw)) or {}
-        seen, think = str(o.get("看到") or o.get("s") or "")[:60], str(o.get("想") or "")[:200]
+        seen, think = str(o.get("看到") or o.get("s") or "")[:80], str(o.get("想") or "")[:300]
         calls = o.get("用") or o.get("a") or []
         if isinstance(calls, str):
             calls = [calls]
-        print(f"[{rnd}] {dt:.1f}s 看到「{seen}」想「{think}」")
+        actual = str(o.get("上一輪實際") or "")[:80]
+        match = o.get("符合")
+        if isinstance(match, str):
+            match = match.strip().lower() in ("true", "是", "符合", "yes")
+        names_called = [parse_call(x, cat)[0] for x in list(calls)[:3]]
+        if prev is not None and match is not None:
+            if match:
+                match_stat["符合"] += 1
+            else:
+                match_stat["不符"] += 1
+                if "檢討" not in names_called:
+                    match_stat["不符沒檢討"] += 1
+        missed_review = (prev is not None and match is False and "檢討" not in names_called)
+        print(f"[{rnd}] {dt:.1f}s 看到「{seen}」" + (f"上一輪實際「{actual}」符合={match} " if prev else "") + f"想「{think}」")
         rets, did = [], []
         for item in list(calls)[:3]:
             name, params = parse_call(item, cat)
@@ -1302,7 +1338,12 @@ def main():
             rets.append(f"● {name}{'(' + ','.join(str(v) for v in params.values()) + ')' if params else ''} → {r}")
             print(f"   ▶ {name} {params} → {r[:120].replace(NL, ' ')}")
         tool_returns = NL.join(rets)
-        history.append(f"[{rnd}] 看到:{seen}｜想:{think[:80]}｜用:{'、'.join(did) or '無'}")
+        history.append(f"[{rnd}] 看到:{seen}｜想:{think[:80]}｜用:{'、'.join(did) or '無'}"
+                       + (f"｜上一輪實際:{actual}｜符合:{match}" if prev else ""))
+        m_reason = re.search(r"因為[:：]\s*(.*?)(?:｜|\|)", think)
+        m_expect = re.search(r"結果應該是[:：]\s*(.*?)(?:｜|\||$)", think)
+        prev = {"原因": (m_reason.group(1) if m_reason else think[:40]), "預期": (m_expect.group(1) if m_expect else "（你沒寫 結果應該是）"),
+                "做了": "、".join(did) or "無"}
         if tools.clear_flag:                              # 大任務完成：這個任務期間的紀錄全部清空
             tools.clear_flag = False
             history, task_round = [], 0
@@ -1311,7 +1352,8 @@ def main():
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({"時間": datetime.now().strftime("%H:%M:%S"), "輪": rnd, "秒": round(dt, 1),
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
-                                "推理": reason, "截斷": trunc}, ensure_ascii=False) + NL)
+                                "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
+                                "符合統計": dict(match_stat)}, ensure_ascii=False) + NL)
         if not args.image and not live:
             time.sleep(1.0)
 

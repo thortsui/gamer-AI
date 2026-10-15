@@ -158,6 +158,14 @@ def main():
     print(f"大任務：設 {big_set}、完成 {big_done}｜遊戲任務完成：{task_done} 件｜死亡重生：{respawn} 次")
     print(f"失誤：" + ("、".join(f"{k} {v}" for k, v in fails.items()) or "無")
           + f"｜空轉：連三輪同一動作 {idle} 次、同方向連轉 5 次以上 {spin} 次、「看到」連續 5 輪沒變 {stuck_seen} 次")
+    # 12:1x 使用者：原因／預期／實際三件事，不符就檢討 → 預期符合率、不符沒檢討次數、檢討次數
+    ok = sum(1 for r in recs if r.get("符合") is True)
+    no = sum(1 for r in recs if r.get("符合") is False)
+    rev = use.get("檢討", 0)
+    last = next((r for r in reversed(recs) if r.get("符合統計")), None)
+    miss = last["符合統計"].get("不符沒檢討", 0) if last else 0
+    if ok + no:
+        print(f"預期 vs 實際：符合 {ok}、不符 {no}（符合率 {ok / (ok + no) * 100:.0f}%）｜檢討 {rev} 次｜不符卻沒檢討 {miss} 次")
     top = "、".join(f"{k} {v}" for k, v in use.most_common(12))
     print(f"工具使用：{sum(use.values())} 次｜{top}")
     doc = sum(v for k, v in use.items() if k in ("遊戲介紹", "讀文件", "我的記憶", "工具說明", "工具清單"))
