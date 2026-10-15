@@ -120,7 +120,8 @@ def build_system(game, cat):
             + tool_txt + NL * 2
             + "【開工先量，逐一回報】（使用者定的）每次登入／重進／切空間、或畫面大小變了，第一件事送 開工測試：程式逐項量 ①畫面尺寸 ②每度 dx ③每度 dy ④深度比例，"
               "⑤第幾人稱由你看畫面用 回報人稱 回報。五項都有才算開工完成，面板【開工數值】會一直顯示量了沒。"
-              "刻度對不對要**自己驗**：算好一圈要送多少 dx，用 驗一圈(dx) 看有沒有回到原點，對了再 定刻度(每度dx)。"
+              "量完**必須驗**：送 驗開工（程式照你的數值轉一圈、上下來回、走退來回，三項都回到原點才算開工完成）；"
+              "哪一項 ✗ 就照指示重量再驗。也可以自己算一圈 dx 用 驗一圈(dx) 驗，對了 定刻度(每度dx)。開工沒驗完不要做別的事。"
               "之後每一次 視角／移動 工具的回傳都會附「預期 vs 實測」，對不上就重量；工具出來的結果要跟你腦中的一致才能繼續。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
@@ -560,9 +561,52 @@ class Tools:
     def startup_text(self):
         s = self.startup
         if not s:
-            return "還沒量。登入／重進第一件事：開工測試（程式逐項量：①畫面尺寸 ②每度 dx ③每度 dy ④深度比例；⑤人稱你看畫面回報）"
+            return "還沒量。登入／重進第一件事：開工測試（程式逐項量：①畫面尺寸 ②每度 dx ③每度 dy ④深度比例；⑤人稱你看畫面回報；⑥再用 驗開工 確認全部正確）"
+        v = s.get("驗證")
+        v_txt = ("⑥驗證 " + "、".join(f"{k}{'✓' if ok else '✗'}" for k, ok in v.items())
+                 + ("（全過，開工完成）" if all(v.values()) else "（有 ✗：照回傳的指示重量再驗）")) if v else "⑥驗證 還沒驗（用 驗開工；全過才算開工完成）"
         return (f"①畫面 {s.get('畫面', '?')}｜②每度 dx {s.get('每度dx', '?')}｜③每度 dy {s.get('每度dy', '?')}"
-                f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜量於 {s.get('時間', '?')}")
+                f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜{v_txt}｜量於 {s.get('時間', '?')}")
+
+    def cal_verify(self):
+        """驗開工：開場必做（2026-10-15 11:2x 使用者：「這個是他開場必須做的事情，確認他所有的測量都是正確的」）。
+        水平：照目前刻度轉 360 度回不回原點；垂直：抬 30 再低 30 回不回原點；深度：走 1 秒再退 1 秒回不回原點。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能驗開工"
+        res, notes = {}, []
+        # ① 水平一圈
+        r1 = self.cal_loop()
+        res["一圈"] = "**回到原點**" in r1
+        notes.append("水平：" + r1)
+        # ② 垂直來回
+        b = self.grab()
+        self._drag(0, -30 * self.dy_deg)
+        time.sleep(0.3)
+        mid = self.grab()
+        self._drag(0, 30 * self.dy_deg)
+        time.sleep(0.3)
+        a = self.grab()
+        moved, back = self.diff(b, mid), self.diff(b, a)
+        res["上下"] = moved >= 8 and back < 10
+        notes.append(f"垂直：抬 30 度（dy {30 * self.dy_deg:.0f}）畫面變化 {moved:.0f}，再低 30 度回來跟起點差 {back:.0f}"
+                     + ("，回到原點" if res["上下"] else ("，抬頭時畫面沒變＝已頂到上限或刻度太小，先 仰(-20) 回到水平再驗" if moved < 8 else "，沒回到原點：每度 dy 可能不對，重 量刻度")))
+        # ③ 深度來回
+        b = self.grab()
+        self._key("w", 1.0)
+        time.sleep(0.3)
+        mid = self.grab()
+        self._key("s", 1.0)
+        time.sleep(0.3)
+        a = self.grab()
+        moved, back = self.diff(b, mid), self.diff(b, a)
+        res["深度"] = moved >= 8 and back < 15
+        notes.append(f"深度：走 1 秒畫面變化 {moved:.0f}，退 1 秒回來跟起點差 {back:.0f}"
+                     + ("，回到原點" if res["深度"] else ("，走了畫面沒變＝前方被擋，換有空間的地方再驗" if moved < 8 else "，沒回到原點（退路被擋或步距不對），重 量比例")))
+        self.startup["驗證"] = res
+        self._append("開工數值.md", "驗開工：" + "、".join(f"{k}{'✓' if ok else '✗'}" for k, ok in res.items()))
+        print(f"   🧪 驗開工：{self.startup_text()}")
+        return ("驗開工結果：" + "、".join(f"{k} {'✓' if ok else '✗'}" for k, ok in res.items()) + NL + NL.join(notes) + NL
+                + ("三項都過，開工完成。" if all(res.values()) else "有 ✗ 的照上面指示重量，再 驗開工 一次；全過才算開工完成。"))
 
     @staticmethod
     def zoom_factor(a, b):
@@ -619,6 +663,7 @@ class Tools:
         r3 = self.cal_depth()
         self.startup["時間"] = datetime.now().strftime("%H:%M")
         self.startup.pop("人稱", None)
+        self.startup.pop("驗證", None)          # 重量過就要重驗
         line = f"🧪 開工測試：{self.startup_text()}"
         print("   " + line)
         self._append("開工數值.md", self.startup_text())
@@ -626,8 +671,8 @@ class Tools:
                 + f"① 畫面尺寸：{self.startup['畫面']}（{r1}）" + NL
                 + f"② 每度 dx：{self.dx_deg}；③ 每度 dy：{self.dy_deg}（{r2}）" + NL
                 + f"④ 深度比例：{self.startup.get('深度比例', '沒量到')}（{r3}）" + NL
-                + "⑤ 第幾人稱：你看現在的畫面回報——看得到自己背影＝第三人稱，畫面中央有準心＝第一人稱 → 送 回報人稱(第幾人稱)。"
-                  "五項都有了才算開工完成；之後每次視角／移動回傳的實測跟這些對不上就重量")
+                + "⑤ 第幾人稱：你看現在的畫面回報——看得到自己背影＝第三人稱，畫面中央有準心＝第一人稱 → 送 回報人稱(第幾人稱)。" + NL
+                + "⑥ 然後**必須** 驗開工：程式照這些數值轉一圈、上下來回、走退來回，確認全部回到原點；全過才算開工完成，之後才做別的")
 
     def cal_persp(self, 人稱=""):
         v = str(人稱).strip()
