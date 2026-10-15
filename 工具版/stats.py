@@ -130,13 +130,16 @@ def main():
                 spin += 1
         else:
             run = 1
-    # 09:3x 死後倒數結束直接掉到平台頁、沒點「再玩一次」→ 用「看到」裡的「你死了」補算（連續輪只算一次）
-    prev_dead = False
+    # 死亡＝看到「你死了／再玩一次」的輪次，三分鐘內的算同一次（09:4x 核對：全天 9 次，之前靠確認點算只抓到 4 次）
+    respawn = 0
+    last = None
     for r in recs:
-        dead = "你死了" in (r["看到"] or "")
-        if dead and not prev_dead:
-            respawn += 1
-        prev_dead = dead
+        if re.search(r"你死了|再玩一次", r["看到"] or ""):
+            h, m, s = (int(x) for x in r["時間"].split(":"))
+            t = h * 3600 + m * 60 + s
+            if last is None or t - last > 180:
+                respawn += 1
+            last = t
     same, stuck_seen = 1, 0
     for i in range(1, len(recs)):
         if recs[i]["看到"] and recs[i]["看到"] == recs[i - 1]["看到"]:
