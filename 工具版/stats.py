@@ -37,6 +37,15 @@ def main():
     d = os.path.join(ROOT, "專案", a.game, "記憶", "工具版")
     date = a.date or sorted(f for f in os.listdir(d) if f.endswith(".jsonl"))[-1][:-6]
     recs = [json.loads(l) for l in open(os.path.join(d, date + ".jsonl"), encoding="utf-8")]
+    # 10/16 04:3x：「不符沒檢討」原本取最後一筆的程序累計值（重啟歸零、不管 --since）→ 逐筆算增量
+    prev_miss = 0
+    for r in recs:
+        cur = (r.get("符合統計") or {}).get("不符沒檢討")
+        if cur is None:
+            r["_miss"] = 0
+            continue
+        r["_miss"] = cur - prev_miss if cur >= prev_miss else cur   # 變小＝程序重啟、從 0 重算
+        prev_miss = cur
     if a.since:
         recs = [r for r in recs if r["時間"] >= a.since]
     if not recs:
@@ -162,8 +171,7 @@ def main():
     ok = sum(1 for r in recs if r.get("符合") is True)
     no = sum(1 for r in recs if r.get("符合") is False)
     rev = use.get("檢討", 0)
-    last = next((r for r in reversed(recs) if r.get("符合統計")), None)
-    miss = last["符合統計"].get("不符沒檢討", 0) if last else 0
+    miss = sum(r.get("_miss", 0) for r in recs)
     if ok + no:
         print(f"預期 vs 實際：符合 {ok}、不符 {no}（符合率 {ok / (ok + no) * 100:.0f}%）｜檢討 {rev} 次｜不符卻沒檢討 {miss} 次")
     top = "、".join(f"{k} {v}" for k, v in use.most_common(12))
