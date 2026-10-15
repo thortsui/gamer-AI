@@ -97,7 +97,7 @@ def build_system(game, cat):
         gj = {}
     gname = gj.get("全名") or game
     goal = read_text(os.path.join(gdir, "記憶", "任務指示.txt")).strip() or "（使用者還沒交代目標）"
-    limits = ["不准花任何錢：Robux、金幣、購買、解鎖、升級、付費復活、任何「Buy／Purchase／$」按鈕；看到付費視窗只能用 付費視窗 工具關掉"]
+    limits = ["不准花任何錢：Robux、金幣、購買、解鎖、升級、付費復活、任何「Buy／Purchase／$」按鈕；看到付費視窗只能用 關掉 工具關掉"]
     if gj.get("禁止換職業"):
         limits.append("不准換職業：不點「職業」按鈕、不點護士／醫生／實習生那類選項")
     if gj.get("禁止上下轉頭"):
@@ -136,8 +136,43 @@ def build_system(game, cat):
 _ONE = re.compile(r"^\s*([^\s(（]+)\s*(?:[(（]\s*(.*?)\s*[)）])?\s*$")
 
 
+# 隱藏別名（10:5x 精簡後舊名字還能用，不列在清單上）：舊名 → (新名, 參數轉換)
+ALIAS = {
+    "前進": ("走", lambda p: p), "後退": ("退", lambda p: p),
+    "視角右": ("轉", lambda p: {"度": str(num(p.get("度"), 30))}),
+    "視角左": ("轉", lambda p: {"度": str(-num(p.get("度"), 30))}),
+    "視角上": ("仰", lambda p: {"度": str(num(p.get("度"), 15))}),
+    "視角下": ("仰", lambda p: {"度": str(-num(p.get("度"), 15))}),
+    "180度轉頭": ("轉", lambda p: {"度": "180"}),
+    "關掉面板": ("關掉", lambda p: {}), "付費視窗": ("關掉", lambda p: {}),
+    "look": ("轉", lambda p: {"度": str(num(p.get("dx"), 0) / 2.5)}),
+}
+
+
 def parse_call(item, cat):
     """「名稱(參數)」或 dict → (名稱, {參數名: 值})；看不懂回 (None, 原字)。"""
+    name, params = _parse_call(item, cat)
+    if name is not None:
+        return name, params
+    old = ""
+    raw = ""
+    if isinstance(item, dict):
+        old = str(item.get("工具") or item.get("t") or "")
+        p = item.get("參數") or {}
+        raw = ",".join(str(v) for v in (p.values() if isinstance(p, dict) else []))
+    else:
+        m = _ONE.match(str(item))
+        if m:
+            old, raw = m.group(1), (m.group(2) or "")
+    if old in ALIAS:
+        new, conv = ALIAS[old]
+        args = [x.strip() for x in re.split(r"[,，、]", raw)] if raw.strip() else []
+        key = "度" if old.startswith(("視角", "180")) else ("dx" if old == "look" else "秒")
+        return new, conv({key: args[0]} if args else {})
+    return name, params
+
+
+def _parse_call(item, cat):
     byname = {t["名稱"]: t for t in cat["工具"]}
     if isinstance(item, dict):
         name = str(item.get("工具") or item.get("t") or item.get("name") or "")
@@ -330,7 +365,7 @@ class Tools:
             return "離線模式，看四周沒有新畫面"
         shots = []
         for i in range(4):
-            self.look_right(90)
+            self.look_turn(90)
             time.sleep(0.4)
             im = self.grab()
             if im is not None:
@@ -688,28 +723,48 @@ class Tools:
                 f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
                 "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
+    # 2026-10-15 10:5x 使用者：「脫困不要，改成轉 180 單位（按照他計算結果直接輸入）……需要更多簡潔的方式」
+    # → 轉(度) 正右負左、仰(度) 正上負下，他算好直接填；舊名字（視角左／右／上／下、180度轉頭）留作隱藏別名
+    def look_turn(self, 度=""):
+        d = num(度, None)
+        if d is None:
+            return "轉 要給度數：正＝右、負＝左，例如 轉(90)、轉(-30)、轉(180)"
+        d = max(-180, min(180, d))
+        if abs(d) < 3:
+            return "度數太小（<3 度）沒意義"
+        # 11:0x 使用者：「轉幾度要按照他輸入的計算才對」→ 他填幾度就送 幾度×每度dx，不分段、不改值
+        # （底層 _drag 自己會把超過 220 像素的拖曳拆成小段，但總量照他的數字）
+        return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 180, 30)
+
+    def look_pitch(self, 度=""):
+        d = num(度, None)
+        if d is None:
+            return "仰 要給度數：正＝抬頭、負＝低頭，例如 仰(-20)"
+        d = max(-60, min(60, d))
+        if abs(d) < 3:
+            return "度數太小（<3 度）沒意義"
+        return self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15)
+
     def look_left(self, 度=""):
-        return self._look(度, "x", -1, 5, 180, 30)
+        return self.look_turn(-num(度, 30))
 
     def look_right(self, 度=""):
-        return self._look(度, "x", +1, 5, 180, 30)
+        return self.look_turn(num(度, 30))
 
     def look_up(self, 度=""):
-        return self._look(度, "y", -1, 5, 60, 15)
+        return self.look_pitch(num(度, 15))
 
     def look_down(self, 度=""):
-        return self._look(度, "y", +1, 5, 60, 15)
+        return self.look_pitch(-num(度, 15))
 
     def look_180(self):
-        for _ in range(4):
-            self._look(45, "x", +1, 45, 45, 45)
-            time.sleep(0.15)
-        return "轉了 180 度（分四段各 45 度），現在看的是原本的背後；新畫面下一輪給你"
+        return self.look_turn(180)
 
     # ---- 互動
     def key_press(self, 鍵="", 秒=""):
-        k = str(鍵).strip().lower() or "e"
-        return self._move(k, num(秒, 0.15), 0.05, 2.0)
+        """按(鍵)：一下 0.15 秒（10:5x 使用者：「按 為什麼需要秒」→ 秒拿掉；要長就用 長按）。"""
+        k = str(鍵).split(",")[0].split("，")[0].strip().lower() or "e"     # 他寫 按(e,1.5) 也只取鍵名
+        return self._move(k, 0.15, 0.15, 0.15)
 
     def key_hold(self, 鍵="", 秒=""):
         k = str(鍵).strip().lower() or "e"
@@ -780,12 +835,32 @@ class Tools:
         return f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before)
 
     def click_text(self, 字=""):
+        """點字：10:5x 統計 56 次只找到 14 次（找到的全對），42 次是 OCR 讀歪（「亻呆安」「你的況很要」）
+        → 改用主專案 zh_text 的繁簡／形近字模糊比對，回傳附相似度；真的對不對還是靠下一輪放大圖審核。"""
         key = str(字).strip()
         txt = self.see_text()
-        m = re.search(r"「([^」]*" + re.escape(key) + r"[^」]*)」\(([\d.]+),([\d.]+)\)", txt)
-        if not m:
-            return f"畫面上沒有「{key}」。讀到的字：{txt[:200]}"
-        return f"找到「{m.group(1)}」→ " + self.click_xy(m.group(2), m.group(3), 字=m.group(1))
+        items = re.findall(r"「([^」]*)」\(([\d.]+),([\d.]+)\)", txt)
+        if not items:
+            return f"畫面上沒讀到任何字，點不了「{key}」。改用 點(x,y) 或走近一點再讀"
+        texts = [t for t, _, _ in items]
+        hit = None
+        try:
+            import zh_text
+            cands = zh_text.find(key, texts, min_ratio=0.6)
+            if cands:
+                i, ratio, how = cands[0][0], cands[0][1], (cands[0][2] if len(cands[0]) > 2 else "")
+                hit = (items[i], ratio, how)
+        except Exception:  # noqa: BLE001
+            for it in items:
+                if key in it[0]:
+                    hit = (it, 1.0, "包含")
+                    break
+        if not hit:
+            near = "、".join(texts[:12])
+            return f"畫面上沒有像「{key}」的字（相似度都 <0.6）。讀到的字：{near}。對的字在畫面上但讀不出來就用 點(x,y)"
+        (t, x, y), ratio, how = hit
+        return (f"找到「{t}」（跟「{key}」相似度 {ratio:.2f}{'，' + how if how else ''}）→ "
+                + self.click_xy(x, y, 字=t))
 
     def scroll(self, 格=""):
         n = int(num(格, -3))
@@ -806,11 +881,12 @@ class Tools:
         return f"等了 {d:.1f} 秒"
 
     # ---- 意外
+    def fix_close(self):
+        """關掉：面板／選單／付費視窗都是 esc（10:5x 合併 關掉面板＋付費視窗；脫困、迷路、死亡重生拿掉，他自己用 轉／退／點字 組）。"""
+        return self.fix_panel()
+
     def fix_stuck(self):
-        a = self.move_s(0.4)
-        b = self.move_d(0.5)
-        c = self.look_180()
-        return "脫困：" + a + "；" + b + "；" + c
+        return "脫困 已經拿掉：自己組——退(0.4)、轉(180) 看背後、再決定；或 看四周"
 
     def fix_panel(self):
         before = self.grab()

@@ -19,8 +19,8 @@ from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-MOVE = ("前進", "後退", "左移", "右移", "跳")
-LOOK = ("視角左", "視角右", "視角上", "視角下", "180度轉頭")
+MOVE = ("前進", "後退", "走", "退", "左移", "右移", "跳")
+LOOK = ("視角左", "視角右", "視角上", "視角下", "180度轉頭", "轉", "仰")
 
 
 def changed(ret):
