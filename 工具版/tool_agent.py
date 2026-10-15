@@ -443,6 +443,11 @@ class Tools:
         hud = self._fixed_words(words_before, self._words(after))
         hud_txt = ("；轉前轉後都釘在畫面同一位置的字（HUD／面板上的字，不是場景裡的東西，轉頭對不正、要用 點字 或走近）："
                    + "、".join(f"「{w}」({x:.2f},{y:.2f})" for w, (x, y) in hud[:6])) if hud else ""
+        # 10:10 又對著右上 0.90 的「蓋印表格」連轉右 6 次：那個字 OCR 讀不穩，靠字比對抓不到 → 改用純影像：
+        # 整個畫面有轉動、但某幾塊幾乎沒變的區域＝釘在畫面上的 HUD／面板，直接把位置列給他
+        fixed = self._fixed_blocks(before, after) if d >= 8 else []
+        if fixed:
+            hud_txt += "；轉頭時畫面上這幾塊完全沒動（釘在畫面上的 HUD／面板，不是場景）：" + "、".join(f"({x:.2f},{y:.2f})" for x, y in fixed[:6])
         if axis == "x":
             sh = self.shift_x(before, after)
             sh_txt = f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬" if sh is not None else ""
@@ -475,6 +480,34 @@ class Tools:
             except Exception:  # noqa: BLE001
                 continue
         return out
+
+    @staticmethod
+    def _fixed_blocks(a, b, cols=16, rows=9, thr=4.0):
+        """轉頭前後幾乎沒變的區塊中心（0~1）。整張圖有變（呼叫端先檢查）才有意義。"""
+        if a is None or b is None:
+            return []
+        ga = a.convert("L").resize((cols * 20, rows * 20))
+        gb = b.convert("L").resize((cols * 20, rows * 20))
+        pa, pb = ga.tobytes(), gb.tobytes()
+        W = cols * 20
+        out = []
+        textured = 0
+        for r in range(rows):
+            for c in range(cols):
+                tot, vals = 0, []
+                for y in range(r * 20, r * 20 + 20, 2):
+                    base = y * W
+                    for x in range(c * 20, c * 20 + 20, 2):
+                        tot += abs(pa[base + x] - pb[base + x])
+                        vals.append(pa[base + x])
+                mean = sum(vals) / len(vals)
+                texture = sum(abs(v - mean) for v in vals) / len(vals)
+                if texture < 6:                     # 平的牆／地板沒紋理，轉了也看不出變化，不能當 HUD
+                    continue
+                textured += 1
+                if tot / 100 < thr:
+                    out.append(((c + 0.5) / cols, (r + 0.5) / rows))
+        return out if textured and len(out) <= textured * 0.3 else []      # 三成以上有紋理的區塊都沒動＝根本沒轉，不算 HUD
 
     @staticmethod
     def _fixed_words(a, b):
