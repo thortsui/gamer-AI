@@ -1026,6 +1026,8 @@ def main():
     ap.add_argument("--endpoint", default="http://192.168.0.126:8888/v1")
     ap.add_argument("--deadline", type=float, default=90.0)
     ap.add_argument("--max-tokens", type=int, default=900)
+    ap.add_argument("--effort", default="快思推理",
+                    help="推理強度：快思推理（low）／中想（medium）／慢想（xhigh）。2026-10-15 08:0x 使用者：「拉長他能說的字數、思考強度拉高」")
     args = ap.parse_args()
     live = bool(args.live) and not args.image
     from play_agent import stream_json, parse_json_loose, LAST_REASONING
@@ -1035,7 +1037,8 @@ def main():
     model = detect_model(args.endpoint)
     system = build_system(args.game, cat)
     log_path = os.path.join(tools.mdir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-    print(f"[工具版] 遊戲 {args.game}｜大腦 {model}｜{'LIVE 真的按' if live else 'dry-run 只印'}｜system {len(system)} 字｜工具 {len(cat['工具'])} 個")
+    print(f"[工具版] 遊戲 {args.game}｜大腦 {model}｜{'LIVE 真的按' if live else 'dry-run 只印'}｜system {len(system)} 字｜工具 {len(cat['工具'])} 個"
+          f"｜推理 {args.effort}｜max_tokens {args.max_tokens}｜時限 {args.deadline:.0f}s")
     print(f"   紀錄 {log_path}")
 
     history = []        # 這個大任務期間的輪次摘要（大任務完成就清空）
@@ -1069,7 +1072,7 @@ def main():
         content.append({"type": "text", "text": panel})
         t0 = time.time()
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
-                                          time.time() + args.deadline, 0.2, effort="快思推理")
+                                          time.time() + args.deadline, 0.2, effort=args.effort)
         dt = time.time() - t0
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
