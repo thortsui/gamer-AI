@@ -602,9 +602,11 @@ class Tools:
         time.sleep(0.3)
         a = self.grab()
         moved, back = self.diff(b, mid), self.diff(b, a)
-        res["深度"] = moved >= 8 and back < 15
+        # 12:1x 實測：退 1 秒跟起點差 63（第三人稱退走角色會轉身、鏡頭跟著擺），回不到原點是常態 →
+        # 改判「有走出去、退回來有比走出去那一點更接近起點」就算深度可用
+        res["深度"] = moved >= 8 and back < moved * 0.8
         notes.append(f"深度：走 1 秒畫面變化 {moved:.0f}，退 1 秒回來跟起點差 {back:.0f}"
-                     + ("，回到原點" if res["深度"] else ("，走了畫面沒變＝前方被擋，換有空間的地方再驗" if moved < 8 else "，沒回到原點（退路被擋或步距不對），重 量比例")))
+                     + ("，有走出去也退得回來，深度可用" if res["深度"] else ("，走了畫面沒變＝前方被擋，換有空間的地方再驗" if moved < 8 else "，退回來反而離起點更遠（退路被擋），換個地方再驗")))
         self.startup["驗證"] = res
         self._append("開工數值.md", "驗開工：" + "、".join(f"{k}{'✓' if ok else '✗'}" for k, ok in res.items()))
         print(f"   🧪 驗開工：{self.startup_text()}")
@@ -1098,8 +1100,10 @@ class Tools:
     reviews = []
 
     def flow_review(self, 原因="", 預期="", 實際="", 錯在哪="", 下次=""):
-        if not str(錯在哪).strip() or not str(下次).strip():
-            return "檢討 要寫滿：原因、預期、實際、錯在哪、下次怎麼做（五格）"
+        vals = {"原因": 原因, "預期": 預期, "實際": 實際, "錯在哪": 錯在哪, "下次": 下次}
+        bad = [k for k, v in vals.items() if not str(v).strip() or str(v).strip() == k or len(str(v).strip()) < 3]
+        if bad:          # 12:1x 他把五格填成「原因、預期…」字面（跟早上審核照抄一樣）→ 退回
+            return "檢討 要寫真的內容，不能照抄格名：" + "、".join(bad) + " 沒寫。例：檢討(按E想開門,門打開,門沒動,距離太遠E沒亮,先走近看到E提示再按)"
         line = f"原因:{原因}｜預期:{預期}｜實際:{實際}｜錯在哪:{錯在哪}｜下次:{下次}"
         self.reviews.append(line)
         self._append("檢討.md", line)
