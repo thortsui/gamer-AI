@@ -72,7 +72,8 @@ def catalog_lines(cat, 類別=None):
         tag = "" if t["實作"] != "未實作" else "（未實作）"
         if t.get("自訂"):
             tag = "（你自己定義的）"
-        out.append(f"{t['用法']}｜{t['用途']}{tag}")
+        # 12:4x 他會把用法裡的參數名照抄（轉(度)、檢討(原因,預期…)）→ 清單上寫實際範例值，參數說明放工具說明
+        out.append(f"{t.get('例') or t['用法']}｜{t['用途']}{tag}")
     return out
 
 
@@ -116,7 +117,7 @@ def build_system(game, cat):
             + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
             + "使用者給你的目標：" + NL + goal + NL * 2
             + rules + NL * 2
-            + "你有這些工具（格式 用法｜用途）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
+            + "你有這些工具（格式 範例｜用途；括號裡是範例值，**填你自己的數字和內容，不要照抄範例或參數名**）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
             + tool_txt + NL * 2
             + "【開工先量，逐一回報】（使用者定的）每次登入／重進／切空間、或畫面大小變了，第一件事送 開工測試：程式逐項量 ①畫面尺寸 ②每度 dx ③每度 dy ④深度比例，"
               "⑤第幾人稱由你看畫面用 回報人稱 回報。五項都有才算開工完成，面板【開工數值】會一直顯示量了沒。"
@@ -311,7 +312,7 @@ class Tools:
         t = next((t for t in self.cat["工具"] if t["名稱"] == str(名稱).strip()), None)
         if not t:
             return "沒有這個工具。叫 工具清單 看有哪些。"
-        return json.dumps({k: t[k] for k in ("名稱", "用途", "用法", "參數", "回傳")}, ensure_ascii=False)
+        return json.dumps({k: t[k] for k in ("名稱", "用途", "用法", "例", "參數", "回傳") if k in t}, ensure_ascii=False)
 
     def doc_list(self, 類別=""):
         return NL.join(catalog_lines(self.cat, str(類別).strip() or None)) or "沒有這一類"
