@@ -1259,8 +1259,12 @@ class Tools:
         fn = getattr(self, impl, None)
         if fn is None:
             return f"「{name}」的實作 {impl} 找不到"
+        keys = list(t["參數"].keys())
+        kw = {k: v for k, v in params.items() if k in keys}
+        if keys and not kw and params:           # 12:5x 他用英文鍵名 {"labels": "door"}：鍵名對不上就照順序塞
+            kw = {k: v for k, v in zip(keys, params.values())}
         try:
-            return str(fn(**{k: v for k, v in params.items() if k in t["參數"]}))
+            return str(fn(**kw))
         except TypeError:
             return str(fn())
         except Exception as e:  # noqa: BLE001
