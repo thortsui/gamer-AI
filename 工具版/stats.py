@@ -94,7 +94,7 @@ def main():
                 s = re.search(r"移了 (\d+)% 畫面寬", body)
                 if s:
                     shifts.append(int(s.group(1)))
-            elif name in ("按", "長按") and (arg.lower().startswith("e") or not arg):
+            elif name in ("按", "長按") and (re.match(r"e\b", arg.strip().lower()) or not arg):   # 10/16 05:3x：原本 startswith("e") 把 esc 也算成 E
                 c = changed(body)
                 if c is not None:
                     e_ok[1] += 1
@@ -165,6 +165,23 @@ def main():
           + (f"，實測位移平均 {statistics.mean(shifts):.0f}% 畫面寬" if shifts else ""))
     print(f"按 E 有反應率：{rate(e_ok)}｜點擊：" + "、".join(f"{k} {v}" for k, v in click.items()) + (f"，確認後有反應 {rate(click_ok)}" if click_ok[1] else "") if (e_ok[1] or click) else "按 E／點擊：還沒用過")
     print(f"大任務：設 {big_set}、完成 {big_done}｜遊戲任務完成：{task_done} 件｜死亡重生：{respawn} 次")
+    # 10/16 05:3x：遊戲自己的進度（輪班數、錢）從「看到」字面抓；多人伺服器，不全是他做的
+    shifts_seen, money_seen = [], []
+    for r in recs:
+        sv = r.get("看到") or ""
+        m1 = re.search(r"輪班\s*(\d+)", sv)
+        m2 = re.search(r"\$\s*([\d,]+)", sv)
+        if m1:
+            shifts_seen.append(int(m1.group(1)))
+        if m1 and m2:                                  # 有「輪班」＝局內；大廳的金幣不算
+            try:
+                money_seen.append(int(m2.group(1).replace(",", "")))
+            except ValueError:
+                pass
+    if shifts_seen or money_seen:
+        print("遊戲進度（看到欄字面）："
+              + (f"輪班 {shifts_seen[0]}→{shifts_seen[-1]}（最高 {max(shifts_seen)}）" if shifts_seen else "輪班 沒看到")
+              + (f"、局內錢 ${money_seen[0]}→${money_seen[-1]}（最高 ${max(money_seen)}）" if money_seen else ""))
     print(f"失誤：" + ("、".join(f"{k} {v}" for k, v in fails.items()) or "無")
           + f"｜空轉：連三輪同一動作 {idle} 次、同方向連轉 5 次以上 {spin} 次、「看到」連續 5 輪沒變 {stuck_seen} 次")
     # 12:1x 使用者：原因／預期／實際三件事，不符就檢討 → 預期符合率、不符沒檢討次數、檢討次數
