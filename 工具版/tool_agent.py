@@ -296,7 +296,13 @@ class Tools(ExtraTools):
             return "（離線模式，畫面不會變）"
         after = self.grab()
         d = self.diff(before, after)
-        return f"畫面變化 {d:.0f}" + ("（沒變＝可能被擋）" if d < 2 else "")
+        if d < 2 and self.live:
+            # 10/16 03:0x：死亡面板點「再玩一次」立刻量 1、下一輪已在大廳 → 介面換頁要幾秒，沒變就等 1.2 秒再量一次
+            time.sleep(1.2)
+            d2 = self.diff(before, self.grab())
+            if d2 >= 2:
+                return f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢）"
+        return f"畫面變化 {d:.0f}" + ("（沒變＝可能被擋；等 1.2 秒再看也沒變）" if d < 2 and self.live else "（沒變＝可能被擋）" if d < 2 else "")
 
     # ---- 文件類
     def doc_game(self, 遊戲名=""):
