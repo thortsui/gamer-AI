@@ -133,7 +133,7 @@ def build_system(game, cat):
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
               "定義完它就在清單裡、下一輪就能叫。" + NL * 2
             + "每一輪只輸出一個 JSON：" + cat["輸出格式"] + NL
-            + "「用」最多 3 個，照順序做；字串「名稱(參數)」或 {\"工具\":\"名稱\",\"參數\":{...}} 都可以。"
+            + "「用」一輪最多 5 個小動作，照順序做（12:3x 使用者：一輪排四到五個小動作加速）；字串「名稱(參數)」或 {\"工具\":\"名稱\",\"參數\":{...}} 都可以。"
               "不知道怎麼做就先叫文件類工具看一眼，再動。")
 
 
@@ -385,6 +385,18 @@ class Tools:
         time.sleep(d)
         pydirectinput.keyUp(k)
 
+    def depth_k(self):
+        """走 1 秒畫面中央放大幾倍（開工測試／量比例量的）；沒有就讀校準檔；都沒有回 None。"""
+        s = str(self.startup.get("深度比例", ""))
+        m = re.search(r"放大([\d.]+)倍", s)
+        if m:
+            return float(m.group(1))
+        try:
+            cal = json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8"))
+            return float(cal.get("深度", {}).get("走1秒放大倍數") or 0) or None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _move(self, k, d, lo, hi):
         d = max(lo, min(hi, d))
         before = self.grab()
@@ -392,7 +404,52 @@ class Tools:
             self._key(k, d)
         else:
             print(f"   [dry-run] 按 {k} {d:.1f}s")
+        if k in ("w", "s") and self.live and not self.image_path:
+            # 12:3x 使用者：「深度確認也要（計算相對距離來更好走路）」→ 走／退 回傳實測中央放大倍數，對照深度比例的預期
+            time.sleep(0.25)
+            after = self.grab()
+            dd = self.diff(before, after)
+            z = self.zoom_factor(before, after) if k == "w" else None
+            kk = self.depth_k()
+            exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
+            z_txt = f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else ""
+            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + z_txt
         return f"按 {k} {d:.1f} 秒；" + self._changed(before)
+
+    def see_dist(self, 標籤=""):
+        """估距：用 YOLO 框高＋深度比例算「再走幾秒到面前」（目標框高到 0.5 算到面前）。"""
+        labels = [x.strip() for x in re.split(r"[,，、]", str(標籤)) if x.strip()]
+        if not labels:
+            return "要給英文標籤，例如 估距(door)"
+        im = self.grab()
+        if im is None:
+            return "抓不到畫面"
+        try:
+            if self._eyes is None:
+                from local_vision import Eyes
+                self._eyes = Eyes()
+                self._eyes.load()
+            self._eyes.watch(labels)
+            dets = self._eyes._detect(im, labels)
+        except Exception as e:  # noqa: BLE001
+            return f"眼睛不可用：{e}"
+        if not dets:
+            return "沒框到：" + "、".join(labels) + "；先 轉 找到它再估"
+        kk = self.depth_k()
+        out = []
+        import math
+        for lab, ds in dets.items():
+            d0 = ds[0]
+            h = max(d0["h"], 0.01)
+            side = "正中央" if abs(d0["cx"] - 0.5) < 0.08 else ("偏左" if d0["cx"] < 0.5 else "偏右") + f"{abs(d0['cx'] - 0.5) * 100:.0f}%"
+            if h >= 0.5:
+                out.append(f"{lab}：框高 {h:.2f}，已經在面前（{side}）")
+            elif kk and kk > 1.05:
+                secs = math.log(0.5 / h) / math.log(kk)
+                out.append(f"{lab}：框高 {h:.2f}、{side}；照深度比例每秒 {kk} 倍，約再走 {secs:.1f} 秒到面前（先對正、分兩次走、中間看一眼）")
+            else:
+                out.append(f"{lab}：框高 {h:.2f}、{side}；深度比例還沒量（量比例），只能用框高估：越小越遠")
+        return "；".join(out)
 
     def move_w(self, 秒=""):
         return self._move("w", num(秒, 0.5), 0.2, 2.0)
@@ -1321,7 +1378,7 @@ def main():
         match = o.get("符合")
         if isinstance(match, str):
             match = match.strip().lower() in ("true", "是", "符合", "yes")
-        names_called = [parse_call(x, cat)[0] for x in list(calls)[:3]]
+        names_called = [parse_call(x, cat)[0] for x in list(calls)[:5]]
         if prev is not None and match is not None:
             if match:
                 match_stat["符合"] += 1
@@ -1332,7 +1389,7 @@ def main():
         missed_review = (prev is not None and match is False and "檢討" not in names_called)
         print(f"[{rnd}] {dt:.1f}s 看到「{seen}」" + (f"上一輪實際「{actual}」符合={match} " if prev else "") + f"想「{think}」")
         rets, did = [], []
-        for item in list(calls)[:3]:
+        for item in list(calls)[:5]:
             name, params = parse_call(item, cat)
             if not name:
                 rets.append(f"✗ 看不懂「{params}」（工具名要照清單）")
