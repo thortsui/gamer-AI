@@ -527,15 +527,15 @@ class Tools(ExtraTools):
         return self._move("space", 0.1, 0.1, 0.1)
 
     # ---- 視角
-    def _drag(self, dx, dy):
-        """壓右鍵拖曳（跟舊版同一套）；一次最多 220 像素，分段。"""
+    def _drag(self, dx, dy, fy=0.5):
+        """壓右鍵拖曳（跟舊版同一套）；一次最多 220 像素，分段。fy＝從畫面多高的地方開始拖（0.5＝正中央）。"""
         import pydirectinput
         if not self.live:
             print(f"   [dry-run] 轉視角 dx {dx:.0f} dy {dy:.0f}")
             return
         bbox = self.win.client_bbox() if self.win else None
         cx = (bbox["left"] + bbox["width"] // 2) if bbox else 960
-        cy = (bbox["top"] + bbox["height"] // 2) if bbox else 500
+        cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
         rest_x, rest_y = int(dx), int(dy)
         while rest_x or rest_y:
             sx = max(-220, min(220, rest_x))
@@ -597,6 +597,17 @@ class Tools(ExtraTools):
         time.sleep(0.25)
         after = self.grab()
         d = self.diff(before, after)
+        retry_note = ""
+        if d < 3:
+            # 10/16 19:0x：中央剛好有 E 提示（註冊／蓋印表格）時，從中央壓右鍵會按在提示上、鏡頭不轉（變化 0～4、位移 0%）
+            # → 幾乎沒轉就改從畫面上方 25% 的地方重拖一次（第一次沒轉，重拖不會轉兩倍）
+            self._drag(px if axis == "x" else 0, px if axis == "y" else 0, fy=0.25)
+            time.sleep(0.25)
+            after2 = self.grab()
+            d2 = self.diff(before, after2)
+            retry_note = (f"（第一次從畫面中央拖，畫面變化 {d:.0f} 幾乎沒轉——中央可能有提示擋住；改從畫面上方重拖一次，"
+                          + ("這次轉了）" if d2 >= 3 else "還是沒轉）"))
+            after, d = after2, d2
         hud = self._fixed_words(words_before, self._words(after))
         hud_txt = ("；轉前轉後都釘在畫面同一位置的字（HUD／面板上的字，不是場景裡的東西，轉頭對不正、要用 點字 或走近）："
                    + "、".join(f"「{w}」({x:.2f},{y:.2f})" for w, (x, y) in hud[:6])) if hud else ""
@@ -620,9 +631,9 @@ class Tools(ExtraTools):
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
                     pass
-            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{hud_txt}。"
+            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{retry_note}{hud_txt}。"
                     "跟你腦中的對不上就 量刻度 重量")
-        return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}"
+        return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + "。對不上就 量刻度 重量")
 
     def _words(self, im):
