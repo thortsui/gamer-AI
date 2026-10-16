@@ -991,19 +991,8 @@ class Tools(ExtraTools):
             return "度數太小（<3 度）沒意義"
         return self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15)
 
-    def look_slow(self, 方向=""):
-        """慢慢轉（2026-10-15 18:0x 使用者）：一次 3 度慢慢轉，直到跳出 UI（畫面上出現原本沒有的字，例如 E 提示）
-        或畫面有比較大的變動（由本機視覺判斷：OCR 新字＋前後幀差異），最多轉一圈。"""
-        d = str(方向).strip().lower()
-        sign = -1 if d in ("左", "l", "left", "-") else (1 if d in ("右", "r", "right", "+", "") else None)
-        if sign is None:
-            return "慢慢轉 要給方向：左 或 右，例如 慢慢轉(右)"
-        if self.image_path or not self.live:
-            return f"[dry-run] 會往{'右' if sign > 0 else '左'}每次 3 度慢慢轉，直到出現新字或畫面大變"
-        step_px = 3 * self.dx_deg * sign
-        start = self.grab()
-        if start is None:
-            return "抓不到畫面"
+    def _new_word_checker(self, start):
+        """慢慢轉／走到有變化 共用：起點的字＋這段對話讀過的字當基準，回傳判斷「這個字是不是新出現的 UI」的函式。"""
         # 起點讀兩次當基準（OCR 對 HUD 的讀法會抖：「蓋印表格」→「/ 、印表」、理智數字每秒變、「$ 20」空格不同）
         base_words = set(self._words(start).keys())
         time.sleep(0.15)
@@ -1032,6 +1021,23 @@ class Tools(ExtraTools):
                     if n in b or b in n:
                         return False
             return True
+
+        return is_new
+
+    def look_slow(self, 方向=""):
+        """慢慢轉（2026-10-15 18:0x 使用者）：一次 3 度慢慢轉，直到跳出 UI（畫面上出現原本沒有的字，例如 E 提示）
+        或畫面有比較大的變動（由本機視覺判斷：OCR 新字＋前後幀差異），最多轉一圈。"""
+        d = str(方向).strip().lower()
+        sign = -1 if d in ("左", "l", "left", "-") else (1 if d in ("右", "r", "right", "+", "") else None)
+        if sign is None:
+            return "慢慢轉 要給方向：左 或 右，例如 慢慢轉(右)"
+        if self.image_path or not self.live:
+            return f"[dry-run] 會往{'右' if sign > 0 else '左'}每次 3 度慢慢轉，直到出現新字或畫面大變"
+        step_px = 3 * self.dx_deg * sign
+        start = self.grab()
+        if start is None:
+            return "抓不到畫面"
+        is_new = self._new_word_checker(start)
 
         prev = start
         turned = 0
@@ -1062,6 +1068,63 @@ class Tools(ExtraTools):
         self._append("刻度樣本.md", f"慢慢轉{'右' if sign > 0 else '左'} {turned} 度｜停：{reason[:60]}")
         return (f"慢慢轉{'右' if sign > 0 else '左'}：轉了 {turned} 度（每次 3 度）後停下，原因：{reason}。"
                 "現在的畫面下一輪給你；要繼續就再叫一次")
+
+    def walk_until(self, 方向="", 秒上限=""):
+        """走到畫面有變化（2026-10-16 10:4x 使用者）：按著方向鍵一直走，直到畫面突然大變（例如跳出 UI／E 提示）才放開。
+        停的條件：①出現原本沒有的字（連續兩次讀到）②這一瞬間的變化遠大於走路平常的變化 ③連續幾次畫面不動＝被擋 ④到秒上限。"""
+        d = str(方向).strip().lower()
+        keymap = {"": "w", "前": "w", "w": "w", "往前": "w", "後": "s", "s": "s", "退": "s",
+                  "左": "a", "a": "a", "右": "d", "d": "d"}
+        k = keymap.get(d)
+        if k is None:
+            return "走到有變化 的方向要寫：前、後、左、右（不寫＝前），例如 走到有變化(前)"
+        name = {"w": "前", "s": "後", "a": "左", "d": "右"}[k]
+        limit = max(1.0, min(10.0, num(秒上限, 5.0)))
+        if self.image_path or not self.live:
+            return f"[dry-run] 會按著 {k} 往{name}走，最多 {limit:.0f} 秒，畫面突然大變／出現新字／被擋就停"
+        start = self.grab()
+        if start is None:
+            return "抓不到畫面"
+        is_new = self._new_word_checker(start)
+        import pydirectinput
+        prev, diffs, pending, reason = start, [], set(), ""
+        t0 = time.time()
+        pydirectinput.keyDown(k)
+        try:
+            while True:
+                time.sleep(0.12)
+                el = time.time() - t0
+                cur = self.grab()
+                if cur is None:
+                    reason = "抓不到畫面"
+                    break
+                dd = self.diff(prev, cur)
+                diffs.append(dd)
+                prev = cur
+                if el > 0.5 and len(diffs) >= 4:
+                    base = sorted(diffs[:-1])[len(diffs[:-1]) // 2]          # 走路平常的變化（中位數）
+                    if dd >= max(35.0, base * 2.5 + 10):
+                        reason = f"畫面突然大變（這一下變化 {dd:.0f}，走路平常約 {base:.0f}）"
+                        break
+                    if all(x < 2 for x in diffs[-4:]):
+                        reason = "連續幾次畫面都不動＝前面被擋"
+                        break
+                words = self._words(cur)
+                cand = {re.sub(r"[\s,，、.．:：/／|｜%$\-—_~]+", "", w): w for w in words if is_new(w)}
+                new = [cand[x] for x in cand if x in pending]
+                pending = set(cand.keys())
+                if new:
+                    reason = "跳出原本沒有的字（UI）：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:5])
+                    break
+                if time.time() - t0 >= limit:
+                    reason = f"走滿 {limit:.0f} 秒沒有大變化、沒有新字"
+                    break
+        finally:
+            pydirectinput.keyUp(k)
+        el = time.time() - t0
+        total = self.diff(start, self.grab())
+        return (f"走到有變化：按著 {k} 往{name}走了 {el:.1f} 秒後放開，原因：{reason}。"
+                f"起點到現在畫面變化 {total:.0f}。現在的畫面下一輪給你；要繼續就再叫一次")
 
     def look_left(self, 度=""):
         return self.look_turn(-num(度, 30))
