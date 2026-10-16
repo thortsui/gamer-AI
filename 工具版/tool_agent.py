@@ -586,6 +586,35 @@ class Tools(ExtraTools):
                 best, best_s = v, s
         return best_s / W          # 景物往左移＝負（右轉鏡頭）
 
+    @staticmethod
+    def shift_x_moving(a, b):
+        """只拿轉頭前後有變的像素量水平位移（扣掉釘在畫面上的東西）；回傳 (比例, 用到的像素比例) 或 None。
+        10/17 03:0x：他手上拿拍立得照片時照片蓋在畫面中央，整欄加總的 shift_x 被釘著的照片拉到 0%，
+        畫面變化 26～36 卻連報 8 次「位移 0%」，他以為游標鎖住。"""
+        if a is None or b is None:
+            return None
+        W, H = 160, 90
+        pa = a.convert("L").resize((W, H)).tobytes()
+        pb = b.convert("L").resize((W, H)).tobytes()
+        rows = range(0, H, 3)
+        moving = {(y, x) for y in rows for x in range(W) if abs(pa[y * W + x] - pb[y * W + x]) >= 6}
+        if len(moving) < len(rows) * W * 0.15:
+            return None
+        best, best_s = None, 0
+        for s in range(-72, 73):
+            tot = n = 0
+            for (y, x) in moving:
+                xx = x + s
+                if 0 <= xx < W and (y, xx) in moving:
+                    tot += abs(pa[y * W + x] - pb[y * W + xx])
+                    n += 1
+            if n < 300:
+                continue
+            v = tot / n
+            if best is None or v < best:
+                best, best_s = v, s
+        return (best_s / W, len(moving) / (len(rows) * W)) if best is not None else None
+
     def _look(self, deg, axis, sign, lo, hi, default):
         deg = max(lo, min(hi, num(deg, default)))
         px = deg * (self.dx_deg if axis == "x" else self.dy_deg) * sign
@@ -618,6 +647,13 @@ class Tools(ExtraTools):
             hud_txt += "；轉頭時畫面上這幾塊完全沒動（釘在畫面上的 HUD／面板，不是場景）：" + "、".join(f"({x:.2f},{y:.2f})" for x, y in fixed[:6])
         if axis == "x":
             sh = self.shift_x(before, after)
+            pinned_note = ""
+            if sh is not None and abs(sh) < 0.03 and d >= 15:
+                mv = self.shift_x_moving(before, after)
+                if mv and abs(mv[0]) >= 0.03:
+                    sh = mv[0]
+                    pinned_note = (f"（整張比對被畫面上釘著不動的東西拉成 0%——像手上拿的東西或面板；"
+                                   f"只看有變的 {mv[1] * 100:.0f}% 畫面重量）")
             # 10/16 07:0x：10/15～16 回測：|dx|>130（約 50 度以上）方向對 81、相反 70、卡搜尋上限(≥45%) 95 → 前後畫面沒重疊、量不出來
             unmeasurable = sh is not None and (abs(px) > 130 or abs(sh) >= 0.45)
             if unmeasurable:
@@ -626,7 +662,7 @@ class Tools(ExtraTools):
             else:
                 # 10/16 03:3x：他一直把「景物往左移」讀成「鏡頭往左轉」寫進檢討（刻度反）→ 量測後面標鏡頭實際轉向
                 sh_txt = (f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬"
-                          + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) if sh is not None else ""
+                          + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) + pinned_note if sh is not None else ""
                 try:
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
