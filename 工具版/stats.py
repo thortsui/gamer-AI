@@ -142,15 +142,30 @@ def main():
         else:
             run = 1
     # 死亡＝看到「你死了／再玩一次」的輪次，三分鐘內的算同一次（09:4x 核對：全天 9 次，之前靠確認點算只抓到 4 次）
+    # 10/16 14:3x：14:09 理智 1%→14:11 直接回大廳、沒看到死亡面板 → 漏算。加：局內（看到有「輪班」）下一筆變大廳、
+    # 最後看到的理智 ≤5% 也算死亡（跟面板三分鐘內的算同一次）
     respawn = 0
     last = None
+    sanity, in_game = None, False
     for r in recs:
-        if re.search(r"你死了|再玩一次", r["看到"] or ""):
-            h, m, s = (int(x) for x in r["時間"].split(":"))
-            t = h * 3600 + m * 60 + s
+        sv = r["看到"] or ""
+        h, m, s_ = (int(x) for x in r["時間"].split(":"))
+        t = h * 3600 + m * 60 + s_
+        died = bool(re.search(r"你死了|再玩一次", sv))
+        lobby = ("大廳" in sv or "ANIMAL" in sv.upper()) and "輪班" not in sv
+        if not died and in_game and lobby and sanity is not None and sanity <= 5:
+            died = True
+        if died:
             if last is None or t - last > 180:
                 respawn += 1
             last = t
+        ms = re.search(r"(?:理智\s*(\d+)\s*%|(\d+)\s*%\s*[/、]?\s*\$|左下(?:理智)?\s*(\d+)\s*%)", sv)
+        if ms:
+            sanity = int(next(g for g in ms.groups() if g))
+        if "輪班" in sv:
+            in_game = True
+        elif lobby:
+            in_game, sanity = False, None
     same, stuck_seen = 1, 0
     for i in range(1, len(recs)):
         if recs[i]["看到"] and recs[i]["看到"] == recs[i - 1]["看到"]:
