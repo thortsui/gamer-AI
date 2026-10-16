@@ -291,18 +291,33 @@ class Tools(ExtraTools):
         pa, pb = ga.tobytes(), gb.tobytes()
         return sum(abs(x - y) for x, y in zip(pa, pb)) / len(pa)
 
-    def _changed(self, before):
+    def _grab_noise(self):
+        """10/16 08:0x：第三人稱場景本來就在動（角色、動物），按 E 前後變化 4～19 但畫面沒換 → 先隔 0.2 秒拍兩張量背景。"""
+        b1 = self.grab()
+        if self.image_path or not self.live:
+            return b1, 0.0
+        time.sleep(0.2)
+        b2 = self.grab()
+        return b2, self.diff(b1, b2)
+
+    def _changed(self, before, noise=None):
         if self.image_path:
             return "（離線模式，畫面不會變）"
+        th = 2.0 if noise is None else max(2.0, noise * 2 + 4)
+        bg = "" if noise is None else f"；沒按時 0.2 秒內背景本來就動 {noise:.0f}"
         after = self.grab()
         d = self.diff(before, after)
-        if d < 2 and self.live:
+        if d < th and self.live:
             # 10/16 03:0x：死亡面板點「再玩一次」立刻量 1、下一輪已在大廳 → 介面換頁要幾秒，沒變就等 1.2 秒再量一次
             time.sleep(1.2)
             d2 = self.diff(before, self.grab())
-            if d2 >= 2:
-                return f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢）"
-        return f"畫面變化 {d:.0f}" + ("（沒變＝可能被擋；等 1.2 秒再看也沒變）" if d < 2 and self.live else "（沒變＝可能被擋）" if d < 2 else "")
+            if d2 >= th and d2 >= d + 3:
+                return f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢{bg}）"
+        if d < 2:
+            return f"畫面變化 {d:.0f}" + ("（沒變＝可能被擋；等 1.2 秒再看也沒變）" if self.live else "（沒變＝可能被擋）")
+        if d < th:
+            return f"畫面變化 {d:.0f}（跟背景差不多＝看不出有反應{bg}；等 1.2 秒再看也一樣）"
+        return f"畫面變化 {d:.0f}" + (f"（比背景大{bg}）" if noise is not None else "")
 
     # ---- 文件類
     def doc_game(self, 遊戲名=""):
@@ -439,7 +454,11 @@ class Tools(ExtraTools):
 
     def _move(self, k, d, lo, hi):
         d = max(lo, min(hi, d))
-        before = self.grab()
+        noise = None
+        if k in ("w", "s", "a", "d", "space"):
+            before = self.grab()
+        else:
+            before, noise = self._grab_noise()
         if self.live:
             self._key(k, d)
         else:
@@ -454,7 +473,7 @@ class Tools(ExtraTools):
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else ""
             return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + z_txt
-        return f"按 {k} {d:.1f} 秒；" + self._changed(before)
+        return f"按 {k} {d:.1f} 秒；" + self._changed(before, noise)
 
     def see_dist(self, 標籤=""):
         """估距：用 YOLO 框高＋深度比例算「再走幾秒到面前」（目標框高到 0.5 算到面前）。"""
@@ -1108,7 +1127,7 @@ class Tools(ExtraTools):
         return "取消了預約的點擊"
 
     def _do_click(self, fx, fy):
-        before = self.grab()
+        before, noise = self._grab_noise()
         if self.live:
             import pydirectinput
             bbox = self.win.client_bbox() if self.win else None
@@ -1121,7 +1140,7 @@ class Tools(ExtraTools):
             pydirectinput.mouseUp()
         else:
             print(f"   [dry-run] 點 ({fx:.2f},{fy:.2f})")
-        return f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before)
+        return f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before, noise)
 
     def click_text(self, 字=""):
         """點字：10:5x 統計 56 次只找到 14 次（找到的全對），42 次是 OCR 讀歪（「亻呆安」「你的況很要」）

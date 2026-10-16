@@ -25,6 +25,8 @@ LOOK = ("視角左", "視角右", "視角上", "視角下", "180度轉頭", "轉
 
 def changed(ret):
     m = re.search(r"畫面變化 (\d+)", ret)
+    if m and "跟背景差不多" in ret:          # 10/16 08:0x：比背景大才算有反應
+        return False
     return (int(m.group(1)) >= 2) if m else None
 
 
