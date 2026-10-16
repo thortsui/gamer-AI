@@ -471,7 +471,8 @@ class Tools(ExtraTools):
             z = self.zoom_factor(before, after) if k == "w" else None
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
-            z_txt = f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else ""
+            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else
+                     "；中央放大量不出來（角色擋在畫面中央、鏡頭跟著走，這次不算距離）" if (k == "w" and dd >= 2) else "")
             return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + z_txt
         return f"按 {k} {d:.1f} 秒；" + self._changed(before, noise)
 
@@ -750,15 +751,21 @@ class Tools(ExtraTools):
         gb = b.convert("L").resize((320, 180))
         W, H = 320, 180
         pb = gb.crop((80, 45, 240, 135)).tobytes()
-        best, best_k = None, 1.0
+        best, best_k, v1 = None, 1.0, None
         for k10 in range(10, 21):
             k = k10 / 10.0
             w, h = 160 / k, 90 / k
             box = (int(160 - w / 2), int(90 - h / 2), int(160 + w / 2), int(90 + h / 2))
             pa = ga.crop(box).resize((160, 90), Image.BILINEAR).tobytes()
             v = sum(abs(x - y) for x, y in zip(pa, pb)) / len(pb)
+            if k10 == 10:
+                v1 = v
             if best is None or v < best:
                 best, best_k = v, k
+        # 10/16 09:0x：今天 232 次走路，結果擠在 1.0（86）和 2.0（56）兩端、走 0.5 秒和 1.5 秒分佈一樣＝量不出來
+        # （第三人稱角色擋在中央、鏡頭跟著走）→ 卡在搜尋兩端、或比「不放大」好不到 8% 就回 None
+        if best_k in (1.0, 2.0) or v1 is None or (v1 - best) < 0.08 * v1:
+            return None
         return best_k
 
     def cal_depth(self):
@@ -772,6 +779,9 @@ class Tools(ExtraTools):
         if d < 2:
             return "走 1 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
         k = self.zoom_factor(before, after)
+        if k is None:
+            return (f"走 1 秒畫面變化 {d:.0f}，但中央放大量不出來（角色擋在畫面中央、鏡頭跟著走），這次不算，校準檔沒改；"
+                    "深度比例目前量不準，估距離用 找東西／估距 的框高")
         if k <= 1.05 or d < 15:
             # 10/16 03:1x：貼牆走畫面變化 6～7、放大 1.0～1.1 倍也被寫進校準檔 → 這種不算量到
             return (f"走 1 秒中央只放大 {k:.2f} 倍、畫面變化 {d:.0f}＝幾乎沒往前（貼牆／被擋／原地），這次不算，校準檔沒改；"
