@@ -159,6 +159,8 @@ def main():
             if last is None or t - last > 180:
                 respawn += 1
             last = t
+            in_game, sanity = False, None       # 看到面板＝這局結束；之後回大廳不再另算一次
+            continue
         ms = re.search(r"(?:理智\s*(\d+)\s*%|(\d+)\s*%\s*[/、]?\s*\$|左下(?:理智)?\s*(\d+)\s*%)", sv)
         if ms:
             sanity = int(next(g for g in ms.groups() if g))
