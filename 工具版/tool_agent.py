@@ -843,27 +843,39 @@ class Tools(ExtraTools):
         total = int(round(total))
         if not (200 <= abs(total) <= 3000):
             return f"dx {total} 不合理（一圈通常 500～1500）"
-        start = self.grab()
-        if start is None:
+        start0 = self.grab()
+        if start0 is None:
             return "抓不到畫面"
+        # 10/16 13:0x：大廳裡 8 次驗一圈，畫面差 40～69、位移卡在 ±47% 上限也照給「調大／調小」，最後一次差 50、位移 4% 被判「回到原點」
+        # → 他把刻度從 2.5 改成 5.25。改：先量背景（沒轉時 0.4 秒內本來就動多少），差要在背景範圍內＋位移 <4% 才算回到原點
+        time.sleep(0.4)
+        start = self.grab() or start0
+        noise = self.diff(start0, start)
         self._drag(total, 0)
         time.sleep(0.4)
         end = self.grab()
         d = self.diff(start, end)
         sh = self.shift_x(start, end)
-        # 11:3x 實測：轉一圈後位移 +1% 但整張差 23（場上有別的玩家在動）被判 ✗ → 只看水平位移，差異值只當參考
-        back = sh is not None and abs(sh) < 0.04
+        tol = max(10.0, noise * 2 + 6)
+        same_view = d <= tol
+        back = same_view and sh is not None and abs(sh) < 0.04
         implied = round(abs(total) / 360.0, 2)
-        if sh is not None and abs(sh) >= 0.04:
+        if back:
+            hint = "終點畫面跟起點幾乎重合"
+        elif sh is None or abs(sh) < 0.04:
+            hint = (f"畫面差 {d:.0f} 遠大於背景（沒轉時本來就動 {noise:.0f}），位移卻量不出偏移＝前後不是同一個畫面、差很多，"
+                    "這次看不出該調大還是調小；用 量刻度 重量")
+        elif abs(sh) >= 0.30:
+            hint = (f"終點偏了 {abs(sh) * 100:.0f}% 畫面寬以上，前後幾乎沒重疊，量不準偏多少和往哪邊；"
+                    "這次看不出該調大還是調小，用 量刻度 重量比一直猜快")
+        else:
             hint = (f"終點畫面比起點{'偏左' if sh < 0 else '偏右'} {abs(sh) * 100:.0f}% 畫面寬＝轉{'過頭' if sh < 0 else '不夠'}；"
                     f"你填的每度 dx {implied} 要{'調小' if sh < 0 else '調大'}一點再驗")
-        else:
-            hint = "終點畫面跟起點幾乎重合"
         try:
             self._append("刻度樣本.md", f"驗一圈 dx {total}（{src}）｜跟起點差 {d:.0f}｜位移 {(sh or 0) * 100:+.0f}%｜{'回到原點' if back else '沒回到原點'}")
         except Exception:  # noqa: BLE001
             pass
-        return (f"驗一圈：送了 dx {total}（{src}，等於每度 {implied}）→ 跟起點畫面差 {d:.0f}、位移 {(sh or 0) * 100:+.0f}% 畫面寬 → "
+        return (f"驗一圈：送了 dx {total}（{src}，等於每度 {implied}）→ 跟起點畫面差 {d:.0f}（背景本來就動 {noise:.0f}）、位移 {(sh or 0) * 100:+.0f}% 畫面寬 → "
                 + ("**回到原點**，刻度對" if back else "**沒回到原點**；" + hint)
                 + "。確定對了就用 定刻度(每度dx) 寫進校準檔")
 
@@ -877,7 +889,10 @@ class Tools(ExtraTools):
             cal = json.load(open(p, encoding="utf-8"))
         except Exception:  # noqa: BLE001
             cal = {}
+        measured = (cal.get("水平") or {}).get("量測每度dx")        # 10/16 13:1x：手動定的不蓋掉量刻度量到的值（1.8 倍規則拿它比）
         cal["水平"] = {"一圈dx": int(round(v * 360)), "每度dx": self.dx_deg, "方法": "他自己驗一圈後定的", "時間": datetime.now().strftime("%m/%d %H:%M")}
+        if measured:
+            cal["水平"]["量測每度dx"] = measured
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
         self.startup["每度dx"] = self.dx_deg
@@ -946,8 +961,17 @@ class Tools(ExtraTools):
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
         note = ""
         old_dx, old_dy = self.dx_deg, self.dy_deg
-        if old_dx and not (1 / 1.8 <= dx_deg / old_dx <= 1.8):
-            note += f"水平量到每度 {dx_deg}、跟上次 {old_dx} 差超過 1.8 倍 → 不採用、沿用 {old_dx}；"
+        # 10/16 13:1x：他用 定刻度 手動改成 5.25（驗一圈 bug 誤導），之後 量刻度 量到 2.5 被 1.8 倍規則擋掉、沿用錯的 5.25
+        # → 1.8 倍規則拿「上次 量刻度 量到的值」比；目前值是手動定的、又沒有量測紀錄，就不套規則（並說明）
+        try:
+            _h = (json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8")).get("水平") or {})
+        except Exception:  # noqa: BLE001
+            _h = {}
+        ref_dx = _h.get("量測每度dx") or (None if "他自己" in str(_h.get("方法", "")) else old_dx)
+        if ref_dx is None and old_dx:
+            note += f"目前每度 dx {old_dx} 是你用 定刻度 手動定的、沒有量刻度的紀錄可比，這次量到的 {dx_deg} 直接採用；"
+        elif ref_dx and not (1 / 1.8 <= dx_deg / ref_dx <= 1.8):
+            note += f"水平量到每度 {dx_deg}、跟上次量到的 {ref_dx} 差超過 1.8 倍 → 不採用、沿用 {old_dx}；"
             dx_deg = old_dx
         if old_dy and not (1 / 1.8 <= dy_deg / old_dy <= 1.8):
             note += f"垂直量到每度 {dy_deg}、跟上次 {old_dy} 差超過 1.8 倍 → 不採用、沿用 {old_dy}；"
@@ -959,7 +983,8 @@ class Tools(ExtraTools):
         except Exception:  # noqa: BLE001
             cal = {}
         now = datetime.now().strftime("%m/%d %H:%M")
-        cal["水平"] = {"一圈dx": loop_dx, "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now}
+        cal["水平"] = {"一圈dx": loop_dx, "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
+                     "量測每度dx": dx_deg if dx_deg != old_dx or not note else (_h.get("量測每度dx") or dx_deg)}
         cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "機械掃描（工具版 量刻度）", "時間": now}
         cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
         with open(p, "w", encoding="utf-8") as f:
