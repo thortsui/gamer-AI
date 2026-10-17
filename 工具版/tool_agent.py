@@ -1280,6 +1280,12 @@ class Tools(ExtraTools):
                 return "找不到 Roblox 視窗"
             pydirectinput.moveTo(int(bbox["left"] + fx * bbox["width"]), int(bbox["top"] + fy * bbox["height"]))
             time.sleep(0.05)
+            # 10/17 13:3x：Roblox 介面按鈕（ESC 繼續、辦理入住、出口）點了畫面變化 0 的居多（10/16～17 約七成）；
+            # 游標瞬移過去 Roblox 常沒認到滑到按鈕上 → 原地小晃一下再按
+            pydirectinput.moveRel(3, 0, relative=True)
+            time.sleep(0.04)
+            pydirectinput.moveRel(-3, 0, relative=True)
+            time.sleep(0.06)
             pydirectinput.mouseDown()
             time.sleep(0.08)
             pydirectinput.mouseUp()
