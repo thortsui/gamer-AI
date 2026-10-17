@@ -56,6 +56,7 @@ def main():
     secs = [r["秒"] for r in recs]
     print(f"【{date}{'（' + a.since + ' 起）' if a.since else ''}】{recs[0]['時間']}～{recs[-1]['時間']}")
     print(f"速度：{len(recs)} 輪｜每輪 平均 {statistics.mean(secs):.1f}s、中位 {statistics.median(secs):.1f}s、最慢 {max(secs):.1f}s")
+    think_time(recs)
 
     use = Counter()
     move_ok = [0, 0]
@@ -220,6 +221,33 @@ def main():
     task_changes(recs)
     plan3_stats(recs)
     verify2_stats(recs)
+
+
+def _trim(vals):
+    """去極端值（IQR 法：Q1−1.5×IQR～Q3+1.5×IQR 之外的丟掉）→ (留下的, 丟掉的)。"""
+    if len(vals) < 4:
+        return list(vals), []
+    q = statistics.quantiles(vals, n=4)
+    lo, hi = q[0] - 1.5 * (q[2] - q[0]), q[2] + 1.5 * (q[2] - q[0])
+    keep = [v for v in vals if lo <= v <= hi]
+    return keep, [v for v in vals if not lo <= v <= hi]
+
+
+def think_time(recs):
+    """10/18 使用者「思考時間也要回報（去除極端值）」：大腦想的秒數（jsonl「秒」）＋一輪總時間（相鄰兩輪的時間差＝想＋做三步），都去極端值。"""
+    def line(name, vals):
+        if not vals:
+            return f"{name}：沒有資料"
+        keep, out = _trim(vals)
+        return (f"{name}（去極端值）：平均 {statistics.mean(keep):.1f}s、中位 {statistics.median(keep):.1f}s、"
+                f"範圍 {min(keep):.0f}～{max(keep):.0f}s｜去掉 {len(out)} 個" + (f"（{'、'.join(f'{v:.0f}' for v in sorted(out))}s）" if out else ""))
+    gaps = []
+    for a, b in zip(recs, recs[1:]):
+        g = _hms(b["時間"]) - _hms(a["時間"])
+        if 0 < g < 1800:                       # 重啟、停機的空檔不算
+            gaps.append(float(g))
+    print(line("思考時間", [r["秒"] for r in recs]))
+    print(line("一輪總時間（想＋做）", gaps))
 
 
 def _hms(t):
