@@ -215,6 +215,102 @@ def main():
     doc = sum(v for k, v in use.items() if k in ("遊戲介紹", "讀文件", "我的記憶", "工具說明", "工具清單"))
     cal = sum(v for k, v in use.items() if k in ("開工測試", "量刻度", "量畫面", "量比例", "回報人稱"))
     print(f"文件類工具 {doc} 次｜校準類 {cal} 次｜自訂：新工具 {use.get('新工具', 0)}、補用途 {use.get('補用途', 0)}")
+    trunc = sum(1 for r in recs if r.get("截斷"))
+    print(f"截斷：{trunc} 輪（{trunc / len(recs) * 100:.0f}%）")
+    task_changes(recs)
+    plan3_stats(recs)
+    verify2_stats(recs)
+
+
+def _hms(t):
+    h, m, s_ = (int(x) for x in t.split(":"))
+    return h * 3600 + m * 60 + s_
+
+
+HUD_WORDS = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請", "職業", "日誌", "啟用", "重生", "繼續")
+
+
+def task_changes(recs):
+    """10/18 使用者「stats 加任務字換了幾次、隔多久」：每輪程式 OCR 右上／右側的字（jsonl「右上字」），
+    出現一段原本沒有的字（4 個字以上、不是 HUD）而且下一輪還在 → 算任務字換一次。"""
+    import difflib
+    rows = [r for r in recs if "右上字" in r]
+    if not rows:
+        print("任務字：這段沒有「右上字」紀錄（10/18 起才有）")
+        return
+
+    def norm(t):
+        return re.sub(r"[\s\d\W_]+", "", t)
+
+    def words(r):
+        return {norm(w[0]) for w in r.get("右上字") or [] if len(norm(w[0])) >= 4 and not any(h in w[0] for h in HUD_WORDS)}
+
+    def known(w, pool):
+        return any(w in p or p in w or difflib.SequenceMatcher(None, w, p).ratio() >= 0.6 for p in pool)
+
+    seen_recent, events = [], []
+    for i, r in enumerate(rows):
+        cur = words(r)
+        pool = set().union(*seen_recent[-5:]) if seen_recent else set()
+        new = [w for w in cur if not known(w, pool)]
+        if new and seen_recent and i + 1 < len(rows) and any(known(w, words(rows[i + 1])) for w in new):
+            events.append((r["時間"], new[0]))
+        if cur:
+            seen_recent.append(cur)
+    if not events:
+        print(f"任務字：換了 0 次（{len(rows)} 輪有讀右上字）")
+        return
+    gaps = [(_hms(events[i][0]) - _hms(events[i - 1][0])) / 60 for i in range(1, len(events))]
+    print(f"任務字：換了 {len(events)} 次"
+          + (f"，平均隔 {statistics.mean(gaps):.0f} 分鐘（最短 {min(gaps):.0f}、最長 {max(gaps):.0f}）" if gaps else "")
+          + "｜" + "、".join(f"{t[:5]}「{w[:10]}」" for t, w in events[-8:]))
+
+
+def plan3_stats(recs):
+    """10/18 三步規劃：每輪排幾步、各步他自評符合率（下一輪的「符合」清單）、程式量到有反應率、三步全符合率。"""
+    rows = [r for r in recs if "下三步" in r]
+    if not rows:
+        return
+    n_steps = Counter(len(r["下三步"]) for r in rows)
+    self_ok = [[0, 0] for _ in range(3)]
+    react = [[0, 0] for _ in range(3)]
+    all_ok = [0, 0]
+    for r in rows:
+        m = r.get("符合")
+        if isinstance(m, list) and m:
+            for i, v in enumerate(m[:3]):
+                self_ok[i][1] += 1
+                self_ok[i][0] += int(v is True)
+            all_ok[1] += 1
+            all_ok[0] += int(all(v is True for v in m))
+        for i, st in enumerate(r["下三步"][:3]):
+            c = changed(str(st.get("回傳", "")))
+            if c is not None:
+                react[i][1] += 1
+                react[i][0] += int(c)
+
+    def rt(ok):
+        return f"{ok[0]}/{ok[1]}（{ok[0] / ok[1] * 100:.0f}%）" if ok[1] else "0/0"
+    print(f"三步規劃：{len(rows)} 輪｜排了幾步 " + "、".join(f"{k} 步 {v} 輪" for k, v in sorted(n_steps.items()))
+          + f"｜三步全符合 {rt(all_ok)}")
+    print("  他自評符合率：" + "、".join(f"第{i + 1}步 {rt(self_ok[i])}" for i in range(3))
+          + "｜程式量到有反應：" + "、".join(f"第{i + 1}步 {rt(react[i])}" for i in range(3)))
+
+
+def verify2_stats(recs):
+    """10/18 量測二次驗證：每種量測 一致／不一致 次數。"""
+    cnt = {}
+    for r in recs:
+        for ret in r.get("回傳") or []:
+            for m in re.finditer(r"【二次驗證 (一致|不一致)】(.+?) 第一次", ret):
+                c = cnt.setdefault(m.group(2), [0, 0])
+                c[1] += 1
+                c[0] += int(m.group(1) == "一致")
+    if not cnt:
+        return
+    tot = [sum(v[0] for v in cnt.values()), sum(v[1] for v in cnt.values())]
+    print(f"二次驗證：一致 {tot[0]}/{tot[1]}（{tot[0] / tot[1] * 100:.0f}%）｜"
+          + "、".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(cnt.items(), key=lambda kv: -kv[1][1])))
 
 
 if __name__ == "__main__":

@@ -148,6 +148,8 @@ class ExtraTools:
         table = {"低": "快思推理", "中": "中想", "高": "慢想", "快": "快思推理", "慢": "慢想", "反射": "反射"}
         if v not in table:
             return "思考強度 要給 低／中／高（低＝快、字少；高＝想久、每輪 60 秒以上）"
+        if getattr(self, "effort_locked", False):     # 10/18 使用者：「這次挑戰都用高思考」
+            return "這次挑戰使用者定了：全程高思考（慢想），不能改；照高思考繼續"
         self.effort_override = table[v]
         return f"之後每輪用「{v}」（{table[v]}）；想改回來再叫一次"
 

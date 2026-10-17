@@ -88,7 +88,16 @@ def read_text(path, tail=None):
     return s
 
 
-def build_system(game, cat):
+PLAN3_FORMAT = ('{"看到":"儀器讀數，把畫面上看得到的東西、字、方位、數字都寫出來(<=80字)",'
+                '"上一輪實際":"上一輪三步做完之後實際發生了什麼(<=60字；第一輪寫 無)",'
+                '"符合":[true或false,…上一輪三步各一個：那一步的工具回傳＋現在畫面，跟它的「結果應該是」一不一樣；第一輪寫 []],'
+                '"想":"因為:原因｜所以要:目的｜三步:為什麼這樣排",'
+                '"先記":["記錄／檢討／文件／學習類工具，最多 2 個，不佔三步；有 false 就在這裡叫 檢討(…)；不用就 []"],'
+                '"下三步":[{"做":"工具(參數)","結果應該是":"這一步做完應該看到什麼"},{"做":"…","結果應該是":"…"},{"做":"…","結果應該是":"…"}]}')
+PLAN3_PRE_GROUPS = ("文件", "記憶", "流程", "學習")
+
+
+def build_system(game, cat, plan3=False):
     gdir = os.path.join(ROOT, "專案", game)
     identity = read_text(os.path.join(ROOT, "核心", "共用", "00_身分與現在的任務.md"))
     identity = re.sub(r"^---.*?---\s*", "", identity, flags=re.S).strip().replace("{game}", game)
@@ -157,9 +166,20 @@ def build_system(game, cat):
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
               "定義完它就在清單裡、下一輪就能叫。" + NL * 2
-            + "每一輪只輸出一個 JSON：" + cat["輸出格式"] + NL
-            + "「用」一輪最多 5 個小動作，照順序做（12:3x 使用者：一輪排四到五個小動作加速）；字串「名稱(參數)」或 {\"工具\":\"名稱\",\"參數\":{...}} 都可以。"
-              "不知道怎麼做就先叫文件類工具看一眼，再動。")
+            + (PLAN3_RULE + NL * 2 + "每一輪只輸出一個 JSON：" + PLAN3_FORMAT if plan3 else
+               "每一輪只輸出一個 JSON：" + cat["輸出格式"] + NL
+               + "「用」一輪最多 5 個小動作，照順序做（12:3x 使用者：一輪排四到五個小動作加速）；字串「名稱(參數)」或 {\"工具\":\"名稱\",\"參數\":{...}} 都可以。"
+                 "不知道怎麼做就先叫文件類工具看一眼，再動。"))
+
+
+# 10/18 使用者：「他要直接規劃好下三個步驟再直接執行，中間不檢查」
+PLAN3_RULE = ("【三步規劃】（使用者 10/18 定的，這次挑戰照這個做）每一輪先把**接下來三步**規劃好：每一步一個工具（走／轉／按／點字…遊戲動作都可以），"
+              "每一步都寫它的「結果應該是」。程式一口氣照順序做完三步，**中間不停下來給你看**，三步都做完才截下一張畫面給你。"
+              "所以排之前要先想清楚：第一步做完畫面會變成怎樣、第二步要接在那個狀態上，依此類推。"
+              "下一輪看三個工具回傳＋新畫面，在「符合」逐步填 [true/false, …]；有 false 就在「先記」叫 檢討。"
+              "記錄／檢討／文件／學習類（記筆記、檢討、讀文件、大任務完成…）放「先記」，不佔三步、在三步之前做。"
+              "點擊還是兩步：點 或 點字 只是預約，確認點 要排在下一輪（可以當下一輪的第一步）。"
+              "本來的「上一輪實際／符合／檢討」規則一樣適用，只是 符合 改成三步各一個。")
 
 
 # ---------------------------------------------------------------- 速記解析
@@ -239,6 +259,11 @@ def num(v, default):
         return default
 
 
+def z2_needed(dd):
+    """走路第一次量不出放大倍數、但畫面有動：第二次也量一次放大倍數（看是不是真的量不出）。"""
+    return dd >= 2
+
+
 # ---------------------------------------------------------------- 工具實作
 from tools_extra import ExtraTools  # noqa: E402  舊版的學習／記憶／程序／追蹤 全部包成工具（2026-10-15 23:0x）
 
@@ -260,6 +285,18 @@ class Tools(ExtraTools):
             self.dx_deg, self.dy_deg = 2.5, 3.65
         self._ocr = None
         self._eyes = None
+        self.pitch_acc = 0.0            # 水平儀：仰 累計的度數（正＝抬頭）；修水平／水平歸零／量刻度 歸零
+        self.verify2 = False            # 10/18 使用者：「量測都要二次驗證」（--verify2）
+        self.effort_locked = False      # 10/18 使用者：「這次挑戰都用高思考」（--lock-effort）
+
+    def _v2(self, name, v1, v2, ok, unit=""):
+        """二次驗證：同一個量測做兩次，回報兩個值、一不一致，記進 二次驗證.md（stats 算一致率）。"""
+        tag = "一致" if ok else "不一致"
+        try:
+            self._append("二次驗證.md", f"{name}｜第一次 {v1}{unit}｜第二次 {v2}{unit}｜{tag}")
+        except Exception:  # noqa: BLE001
+            pass
+        return f"【二次驗證 {tag}】{name} 第一次 {v1}{unit}、第二次 {v2}{unit}"
 
     # ---- 畫面
     def grab(self):
@@ -307,17 +344,25 @@ class Tools(ExtraTools):
         bg = "" if noise is None else f"；沒按時 0.2 秒內背景本來就動 {noise:.0f}"
         after = self.grab()
         d = self.diff(before, after)
+        v2 = ""
         if d < th and self.live:
             # 10/16 03:0x：死亡面板點「再玩一次」立刻量 1、下一輪已在大廳 → 介面換頁要幾秒，沒變就等 1.2 秒再量一次
             time.sleep(1.2)
             d2 = self.diff(before, self.grab())
             if d2 >= th and d2 >= d + 3:
-                return f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢{bg}）"
+                return (f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢{bg}）"
+                        + ("；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", False) + "（第一次沒反應、第二次有＝反應慢，以第二次為準）" if self.verify2 else ""))
+            if self.verify2:
+                v2 = "；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", d2 < th) + "（兩次都看不出反應）"
+        elif self.verify2 and self.live:
+            time.sleep(0.6)
+            d2 = self.diff(before, self.grab())
+            v2 = "；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", d2 >= th) + ("（0.6 秒後再量也有變）" if d2 >= th else "（0.6 秒後又跟按之前差不多＝只閃一下、可能沒真的反應）")
         if d < 2:
-            return f"畫面變化 {d:.0f}" + ("（沒變＝可能被擋；等 1.2 秒再看也沒變）" if self.live else "（沒變＝可能被擋）")
+            return f"畫面變化 {d:.0f}" + ("（沒變＝可能被擋；等 1.2 秒再看也沒變）" if self.live else "（沒變＝可能被擋）") + v2
         if d < th:
-            return f"畫面變化 {d:.0f}（跟背景差不多＝看不出有反應{bg}；等 1.2 秒再看也一樣）"
-        return f"畫面變化 {d:.0f}" + (f"（比背景大{bg}）" if noise is not None else "")
+            return f"畫面變化 {d:.0f}（跟背景差不多＝看不出有反應{bg}；等 1.2 秒再看也一樣）" + v2
+        return f"畫面變化 {d:.0f}" + (f"（比背景大{bg}）" if noise is not None else "") + v2
 
     # ---- 文件類
     def doc_game(self, 遊戲名=""):
@@ -473,10 +518,31 @@ class Tools(ExtraTools):
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else
                      "；中央放大量不出來（角色擋在畫面中央、鏡頭跟著走，這次不算距離）" if (k == "w" and dd >= 2) else "")
+            if self.verify2:
+                time.sleep(0.3)
+                after2 = self.grab()
+                dd2 = self.diff(before, after2)
+                if k == "w" and (z or z2_needed(dd)):
+                    z2 = self.zoom_factor(before, after2)
+                    ok = (z is None and z2 is None) or (z is not None and z2 is not None and abs(z - z2) <= 0.15)
+                    z_txt += "；" + self._v2("走路放大倍數", f"{z:.1f}" if z else "量不出", f"{z2:.1f}" if z2 else "量不出", ok)
+                else:
+                    z_txt += "；" + self._v2("走了有沒有動", f"{dd:.0f}", f"{dd2:.0f}", (dd >= 2) == (dd2 >= 2))
             return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + z_txt
         return f"按 {k} {d:.1f} 秒；" + self._changed(before, noise)
 
     def see_dist(self, 標籤=""):
+        r = self._see_dist_once(標籤)
+        if not self.verify2 or self.image_path or not self.live or not isinstance(r, tuple):
+            return r if isinstance(r, str) else r[0]
+        txt, h1 = r
+        time.sleep(0.3)
+        r2 = self._see_dist_once(標籤)
+        h2 = r2[1] if isinstance(r2, tuple) else None
+        ok = h1 is not None and h2 is not None and abs(h1 - h2) <= max(0.03, 0.2 * h1)
+        return txt + "；" + self._v2("估距框高", f"{h1:.2f}" if h1 is not None else "沒框到", f"{h2:.2f}" if h2 is not None else "沒框到", ok)
+
+    def _see_dist_once(self, 標籤=""):
         """估距：用 YOLO 框高＋深度比例算「再走幾秒到面前」（目標框高到 0.5 算到面前）。"""
         labels = [x.strip() for x in re.split(r"[,，、]", str(標籤)) if x.strip()]
         if not labels:
@@ -509,7 +575,8 @@ class Tools(ExtraTools):
                 out.append(f"{lab}：框高 {h:.2f}、{side}；照深度比例每秒 {kk} 倍，約再走 {secs:.1f} 秒到面前（先對正、分兩次走、中間看一眼）")
             else:
                 out.append(f"{lab}：框高 {h:.2f}、{side}；深度比例還沒量（量比例），只能用框高估：越小越遠")
-        return "；".join(out)
+        first = next(iter(dets.values()))[0]["h"]
+        return "；".join(out), first
 
     def move_w(self, 秒=""):
         return self._move("w", num(秒, 0.5), 0.2, 2.0)
@@ -646,14 +713,15 @@ class Tools(ExtraTools):
         if fixed:
             hud_txt += "；轉頭時畫面上這幾塊完全沒動（釘在畫面上的 HUD／面板，不是場景）：" + "、".join(f"({x:.2f},{y:.2f})" for x, y in fixed[:6])
         if axis == "x":
-            sh = self.shift_x(before, after)
-            pinned_note = ""
-            if sh is not None and abs(sh) < 0.03 and d >= 15:
-                mv = self.shift_x_moving(before, after)
-                if mv and abs(mv[0]) >= 0.03:
-                    sh = mv[0]
-                    pinned_note = (f"（整張比對被畫面上釘著不動的東西拉成 0%——像手上拿的東西或面板；"
-                                   f"只看有變的 {mv[1] * 100:.0f}% 畫面重量）")
+            sh, pinned_note = self._shift(before, after, d)
+            v2_txt = ""
+            if self.verify2:                       # 10/18 二次驗證：隔 0.3 秒再拍一張，再量一次位移
+                time.sleep(0.3)
+                after2 = self.grab()
+                sh2, _ = self._shift(before, after2, self.diff(before, after2))
+                ok = sh is not None and sh2 is not None and abs(sh - sh2) <= 0.04
+                v2_txt = "；" + self._v2("轉頭位移", f"{(sh or 0) * 100:+.0f}" if sh is not None else "量不出",
+                                         f"{(sh2 or 0) * 100:+.0f}" if sh2 is not None else "量不出", ok, "%")
             # 10/16 07:0x：10/15～16 回測：|dx|>130（約 50 度以上）方向對 81、相反 70、卡搜尋上限(≥45%) 95 → 前後畫面沒重疊、量不出來
             unmeasurable = sh is not None and (abs(px) > 130 or abs(sh) >= 0.45)
             if unmeasurable:
@@ -661,16 +729,33 @@ class Tools(ExtraTools):
                           "要知道實際轉多少就分成 50 度以內一次一次轉")
             else:
                 # 10/16 03:3x：他一直把「景物往左移」讀成「鏡頭往左轉」寫進檢討（刻度反）→ 量測後面標鏡頭實際轉向
-                sh_txt = (f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬"
-                          + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) + pinned_note if sh is not None else ""
+                sh_txt = ((f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬"
+                           + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) + pinned_note) if sh is not None else ""
                 try:
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
                     pass
-            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{retry_note}{hud_txt}。"
+            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{retry_note}{hud_txt}{v2_txt}。"
                     "跟你腦中的對不上就 量刻度 重量")
+        v2_txt = ""
+        if self.verify2:
+            time.sleep(0.3)
+            d2 = self.diff(before, self.grab())
+            v2_txt = "；" + self._v2("上下轉有沒有動", f"{d:.0f}", f"{d2:.0f}", (d >= 2) == (d2 >= 2))
         return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
-                + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + "。對不上就 量刻度 重量")
+                + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + v2_txt + "。對不上就 量刻度 重量")
+
+    def _shift(self, before, after, d):
+        """水平位移（整張比對；被釘著的東西拉成 0% 時改只看有變的像素）→ (比例或 None, 說明)。"""
+        sh = self.shift_x(before, after)
+        note = ""
+        if sh is not None and abs(sh) < 0.03 and d >= 15:
+            mv = self.shift_x_moving(before, after)
+            if mv and abs(mv[0]) >= 0.03:
+                sh = mv[0]
+                note = (f"（整張比對被畫面上釘著不動的東西拉成 0%——像手上拿的東西或面板；"
+                        f"只看有變的 {mv[1] * 100:.0f}% 畫面重量）")
+        return sh, note
 
     def _words(self, im):
         """畫面上的字 → {字: (x, y)}（給轉頭前後比對用；05:00 他對著右側 0.87 固定不動的「蓋印表格」字連轉右 23 次）。"""
@@ -757,29 +842,45 @@ class Tools(ExtraTools):
         res["一圈"] = "**回到原點**" in r1
         notes.append("水平：" + r1)
         # ② 垂直來回
-        b = self.grab()
-        self._drag(0, -30 * self.dy_deg)
-        time.sleep(0.3)
-        mid = self.grab()
-        self._drag(0, 30 * self.dy_deg)
-        time.sleep(0.3)
-        a = self.grab()
-        moved, back = self.diff(b, mid), self.diff(b, a)
+        def updown():
+            b = self.grab()
+            self._drag(0, -30 * self.dy_deg)
+            time.sleep(0.3)
+            mid = self.grab()
+            self._drag(0, 30 * self.dy_deg)
+            time.sleep(0.3)
+            a = self.grab()
+            return self.diff(b, mid), self.diff(b, a)
+        moved, back = updown()
         res["上下"] = moved >= 8 and back < 10
+        if self.verify2:
+            m2, b2 = updown()
+            ok2 = m2 >= 8 and b2 < 10
+            notes.append(self._v2("驗開工 上下", "✓" if res["上下"] else "✗", "✓" if ok2 else "✗", res["上下"] == ok2)
+                         + f"（第二次抬頭變化 {m2:.0f}、回來差 {b2:.0f}）")
+            res["上下"] = res["上下"] and ok2
         notes.append(f"垂直：抬 30 度（dy {30 * self.dy_deg:.0f}）畫面變化 {moved:.0f}，再低 30 度回來跟起點差 {back:.0f}"
                      + ("，回到原點" if res["上下"] else ("，抬頭時畫面沒變＝已頂到上限或刻度太小，先 仰(-20) 回到水平再驗" if moved < 8 else "，沒回到原點：每度 dy 可能不對，重 量刻度")))
         # ③ 深度來回
-        b = self.grab()
-        self._key("w", 1.0)
-        time.sleep(0.3)
-        mid = self.grab()
-        self._key("s", 1.0)
-        time.sleep(0.3)
-        a = self.grab()
-        moved, back = self.diff(b, mid), self.diff(b, a)
+        def walkback():
+            b = self.grab()
+            self._key("w", 1.0)
+            time.sleep(0.3)
+            mid = self.grab()
+            self._key("s", 1.0)
+            time.sleep(0.3)
+            a = self.grab()
+            return self.diff(b, mid), self.diff(b, a)
+        moved, back = walkback()
         # 12:1x 實測：退 1 秒跟起點差 63（第三人稱退走角色會轉身、鏡頭跟著擺），回不到原點是常態 →
         # 改判「有走出去、退回來有比走出去那一點更接近起點」就算深度可用
         res["深度"] = moved >= 8 and back < moved * 0.8
+        if self.verify2:
+            m2, b2 = walkback()
+            ok2 = m2 >= 8 and b2 < m2 * 0.8
+            notes.append(self._v2("驗開工 深度", "✓" if res["深度"] else "✗", "✓" if ok2 else "✗", res["深度"] == ok2)
+                         + f"（第二次走出去變化 {m2:.0f}、退回來差 {b2:.0f}）")
+            res["深度"] = res["深度"] and ok2
         notes.append(f"深度：走 1 秒畫面變化 {moved:.0f}，退 1 秒回來跟起點差 {back:.0f}"
                      + ("，有走出去也退得回來，深度可用" if res["深度"] else ("，走了畫面沒變＝前方被擋，換有空間的地方再驗" if moved < 8 else "，退回來反而離起點更遠（退路被擋），換個地方再驗")))
         self.startup["驗證"] = res
@@ -815,17 +916,30 @@ class Tools(ExtraTools):
             return None
         return best_k
 
-    def cal_depth(self):
-        if self.image_path or not self.live:
-            return "離線／dry-run 不能量比例"
+    def _depth_once(self):
         before = self.grab()
         self._key("w", 1.0)
         time.sleep(0.3)
         after = self.grab()
-        d = self.diff(before, after)
+        return self.diff(before, after), self.zoom_factor(before, after)
+
+    def cal_depth(self):
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能量比例"
+        d, k = self._depth_once()
+        v2 = ""
+        if self.verify2:                           # 10/18 二次驗證：接著再走 1 秒量第二次
+            d2, k2 = self._depth_once()
+            good = lambda dd, kk: kk is not None and kk > 1.05 and dd >= 15
+            ok = good(d, k) and good(d2, k2) and abs(k - k2) <= 0.15
+            v2 = self._v2("量比例 走1秒放大", f"{k:.2f}" if k else "量不出", f"{k2:.2f}" if k2 else "量不出", ok, "倍")
+            if not ok:
+                return (v2 + "（兩次差超過 0.15 倍或有一次量不出＝這次不算，校準檔沒改）；"
+                        f"第一次畫面變化 {d:.0f}、第二次 {d2:.0f}。換前方空曠、走 2 秒都不會撞牆的地方再量比例")
+            k = round((k + k2) / 2, 2)
+            v2 = "；" + v2 + "（用平均）"
         if d < 2:
             return "走 1 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
-        k = self.zoom_factor(before, after)
         if k is None:
             return (f"走 1 秒畫面變化 {d:.0f}，但中央放大量不出來（角色擋在畫面中央、鏡頭跟著走），這次不算，校準檔沒改；"
                     "深度比例目前量不準，估距離用 找東西／估距 的框高")
@@ -842,7 +956,7 @@ class Tools(ExtraTools):
         cal["深度"] = {"走1秒放大倍數": k, "方法": "中央區放大比對（工具版 量比例）", "時間": datetime.now().strftime("%m/%d %H:%M")}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
-        return f"深度比例：走 1 秒畫面中央放大 {k:.1f} 倍（畫面變化 {d:.0f}）。之後估「前方幾步」用這個換算"
+        return f"深度比例：走 1 秒畫面中央放大 {k:.1f} 倍（畫面變化 {d:.0f}）{v2}。之後估「前方幾步」用這個換算"
 
     def cal_startup(self):
         """開工測試：逐項量、逐項回報（使用者要求的幾個數值）。"""
@@ -922,8 +1036,19 @@ class Tools(ExtraTools):
             self._append("刻度樣本.md", f"驗一圈 dx {total}（{src}）｜跟起點差 {d:.0f}｜位移 {(sh or 0) * 100:+.0f}%｜{'回到原點' if back else '沒回到原點'}")
         except Exception:  # noqa: BLE001
             pass
+        v2 = ""
+        if self.verify2:                           # 10/18 二次驗證：同樣的 dx 再轉一圈，第二圈也要回到起點
+            self._drag(total, 0)
+            time.sleep(0.4)
+            end2 = self.grab()
+            dd2 = self.diff(start, end2)
+            sh2 = self.shift_x(start, end2)
+            back2 = dd2 <= tol and sh2 is not None and abs(sh2) < 0.04
+            v2 = "；" + self._v2("驗一圈 位移", f"{(sh or 0) * 100:+.0f}", f"{(sh2 or 0) * 100:+.0f}", back == back2, "%") + \
+                 f"（第二圈跟起點差 {dd2:.0f}、{'回到原點' if back2 else '沒回到原點'}）"
+            back = back and back2
         return (f"驗一圈：送了 dx {total}（{src}，等於每度 {implied}）→ 跟起點畫面差 {d:.0f}（背景本來就動 {noise:.0f}）、位移 {(sh or 0) * 100:+.0f}% 畫面寬 → "
-                + ("**回到原點**，刻度對" if back else "**沒回到原點**；" + hint)
+                + ("**回到原點**，刻度對" if back else "**沒回到原點**；" + hint) + v2
                 + "。確定對了就用 定刻度(每度dx) 寫進校準檔")
 
     def cal_set(self, 每度dx=""):
@@ -956,6 +1081,11 @@ class Tools(ExtraTools):
             pass
         im = self.grab()
         size = f"{im.width}×{im.height}" if im is not None else "抓不到"
+        if self.verify2:
+            time.sleep(0.2)
+            im2 = self.grab()
+            size2 = f"{im2.width}×{im2.height}" if im2 is not None else "抓不到"
+            size += "；" + self._v2("畫面尺寸", size, size2, size == size2 and im is not None)
         return (f"畫面 {size}（視窗 {bbox}）｜目前刻度：每度 dx {self.dx_deg}、每度 dy {self.dy_deg}"
                 f"｜來源 記憶/視角校準.json｜轉 90 度＝dx {90 * self.dx_deg:.0f}、抬頭 30 度＝dy {30 * self.dy_deg:.0f}")
 
@@ -966,7 +1096,77 @@ class Tools(ExtraTools):
         start = self.grab()
         if start is None:
             return "抓不到畫面"
-        # 水平：每步 dx 60，轉到跟起點最像的位置
+        loop1 = self._loop_once()
+        loop_dx = loop1
+        v2_note = ""
+        if self.verify2:                          # 10/18 二次驗證：水平一圈再量一次
+            loop2 = self._loop_once()
+            ok = abs(loop1 - loop2) <= 0.10 * (loop1 + loop2) / 2
+            v2_note += self._v2("量刻度 一圈dx", loop1, loop2, ok) + ("（相差 10% 內，用平均）" if ok else "（相差超過 10%，水平這次不採用）") + "；"
+            loop_dx = int(round((loop1 + loop2) / 2)) if ok else None
+        dx_deg = round(loop_dx / 360.0, 2) if loop_dx else self.dx_deg
+        # 垂直：先往上掃到頂（畫面不再變），再往下掃到底，算全程
+        # 04:09 量到全程 dy 1600（每度 8.99，前兩次 560／3.15）：掃到底時畫面還有別人在動、diff 降不到 1.5 → 掃滿 20 步。
+        # 改成「連續兩步變化都很小」就算到底，而且全程最多 1000。
+        self._sweep_pitch(-1, 14)
+        full_dy = min(max(self._sweep_pitch(+1, 13), 80), 1000)
+        dy_ok = True
+        if self.verify2:                          # 10/18 二次驗證：從底再掃回頂，全程再量一次
+            full2 = min(max(self._sweep_pitch(-1, 13), 80), 1000)
+            dy_ok = abs(full_dy - full2) <= 0.15 * (full_dy + full2) / 2
+            v2_note += self._v2("量刻度 全程dy", full_dy, full2, dy_ok) + ("（相差 15% 內，用平均）" if dy_ok else "（相差超過 15%，垂直這次不採用）") + "；"
+            self._drag(0, full2 // 2)             # 在頂端 → 往下一半回到中間
+            full_dy = int(round((full_dy + full2) / 2))
+        else:
+            self._drag(0, -full_dy // 2)        # 在底端 → 往上一半回到中間
+        self.pitch_acc = 0.0
+        dy_deg = round(full_dy / 178.0, 2) if dy_ok else self.dy_deg
+        # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
+        note = v2_note
+        old_dx, old_dy = self.dx_deg, self.dy_deg
+        # 10/16 13:1x：他用 定刻度 手動改成 5.25（驗一圈 bug 誤導），之後 量刻度 量到 2.5 被 1.8 倍規則擋掉、沿用錯的 5.25
+        # → 1.8 倍規則拿「上次 量刻度 量到的值」比；目前值是手動定的、又沒有量測紀錄，就不套規則（並說明）
+        try:
+            _h = (json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8")).get("水平") or {})
+        except Exception:  # noqa: BLE001
+            _h = {}
+        # 10/18 使用者「都要」：兩個基準都比、都報——①上次 量刻度 實測值 ②目前用的值；任一個在 1.8 倍內就採用，兩個都超才擋
+        try:
+            _v = (json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8")).get("垂直") or {})
+        except Exception:  # noqa: BLE001
+            _v = {}
+        if loop_dx:
+            r18 = self._rule18("水平每度 dx", dx_deg, _h.get("量測每度dx"), old_dx, "他自己" in str(_h.get("方法", "")))
+            note += r18
+            if r18.endswith("不採用；"):
+                dx_deg = old_dx
+        if dy_ok:
+            r18 = self._rule18("垂直每度 dy", dy_deg, _v.get("量測每度dy"), old_dy, False)
+            note += r18
+            if r18.endswith("不採用；"):
+                dy_deg = old_dy
+        self.dx_deg, self.dy_deg = dx_deg, dy_deg
+        p = os.path.join(self.gdir, "記憶", "視角校準.json")
+        try:
+            cal = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cal = {}
+        now = datetime.now().strftime("%m/%d %H:%M")
+        cal["水平"] = {"一圈dx": loop_dx or _h.get("一圈dx"), "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
+                     "量測每度dx": round(loop_dx / 360.0, 2) if loop_dx else _h.get("量測每度dx")}
+        cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "機械掃描（工具版 量刻度）", "時間": now,
+                     "量測每度dy": round(full_dy / 178.0, 2) if dy_ok else _v.get("量測每度dy")}
+        cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=1)
+        self._append("大任務.md", f"量刻度：一圈 dx {loop_dx}（每度 {dx_deg}）、全程 dy {full_dy}（每度 {dy_deg}）")
+        return (note + f"量好了：水平一圈 dx {loop_dx or '（不採用）'} → 每度 dx {dx_deg}；垂直全程 dy {full_dy} → 每度 dy {dy_deg}；"
+                f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
+                "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
+
+    def _loop_once(self):
+        """水平轉一圈：每步 dx 60，轉到跟起點最像的位置，回傳一圈 dx（鏡頭停在約起點）。"""
+        start = self.grab()
         step, total, best, best_total, diffs = 60, 0, None, None, []
         for i in range(1, 41):
             self._drag(step, 0)
@@ -982,64 +1182,30 @@ class Tools(ExtraTools):
             if total >= 1500:
                 break
         loop_dx = best_total or total
-        dx_deg = round(loop_dx / 360.0, 2)
-        # 垂直：先往上掃到頂（畫面不再變），再往下掃到底，算全程
-        # 04:09 量到全程 dy 1600（每度 8.99，前兩次 560／3.15）：掃到底時畫面還有別人在動、diff 降不到 1.5 → 掃滿 20 步。
-        # 改成「連續兩步變化都很小」就算到底，而且全程最多 1000。
-        def sweep(sign, max_steps):
-            moved, small = 0, 0
-            for _ in range(max_steps):
-                b = self.grab()
-                self._drag(0, sign * 80)
-                time.sleep(0.15)
-                d = self.diff(b, self.grab())
-                if d < 3.0:
-                    small += 1
-                    if small >= 2:
-                        break
-                else:
-                    small = 0
-                    moved += 80
-            return moved
-        sweep(-1, 14)
-        full_dy = min(max(sweep(+1, 13), 80), 1000)
-        dy_deg = round(full_dy / 178.0, 2)
-        self._drag(0, -full_dy // 2)        # 回到中間
-        # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
-        note = ""
-        old_dx, old_dy = self.dx_deg, self.dy_deg
-        # 10/16 13:1x：他用 定刻度 手動改成 5.25（驗一圈 bug 誤導），之後 量刻度 量到 2.5 被 1.8 倍規則擋掉、沿用錯的 5.25
-        # → 1.8 倍規則拿「上次 量刻度 量到的值」比；目前值是手動定的、又沒有量測紀錄，就不套規則（並說明）
-        try:
-            _h = (json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8")).get("水平") or {})
-        except Exception:  # noqa: BLE001
-            _h = {}
-        ref_dx = _h.get("量測每度dx") or (None if "他自己" in str(_h.get("方法", "")) else old_dx)
-        if ref_dx is None and old_dx:
-            note += f"目前每度 dx {old_dx} 是你用 定刻度 手動定的、沒有量刻度的紀錄可比，這次量到的 {dx_deg} 直接採用；"
-        elif ref_dx and not (1 / 1.8 <= dx_deg / ref_dx <= 1.8):
-            note += f"水平量到每度 {dx_deg}、跟上次量到的 {ref_dx} 差超過 1.8 倍 → 不採用、沿用 {old_dx}；"
-            dx_deg = old_dx
-        if old_dy and not (1 / 1.8 <= dy_deg / old_dy <= 1.8):
-            note += f"垂直量到每度 {dy_deg}、跟上次 {old_dy} 差超過 1.8 倍 → 不採用、沿用 {old_dy}；"
-            dy_deg = old_dy
-        self.dx_deg, self.dy_deg = dx_deg, dy_deg
-        p = os.path.join(self.gdir, "記憶", "視角校準.json")
-        try:
-            cal = json.load(open(p, encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            cal = {}
-        now = datetime.now().strftime("%m/%d %H:%M")
-        cal["水平"] = {"一圈dx": loop_dx, "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
-                     "量測每度dx": dx_deg if dx_deg != old_dx or not note else (_h.get("量測每度dx") or dx_deg)}
-        cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "機械掃描（工具版 量刻度）", "時間": now}
-        cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(cal, f, ensure_ascii=False, indent=1)
-        self._append("大任務.md", f"量刻度：一圈 dx {loop_dx}（每度 {dx_deg}）、全程 dy {full_dy}（每度 {dy_deg}）")
-        return (note + f"量好了：水平一圈 dx {loop_dx} → 每度 dx {dx_deg}；垂直全程 dy {full_dy} → 每度 dy {dy_deg}；"
-                f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
-                "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
+        if total > loop_dx:                      # 轉過頭的部分轉回來，第二次量才從起點開始
+            self._drag(loop_dx - total, 0)
+            time.sleep(0.2)
+        return loop_dx
+
+    def _rule18(self, name, new, ref_measured, ref_current, manual):
+        """1.8 倍規則兩個基準：比值都算給他看；任一個在 1.8 倍內就採用，兩個都超過才不採用（字串結尾「不採用；」給呼叫端判斷）。"""
+        def within(r):
+            return 1 / 1.8 <= r <= 1.8
+        parts, oks = [], []
+        if ref_measured:
+            r = new / float(ref_measured)
+            parts.append(f"跟上次量刻度實測 {ref_measured} 比 {r:.2f} 倍{'✓' if within(r) else '✗'}")
+            oks.append(within(r))
+        if ref_current:
+            r = new / float(ref_current)
+            parts.append(f"跟目前用的 {ref_current} 比 {r:.2f} 倍{'✓' if within(r) else '✗'}")
+            oks.append(within(r))
+        if not oks:
+            return f"{name} 量到 {new}，沒有基準可比，直接採用；"
+        head = f"1.8 倍規則（{name} 量到 {new}）：" + "、".join(parts)
+        if manual and not ref_measured:
+            return head + "；目前值是你用 定刻度 手動定的、沒有量刻度紀錄，直接採用；"
+        return head + ("；有一個在 1.8 倍內 → 採用；" if any(oks) else f"；兩個都超過 1.8 倍 → 沿用 {ref_current}、不採用；")
 
     # 2026-10-15 10:5x 使用者：「脫困不要，改成轉 180 單位（按照他計算結果直接輸入）……需要更多簡潔的方式」
     # → 轉(度) 正右負左、仰(度) 正上負下，他算好直接填；舊名字（視角左／右／上／下、180度轉頭）留作隱藏別名
@@ -1061,7 +1227,58 @@ class Tools(ExtraTools):
         d = max(-60, min(60, d))
         if abs(d) < 3:
             return "度數太小（<3 度）沒意義"
-        return self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15)
+        r = self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15)
+        self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + d))
+        lv = ("水平" if abs(self.pitch_acc) < 3 else f"{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度")
+        return r + f"｜水平儀（程式累計你送的 仰）：現在約 {lv}；歪了用 修水平 一次拉回"
+
+    def _sweep_pitch(self, sign, max_steps, step=80):
+        """上下掃到頂／底（連續兩步畫面幾乎不變＝頂到了），回傳掃了多少 dy。sign -1＝往上、+1＝往下。"""
+        moved, small = 0, 0
+        for _ in range(max_steps):
+            b = self.grab()
+            self._drag(0, sign * step)
+            time.sleep(0.15)
+            dd = self.diff(b, self.grab())
+            if dd < 3.0:
+                small += 1
+                if small >= 2:
+                    break
+            else:
+                small = 0
+                moved += step
+        return moved
+
+    def look_level(self):
+        """修水平（10/17 他叫了 3 次；19:0x 看地板卡近 50 分鐘還以為水平）：往下掃到底→量出原本歪幾度→往上拉 89 度回水平；
+        再往下掃一次驗證（二次驗證：第二次量應該接近 0 度）。"""
+        if self.image_path or not self.live:
+            return "[dry-run] 會往下掃到底再往上拉 89 度回水平"
+        half = int(round(89 * self.dy_deg))
+        down1 = self._sweep_pitch(+1, 30, 60)
+        was = down1 / self.dy_deg - 89            # 原本仰角 p 掃到底（−89）要 (p+89)×dy → p＝down1/dy − 89（正＝抬頭）
+        self._drag(0, -half)
+        time.sleep(0.25)
+        down2 = self._sweep_pitch(+1, 30, 60)       # 驗證：從修好的位置再掃到底，應該剛好約 89 度
+        now = down2 / self.dy_deg - 89
+        self._drag(0, -half)
+        time.sleep(0.25)
+        self.pitch_acc = 0.0
+        ok = abs(now) <= 17                          # 掃描一步 60 像素≈16 度，誤差在一步內算水平
+
+        def lv(v):
+            return "約水平" if abs(v) < 8 else f"{'抬頭' if v > 0 else '低頭'}約 {abs(v):.0f} 度"
+        self._append("刻度樣本.md", f"修水平：原本 {lv(was)}｜修完再量 {lv(now)}｜{'水平' if ok else '沒修好'}")
+        return (f"修水平：往下掃到底量到原本{lv(was)}（掃了 dy {down1}）→ 往上拉 dy {half}（89 度）；"
+                f"再掃一次驗證：修完是{lv(now)}（掃了 dy {down2}）→ " + ("**已回水平**" if ok else "**沒修好**（每度 dy 可能不對，量刻度 重量）")
+                + "；" + self._v2("水平", lv(was), lv(now), ok) + "（第一次＝修之前、第二次＝修之後應約水平）"
+                + "。水平儀已歸零")
+
+    def look_level_zero(self):
+        """水平歸零：你確認畫面已經水平，把水平儀（仰 的累計）歸零。"""
+        old = self.pitch_acc
+        self.pitch_acc = 0.0
+        return f"水平儀歸零（原本累計 {old:+.0f} 度）"
 
     def _new_word_checker(self, start):
         """慢慢轉／走到有變化 共用：起點的字＋這段對話讀過的字當基準，回傳判斷「這個字是不是新出現的 UI」的函式。"""
@@ -1258,8 +1475,10 @@ class Tools(ExtraTools):
         if not p:
             return "沒有預約中的點擊。先用 點 或 點字 預約"
         chk = str(審核).strip()
-        if not chk or chk in ("審核", "審核結果") or len(chk) < 6:
-            return "確認點 要寫真的審核內容，逐條：不花錢｜不換職業｜不離開｜這是什麼按鈕。不能照抄「審核」兩個字"
+        words = re.sub(r"[\d\s.,，、。:：;；|｜()（）\[\]\-+_/xXyY%]+", "", chk)   # 10/18：「0.56,0.48」純座標也過了 → 扣掉數字符號後要有字
+        if not chk or chk in ("審核", "審核結果") or len(chk) < 6 or len(words) < 4:
+            return ("確認點 要寫真的審核內容（文字，不是座標或數字），逐條：不花錢｜不換職業｜不離開｜這是什麼按鈕。"
+                    "不能照抄「審核」兩個字")
         if time.time() - p["時間"] > 180:
             self.pending_click = None
             return "預約超過 3 分鐘，畫面可能變了，取消；要點就重新預約"
@@ -1637,6 +1856,28 @@ def _close_brackets(frag):
     return None
 
 
+def top_right_words(im):
+    """畫面右半上半部的字（遊戲任務字在右上／右側）：[(字, x, y)]，只留 3 個字以上的。"""
+    try:
+        import local_text
+        res = local_text._win_read(im) or []
+    except Exception:  # noqa: BLE001
+        return []
+    W, H = im.size
+    out = []
+    for r in res:
+        try:
+            box, txt = r[0], str(r[1]).strip()
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            cx, cy = (min(xs) + max(xs)) / 2 / W, (min(ys) + max(ys)) / 2 / H
+            if cx >= 0.6 and cy <= 0.6 and len(re.sub(r"[\s\d\W_]+", "", txt)) >= 3:
+                out.append([txt, round(cx, 2), round(cy, 2)])
+        except Exception:  # noqa: BLE001
+            continue
+    return out[:12]
+
+
 def img_uri(im, width=1024):
     im = im.resize((width, int(width * im.height / im.width)))
     buf = io.BytesIO()
@@ -1665,18 +1906,32 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=900)
     ap.add_argument("--effort", default="快思推理",
                     help="推理強度：快思推理（low）／中想（medium）／慢想（xhigh）。2026-10-15 08:0x 使用者：「拉長他能說的字數、思考強度拉高」")
+    # 10/18 使用者：「這次挑戰都用高思考、量測都要二次驗證、他要直接規劃好下三個步驟再直接執行中間不檢查」
+    ap.add_argument("--lock-effort", action="store_true", help="思考強度 工具不能改（全程用 --effort）")
+    ap.add_argument("--verify2", action="store_true", help="量測二次驗證：每個量測做兩次、回報兩個值與一不一致")
+    ap.add_argument("--plan3", action="store_true", help="三步規劃：每輪排下三步，程式一口氣做完才截下一張圖")
     args = ap.parse_args()
     live = bool(args.live) and not args.image
     from play_agent import stream_json, parse_json_loose, LAST_REASONING
 
     cat = load_catalog(args.game)
     tools = Tools(args.game, cat, live=live, image_path=args.image or None)
+    tools.verify2, tools.effort_locked = bool(args.verify2), bool(args.lock_effort)
     model = detect_model(args.endpoint)
     tools.endpoint, tools.model = args.endpoint, model
-    system = build_system(args.game, cat)
+    system = build_system(args.game, cat, args.plan3)
+    if live:
+        # 10/18 防休眠：10/17 03:05 另開的 keep_awake.ps1 被系統因記憶體不足停掉 → 改由代理自己的主執行緒設定，代理在跑就不休眠、不關螢幕
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)      # CONTINUOUS|SYSTEM_REQUIRED|DISPLAY_REQUIRED
+            print("   防休眠：已設定（代理結束就恢復）")
+        except Exception as e:  # noqa: BLE001
+            print(f"   防休眠設定失敗：{e}")
     log_path = os.path.join(tools.mdir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     print(f"[工具版] 遊戲 {args.game}｜大腦 {model}｜{'LIVE 真的按' if live else 'dry-run 只印'}｜system {len(system)} 字｜工具 {len(cat['工具'])} 個"
-          f"｜推理 {args.effort}｜max_tokens {args.max_tokens}｜時限 {args.deadline:.0f}s")
+          f"｜推理 {args.effort}{'（鎖定）' if args.lock_effort else ''}｜max_tokens {args.max_tokens}｜時限 {args.deadline:.0f}s"
+          f"｜二次驗證 {'開' if args.verify2 else '關'}｜三步規劃 {'開' if args.plan3 else '關'}")
     print(f"   紀錄 {log_path}")
 
     history = []        # 這個大任務期間的輪次摘要（大任務完成就清空）
@@ -1690,12 +1945,13 @@ def main():
             print("[stop.txt] 結束")
             break
         cat = tools.cat                                   # 他定義的新工具／補用途會讓清單變
-        system = build_system(args.game, cat)
+        system = build_system(args.game, cat, args.plan3)
         im = tools.grab()
         if im is None:
             print(f"[{rnd}] 抓不到畫面（Roblox 不在前景？），等 3 秒")
             time.sleep(3)
             continue
+        task_words = top_right_words(im) if live else []      # 10/18：右上／右側的字（遊戲任務字）每輪記一次，stats 算任務字換了幾次
         content = [{"type": "image_url", "image_url": {"url": img_uri(im)}}]
         for tag, shot in tools.extra_images:
             content.append({"type": "text", "text": f"（看四周：{tag}）"})
@@ -1715,8 +1971,14 @@ def main():
         big = tools.big
         big_txt = (f"「{big['名稱']}」｜成功條件：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
                    if big else "（還沒設。先用 設大任務(名稱,成功條件) 定一個，再做事）")
-        prev_txt = ("原因：" + prev.get("原因", "？") + "｜預期結果：" + prev.get("預期", "？") + "｜做了：" + prev.get("做了", "無")
-                    + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
+        if prev and prev.get("三步") is not None:
+            prev_txt = ("原因：" + prev.get("原因", "？") + NL
+                        + NL.join(f"第{i + 1}步 做:{st['做']}｜結果應該是:{st['結果應該是'] or '（你沒寫）'}｜程式回傳:{st['回傳'][:160]}"
+                                  for i, st in enumerate(prev["三步"]))
+                        + NL + "→ 看現在的畫面＋三個回傳，「上一輪實際」寫實際結果、「符合」逐步填 [true/false,…]；有 false 就在 先記 叫 檢討")
+        else:
+            prev_txt = ("原因：" + prev.get("原因", "？") + "｜預期結果：" + prev.get("預期", "？") + "｜做了：" + prev.get("做了", "無")
+                        + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
         reviews_txt = (NL.join("- " + r for r in tools.reviews[-3:]) + NL * 2) if tools.reviews else ""
         panel = ("【開工數值】" + tools.startup_text() + NL
@@ -1726,7 +1988,8 @@ def main():
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
                  + (("【最近的檢討】（你自己寫的，照著做）" + NL + reviews_txt) if reviews_txt else "")
                  + "【這個大任務到目前為止】" + NL + (NL.join(history[-6:]) or "（剛開始）") + NL * 2
-                 + "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
+                 + ("看畫面，規劃接下來三步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + PLAN3_FORMAT if args.plan3 else
+                    "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))
         content.append({"type": "text", "text": panel})
         t0 = time.time()
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
@@ -1739,30 +2002,73 @@ def main():
         calls = o.get("用") or o.get("a") or []
         if isinstance(calls, str):
             calls = [calls]
+        pre, steps, plan_notes = [], [], []
+        if args.plan3:
+            pre = o.get("先記") or []
+            pre = [pre] if isinstance(pre, (str, dict)) else list(pre)
+            raw_steps = o.get("下三步") or []
+            if isinstance(raw_steps, (str, dict)):
+                raw_steps = [raw_steps]
+            for st in raw_steps:
+                if isinstance(st, dict) and ("做" in st or "工具" in st):
+                    steps.append({"做": st.get("做") if "做" in st else {k: v for k, v in st.items() if k != "結果應該是"},
+                                  "結果應該是": str(st.get("結果應該是") or "")[:80]})
+                elif st:
+                    steps.append({"做": st, "結果應該是": ""})
+            if not steps and calls:                       # 他沒照格式、寫了舊的「用」：前三個當三步
+                steps = [{"做": c, "結果應該是": ""} for c in calls[:3]]
+                plan_notes.append("✗ 這次挑戰要寫「下三步」（每步 做＋結果應該是）；你寫了「用」，程式拿前三個當三步做")
+            if len(steps) > 3:
+                plan_notes.append(f"✗ 你排了 {len(steps)} 步，只做前三步")
+                steps = steps[:3]
+            elif 0 < len(steps) < 3:
+                plan_notes.append(f"✗ 你只排了 {len(steps)} 步（這次挑戰每輪排滿三步）")
+            calls = [x for x in pre[:2]] + [st["做"] for st in steps]
         actual = str(o.get("上一輪實際") or "")[:80]
         match = o.get("符合")
         if isinstance(match, str):
             match = match.strip().lower() in ("true", "是", "符合", "yes")
+        if isinstance(match, list):
+            match = [(m if isinstance(m, bool) else str(m).strip().lower() in ("true", "是", "符合", "yes")) for m in match][:3]
+            match_all = (all(match) if match else None)
+        else:
+            match_all = match
         names_called = [parse_call(x, cat)[0] for x in list(calls)[:5]]
-        if prev is not None and match is not None:
-            if match:
+        if prev is not None and match_all is not None:
+            if match_all:
                 match_stat["符合"] += 1
             else:
                 match_stat["不符"] += 1
                 if "檢討" not in names_called:
                     match_stat["不符沒檢討"] += 1
-        missed_review = (prev is not None and match is False and "檢討" not in names_called)
+        missed_review = (prev is not None and match_all is False and "檢討" not in names_called)
         print(f"[{rnd}] {dt:.1f}s 看到「{seen}」" + (f"上一輪實際「{actual}」符合={match} " if prev else "") + f"想「{think}」")
-        rets, did = [], []
-        for item in list(calls)[:5]:
+        rets, did = list(plan_notes), []
+
+        def do(item, tag=""):
             name, params = parse_call(item, cat)
             if not name:
-                rets.append(f"✗ 看不懂「{params}」（工具名要照清單）")
-                continue
+                rets.append(f"✗ {tag}看不懂「{params}」（工具名要照清單）")
+                return f"看不懂「{params}」"
             r = tools.run(name, params)
             did.append(name + (f"({json.dumps(params, ensure_ascii=False)})" if params else ""))
             rets.append(f"● {name}{'(' + ','.join(str(v) for v in params.values()) + ')' if params else ''} → {r}")
-            print(f"   ▶ {name} {params} → {r[:120].replace(NL, ' ')}")
+            print(f"   ▶ {tag}{name} {params} → {r[:120].replace(NL, ' ')}")
+            return r
+
+        if args.plan3:
+            groups = {t["名稱"]: t["類別"] for t in cat["工具"]}
+            for item in pre[:2]:
+                name = parse_call(item, cat)[0]
+                if name and groups.get(name) not in PLAN3_PRE_GROUPS:
+                    rets.append(f"✗ 先記 只放 記錄／檢討／文件／學習類；「{name}」是遊戲動作，要排進 下三步（這次沒做）")
+                    continue
+                do(item, "先記 ")
+            for i, st in enumerate(steps):           # 三步一口氣做完，中間不回大腦
+                st["回傳"] = do(st["做"], f"第{i + 1}步 ")
+        else:
+            for item in list(calls)[:5]:
+                do(item)
         tool_returns = NL.join(rets)
         tools.remember_round(rnd, seen, think, did, rets)
         history.append(f"[{rnd}] 看到:{seen}｜想:{think[:80]}｜用:{'、'.join(did) or '無'}"
@@ -1771,6 +2077,9 @@ def main():
         m_expect = re.search(r"結果應該是[:：]\s*(.*?)(?:｜|\||$)", think)
         prev = {"原因": (m_reason.group(1) if m_reason else think[:40]), "預期": (m_expect.group(1) if m_expect else "（你沒寫 結果應該是）"),
                 "做了": "、".join(did) or "無"}
+        if args.plan3:
+            prev["三步"] = [{"做": (st["做"] if isinstance(st["做"], str) else json.dumps(st["做"], ensure_ascii=False)),
+                            "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))} for st in steps]
         if tools.clear_flag:                              # 大任務完成：這個任務期間的紀錄全部清空
             tools.clear_flag = False
             history, task_round = [], 0
@@ -1780,7 +2089,10 @@ def main():
             f.write(json.dumps({"時間": datetime.now().strftime("%H:%M:%S"), "輪": rnd, "秒": round(dt, 1),
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
-                                "符合統計": dict(match_stat)}, ensure_ascii=False) + NL)
+                                "符合統計": dict(match_stat), "右上字": task_words,
+                                **({"先記": pre[:2], "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
+                                                              for st in steps]} if args.plan3 else {})},
+                               ensure_ascii=False) + NL)
         if not args.image and not live:
             time.sleep(1.0)
 
