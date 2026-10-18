@@ -1383,6 +1383,15 @@ class Tools(ExtraTools):
             redrag = "（從中央拖畫面沒動——中央可能有提示擋住，改從畫面上方重拖一次）"
         out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
+        # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
+        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and self.diff(before, after) >= 8) else None
+        if pinned and pinned[2] >= 0.95:
+            try:
+                self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜目標釘在畫面上沒動（相似{pinned[2]:.2f}）")
+            except Exception:  # noqa: BLE001
+                pass
+            return ("；".join(out) + f"；轉完那一塊還在原位 ({pinned[0]:.2f},{pinned[1]:.2f})（相似度 {pinned[2]:.2f}）＝它是釘在畫面上的東西"
+                    "（面板、海報、HUD、提示框），不是場景，轉頭不會讓它移到中央；沒有補轉。要先 關掉 面板，或改對準場景裡的東西")
         loc1 = self._locate(patch, after, near=(0.5, 0.5, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
         if loc1 and loc1[2] >= GOOD:
