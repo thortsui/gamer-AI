@@ -2065,7 +2065,9 @@ def _close_brackets(frag):
     return None
 
 
-TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請", "職業", "日誌", "啟用", "重生", "繼續", "速度", "好友", "最高")
+TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請", "職業", "日誌", "啟用", "重生", "繼續", "速度", "好友", "最高",
+            # 10/19 02:42 誤判：長按 E 開了職業面板，右側說明「（等級 3）開始時配備電擊槍和可部署攝影機…」被當成任務字換了 → 面板／選單用字
+            "護士", "護十", "秘書", "實習生", "心理學家", "醫護", "外觀", "裝備", "等級", "配備", "恢復", "次數", "攝影機", "伺服器", "設定", "協助", "帳號")
 
 
 def top_right_words(im):
@@ -2075,7 +2077,7 @@ def top_right_words(im):
         import local_text
         from PIL import Image
         W, H = im.size
-        x0, y0, x1, y1 = int(W * 0.78), int(H * 0.06), W, int(H * 0.48)
+        x0, y0, x1, y1 = int(W * 0.78), int(H * 0.06), W, int(H * 0.40)      # 10/18 真的任務字 y 0.14～0.37
         crop = im.crop((x0, y0, x1, y1))
         crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
         res = local_text._win_read(crop) or []
@@ -2088,7 +2090,9 @@ def top_right_words(im):
             xs = [p[0] for p in box]
             ys = [p[1] for p in box]
             cx, cy = (x0 + (min(xs) + max(xs)) / 4) / W, (y0 + (min(ys) + max(ys)) / 4) / H
-            if len(re.findall(r"[\u4e00-\u9fff]", txt)) >= 3 and not any(h in txt for h in TASK_HUD):
+            han = len(re.findall(r"[\u4e00-\u9fff]", txt))
+            # 任務字是短句（在電腦上註冊／蓋印表格／檢查病人的情況）；超過 12 個中文字或帶逗號句號的是面板說明
+            if 3 <= han <= 12 and not re.search(r"[，。,]", txt) and not any(h in txt for h in TASK_HUD):
                 out.append([txt, round(cx, 2), round(cy, 2)])
         except Exception:  # noqa: BLE001
             continue
