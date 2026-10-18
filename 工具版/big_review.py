@@ -41,6 +41,7 @@ def main():
     ap.add_argument("--effort", default="慢想")
     ap.add_argument("--max-tokens", type=int, default=6000)
     ap.add_argument("--endpoint", default="http://192.168.0.126:8888/v1")
+    ap.add_argument("--reuse", action="store_true", help="不叫大腦，用上次存的 大檢討_日期.json 的原文／推理重新解析與寫入（10/19 05:2x 解析失敗補救）")
     a = ap.parse_args()
     import tool_agent as T
     from play_agent import stream_json, parse_json_loose, LAST_REASONING
@@ -111,13 +112,32 @@ def main():
               '"記筆記":["一句一條，表格式，確定的事才寫"],'
               '"要改的習慣":["例如：E 一律先長按 1.5 秒再試短按；右上角黑底白字是任務不是按鈕；填 false 當輪就檢討"]}')
     t0 = time.time()
-    print(f"[大檢討] system {len(system)} 字、user {len(user)} 字、effort {a.effort}、max_tokens {a.max_tokens}…")
-    raw, trunc, ttft, _ = stream_json(a.endpoint, T.detect_model(a.endpoint), system,
-                                      [{"type": "text", "text": user}], a.max_tokens, time.time() + 900, 0.3, effort=a.effort)
-    dt = time.time() - t0
-    reason = LAST_REASONING.get("text", "")
+    if a.reuse:
+        old = json.load(open(os.path.join(m, f"大檢討_{a.date}.json"), encoding="utf-8"))
+        raw, reason, dt, trunc = old.get("原文") or "", old.get("推理") or "", float(old.get("秒") or 0), False
+        print(f"[大檢討] --reuse：用存好的原文 {len(raw)} 字、推理 {len(reason)} 字")
+    else:
+        print(f"[大檢討] system {len(system)} 字、user {len(user)} 字、effort {a.effort}、max_tokens {a.max_tokens}…")
+        raw, trunc, ttft, _ = stream_json(a.endpoint, T.detect_model(a.endpoint), system,
+                                          [{"type": "text", "text": user}], a.max_tokens, time.time() + 900, 0.3, effort=a.effort)
+        dt = time.time() - t0
+        reason = LAST_REASONING.get("text", "")
     o = parse_json_loose(T.repair_json(raw)) or {}
-    print(f"[大檢討] {dt:.0f}s 截斷={trunc} 推理 {len(reason)} 字 輸出 {len(raw)} 字 解析{'成功' if o else '失敗'}")
+    from_reason = False
+    if not o and reason:      # 10/19 05:2x：他把整份 JSON 寫在推理裡、輸出 0 字 → 從推理最後一個「{"今天做了什麼"」取出來
+        i = reason.rfind('{"今天做了什麼"')
+        if i >= 0:
+            o = parse_json_loose(T.repair_json(reason[i:])) or {}
+            from_reason = bool(o)
+    print(f"[大檢討] {dt:.0f}s 截斷={trunc} 推理 {len(reason)} 字 輸出 {len(raw)} 字 解析{'成功' if o else '失敗'}{'（從推理取出）' if from_reason else ''}")
+    if not o:                 # 解析不出來：不覆蓋上一份 大檢討.md（system 會繼續帶上一份），失敗的另存
+        with open(os.path.join(m, "大檢討_失敗.md"), "w", encoding="utf-8") as f:
+            f.write(f"# 大檢討解析失敗 {datetime.now().strftime('%m/%d %H:%M')}" + NL * 2 + "## 原文" + NL + raw + NL * 2 + "## 推理" + NL + reason)
+        if not a.reuse:
+            with open(os.path.join(m, f"大檢討_{a.date}.json"), "w", encoding="utf-8") as f:
+                json.dump({"輸出": o, "原文": raw, "推理": reason, "秒": dt}, f, ensure_ascii=False, indent=1)
+        print("[大檢討] 解析失敗，沒有覆蓋 大檢討.md（另存 大檢討_失敗.md）")
+        return
 
     # 把他列的東西真的寫進他的記憶／工具清單（跟他在遊戲裡叫工具一樣）
     applied = []
@@ -134,7 +154,7 @@ def main():
         if isinstance(t, str) and t.strip():
             applied.append("記筆記 → " + tools.mem_note(t))
 
-    out = [f"# 大檢討 {a.date}（{datetime.now().strftime('%m/%d %H:%M')}，{a.effort}，{dt:.0f} 秒）", ""]
+    out = [f"# 大檢討 {a.date}（{datetime.now().strftime('%m/%d %H:%M')}，{a.effort}，{dt:.0f} 秒{'，JSON 從推理取出' if from_reason else ''}）", ""]
     for k in ("今天做了什麼", "卡最久的三件事", "大任務為什麼沒完成", "卡法歸納", "明天開場要做什麼", "新工具", "補用途", "記卡法", "記筆記", "要改的習慣"):
         v = o.get(k)
         if v is None:
