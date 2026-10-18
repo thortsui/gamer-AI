@@ -27,6 +27,8 @@ def changed(ret):
     m = re.search(r"畫面變化 (\d+)", ret)
     if m and "跟背景差不多" in ret:          # 10/16 08:0x：比背景大才算有反應
         return False
+    if m and "（沒變" in ret.split("；")[0] + ret[:80]:   # 10/18 12:1x：變化 1.6 顯示成「2」但程式判「沒變」→ 以程式的判斷為準
+        return False
     return (int(m.group(1)) >= 2) if m else None
 
 
