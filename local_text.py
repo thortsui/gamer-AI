@@ -71,7 +71,42 @@ def _win_engine():
 
 
 def _win_read(img):
-    """用 Windows OCR 讀一張 PIL 圖，回傳跟 rapidocr 同樣格式的 [(box, text, score)]。"""
+    """用 Windows OCR 讀一張 PIL 圖，回傳跟 rapidocr 同樣格式的 [(box, text, score)]。
+
+    2026-10-19 04:4x：Windows OCR 先判斷文字角度，有些整張畫面判斷失敗（text_angle None）就整張回 0 行——
+    大廳全是大字讀 0 行、保全攝影機畫面（濾鏡雜訊重）「辦理入住」「出口」讀不到，他因此 8 輪以為自己卡在牆角。
+    同一張切 2×2（重疊 10%）每塊都讀得到 → 大圖先讀整張，再讀四塊，合併去重，座標換回整張。"""
+    base = _win_read_once(img)
+    if base is None:
+        return None
+    W, H = img.size
+    if W < 800 and H < 500:
+        return base
+    out = list(base)
+
+    def key(t):
+        return "".join(str(t).split())
+
+    for i in range(2):
+        for j in range(2):
+            x0, x1 = int(max(0.0, i / 2 - 0.05) * W), int(min(1.0, (i + 1) / 2 + 0.05) * W)
+            y0, y1 = int(max(0.0, j / 2 - 0.05) * H), int(min(1.0, (j + 1) / 2 + 0.05) * H)
+            for box, txt, sc in (_win_read_once(img.crop((x0, y0, x1, y1))) or []):
+                box = [[p[0] + x0, p[1] + y0] for p in box]
+                cx, cy = (box[0][0] + box[2][0]) / 2, (box[0][1] + box[2][1]) / 2
+                dup = False
+                for b2, t2, _ in out:
+                    c2x, c2y = (b2[0][0] + b2[2][0]) / 2, (b2[0][1] + b2[2][1]) / 2
+                    if abs(cx - c2x) < 0.04 * W and abs(cy - c2y) < 0.03 * H and (key(txt) in key(t2) or key(t2) in key(txt)):
+                        dup = True
+                        break
+                if not dup:
+                    out.append((box, txt, sc))
+    return out
+
+
+def _win_read_once(img):
+    """Windows OCR 讀一次（整張）。"""
     import numpy as np
     try:
         from winrt.windows.graphics.imaging import (BitmapAlphaMode, BitmapPixelFormat,

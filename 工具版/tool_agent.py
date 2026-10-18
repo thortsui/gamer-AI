@@ -2068,7 +2068,7 @@ def _close_brackets(frag):
     return None
 
 
-TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請", "職業", "日誌", "啟用", "重生", "繼續", "速度", "好友", "最高",
+TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請", "職業", "日誌", "啟用", "重生", "繼續", "速度", "好友", "最高", "咖啡師", "外科", "醫生",
             # 10/19 02:42 誤判：長按 E 開了職業面板，右側說明「（等級 3）開始時配備電擊槍和可部署攝影機…」被當成任務字換了 → 面板／選單用字
             "護士", "護十", "秘書", "實習生", "心理學家", "醫護", "外觀", "裝備", "等級", "配備", "恢復", "次數", "攝影機", "伺服器", "設定", "協助", "帳號")
 
@@ -2086,7 +2086,7 @@ def top_right_words(im):
             x0, y0 = int(W * fx0), int(H * fy0)
             crop = im.crop((x0, y0, int(W * fx1), int(H * fy1)))
             crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
-            res += [(r, x0, y0) for r in (local_text._win_read(crop) or [])]
+            res += [(r, x0, y0) for r in (local_text._win_read_once(crop) or [])]   # 小裁切讀一次就好（不切四塊）
     except Exception:  # noqa: BLE001
         return []
     out = []
