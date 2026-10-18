@@ -298,34 +298,49 @@ def task_changes(recs):
 
 
 def plan3_stats(recs):
-    """10/18 三步規劃：每輪排幾步、各步他自評符合率（下一輪的「符合」清單）、程式量到有反應率、三步全符合率。"""
+    """10/18 N 步規劃：每輪排幾步、各步他自評符合率（下一輪的「符合」清單）、程式量到有反應率、全符合率；按設定步數分開算。
+    12:5x 起改兩步（jsonl「步數」）；還有小任務完成的回顧（送了幾次、回顧後記下幾次）。"""
     rows = [r for r in recs if "下三步" in r]
     if not rows:
         return
-    n_steps = Counter(len(r["下三步"]) for r in rows)
-    self_ok = [[0, 0] for _ in range(3)]
-    react = [[0, 0] for _ in range(3)]
-    all_ok = [0, 0]
-    for r in rows:
-        m = r.get("符合")
-        if isinstance(m, list) and m:
-            for i, v in enumerate(m[:3]):
-                self_ok[i][1] += 1
-                self_ok[i][0] += int(v is True)
-            all_ok[1] += 1
-            all_ok[0] += int(all(v is True for v in m))
-        for i, st in enumerate(r["下三步"][:3]):
-            c = changed(str(st.get("回傳", "")))
-            if c is not None:
-                react[i][1] += 1
-                react[i][0] += int(c)
 
     def rt(ok):
         return f"{ok[0]}/{ok[1]}（{ok[0] / ok[1] * 100:.0f}%）" if ok[1] else "0/0"
-    print(f"三步規劃：{len(rows)} 輪｜排了幾步 " + "、".join(f"{k} 步 {v} 輪" for k, v in sorted(n_steps.items()))
-          + f"｜三步全符合 {rt(all_ok)}")
-    print("  他自評符合率：" + "、".join(f"第{i + 1}步 {rt(self_ok[i])}" for i in range(3))
-          + "｜程式量到有反應：" + "、".join(f"第{i + 1}步 {rt(react[i])}" for i in range(3)))
+    groups = {}
+    for r in rows:
+        groups.setdefault(r.get("步數") or 3, []).append(r)
+    for n, rs in sorted(groups.items()):
+        n_steps = Counter(len(r["下三步"]) for r in rs)
+        self_ok = [[0, 0] for _ in range(n)]
+        react = [[0, 0] for _ in range(n)]
+        all_ok = [0, 0]
+        for r in rs:
+            m = r.get("符合")
+            if isinstance(m, list) and m:
+                for i, v in enumerate(m[:n]):
+                    self_ok[i][1] += 1
+                    self_ok[i][0] += int(v is True)
+                all_ok[1] += 1
+                all_ok[0] += int(all(v is True for v in m))
+            for i, st in enumerate(r["下三步"][:n]):
+                c = changed(str(st.get("回傳", "")))
+                if c is not None:
+                    react[i][1] += 1
+                    react[i][0] += int(c)
+        print(f"{n}步規劃：{len(rs)} 輪｜排了幾步 " + "、".join(f"{k} 步 {v} 輪" for k, v in sorted(n_steps.items()))
+              + f"｜全符合 {rt(all_ok)}")
+        print("  他自評符合率：" + "、".join(f"第{i + 1}步 {rt(self_ok[i])}" for i in range(n))
+              + "｜程式量到有反應：" + "、".join(f"第{i + 1}步 {rt(react[i])}" for i in range(n)))
+    sent = done = 0
+    for r in recs:
+        for ret in r.get("回傳") or []:
+            if re.match(r"● (任務完成|這步做完)", ret):
+                if "還沒算" in ret:
+                    sent += 1
+                elif "記下了" in ret:
+                    done += 1
+    if sent or done:
+        print(f"小任務完成回顧：送出等回顧 {sent} 次、回顧後記下 {done} 次")
 
 
 def verify2_stats(recs):

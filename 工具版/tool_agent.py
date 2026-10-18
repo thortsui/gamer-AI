@@ -88,12 +88,22 @@ def read_text(path, tail=None):
     return s
 
 
-PLAN3_FORMAT = ('{"看到":"儀器讀數，把畫面上看得到的東西、字、方位、數字都寫出來(<=80字)",'
-                '"上一輪實際":"上一輪三步做完之後實際發生了什麼(<=60字；第一輪寫 無)",'
-                '"符合":[true或false,…上一輪三步各一個：那一步的工具回傳＋現在畫面，跟它的「結果應該是」一不一樣；第一輪寫 []],'
-                '"想":"因為:原因｜所以要:目的｜三步:為什麼這樣排",'
-                '"先記":["記錄／檢討／文件／學習類工具，最多 2 個，不佔三步；有 false 就在這裡叫 檢討(…)；不用就 []"],'
-                '"下三步":[{"做":"工具(參數)","結果應該是":"這一步做完應該看到什麼"},{"做":"…","結果應該是":"…"},{"做":"…","結果應該是":"…"}]}')
+CN_NUM = {1: "一", 2: "兩", 3: "三", 4: "四", 5: "五"}
+_PLAN_FORMAT = ('{"看到":"儀器讀數，把畫面上看得到的東西、字、方位、數字都寫出來(<=80字)",'
+                '"上一輪實際":"上一輪K步做完之後實際發生了什麼(<=60字；第一輪寫 無)",'
+                '"符合":[true或false,…上一輪K步各一個：那一步的工具回傳＋現在畫面，跟它的「結果應該是」一不一樣；第一輪寫 []],'
+                '"想":"因為:原因｜所以要:目的｜K步:為什麼這樣排",'
+                '"先記":["記錄／檢討／文件／學習類工具，最多 2 個，不佔K步；有 false 就在這裡叫 檢討(…)；不用就 []"],'
+                '"下K步":[EX]}')
+
+
+def plan_format(n):
+    k = CN_NUM.get(n, str(n))
+    ex = ",".join(['{"做":"工具(參數)","結果應該是":"這一步做完應該看到什麼"}'] + ['{"做":"…","結果應該是":"…"}'] * (n - 1))
+    return _PLAN_FORMAT.replace("K", k).replace("EX", ex)
+
+
+PLAN3_FORMAT = plan_format(3)
 PLAN3_PRE_GROUPS = ("文件", "記憶", "流程", "學習")
 
 
@@ -166,20 +176,30 @@ def build_system(game, cat, plan3=False):
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
               "定義完它就在清單裡、下一輪就能叫。" + NL * 2
-            + (PLAN3_RULE + NL * 2 + "每一輪只輸出一個 JSON：" + PLAN3_FORMAT if plan3 else
+            + (plan_rule(int(plan3)) + NL * 2 + "每一輪只輸出一個 JSON：" + plan_format(int(plan3)) if plan3 else
                "每一輪只輸出一個 JSON：" + cat["輸出格式"] + NL
                + "「用」一輪最多 5 個小動作，照順序做（12:3x 使用者：一輪排四到五個小動作加速）；字串「名稱(參數)」或 {\"工具\":\"名稱\",\"參數\":{...}} 都可以。"
                  "不知道怎麼做就先叫文件類工具看一眼，再動。"))
 
 
-# 10/18 使用者：「他要直接規劃好下三個步驟再直接執行，中間不檢查」
-PLAN3_RULE = ("【三步規劃】（使用者 10/18 定的，這次挑戰照這個做）每一輪先把**接下來三步**規劃好：每一步一個工具（走／轉／按／點字…遊戲動作都可以），"
-              "每一步都寫它的「結果應該是」。程式一口氣照順序做完三步，**中間不停下來給你看**，三步都做完才截下一張畫面給你。"
-              "所以排之前要先想清楚：第一步做完畫面會變成怎樣、第二步要接在那個狀態上，依此類推。"
-              "下一輪看三個工具回傳＋新畫面，在「符合」逐步填 [true/false, …]；有 false 就在「先記」叫 檢討。"
-              "記錄／檢討／文件／學習類（記筆記、檢討、讀文件、大任務完成…）放「先記」，不佔三步、在三步之前做。"
+# 10/18 使用者：「他要直接規劃好下三個步驟再直接執行，中間不檢查」；12:5x「改成 預測兩步驟」
+_PLAN_RULE = ("【K步規劃】（使用者 10/18 定的，這次挑戰照這個做）每一輪先把**接下來K步**規劃好：每一步一個工具（走／轉／按／點字…遊戲動作都可以），"
+              "每一步都寫它的「結果應該是」。程式一口氣照順序做完K步，**中間不停下來給你看**，K步都做完才截下一張畫面給你。"
+              "所以排之前要先想清楚：第一步做完畫面會變成怎樣、下一步要接在那個狀態上。"
+              "下一輪看K個工具回傳＋新畫面，在「符合」逐步填 [true/false, …]；有 false 就在「先記」叫 檢討。"
+              "記錄／檢討／文件／學習類（記筆記、檢討、讀文件、大任務完成…）放「先記」，不佔K步、在K步之前做。"
               "點擊還是兩步：點 或 點字 只是預約，確認點 要排在下一輪（可以當下一輪的第一步）。"
-              "本來的「上一輪實際／符合／檢討」規則一樣適用，只是 符合 改成三步各一個。")
+              "本來的「上一輪實際／符合／檢討」規則一樣適用，只是 符合 改成K步各一個。" + NL
+              + "【小任務完成要先回顧三步】（使用者 10/18 12:5x 定的）任務完成、這步做完 都要送兩次："
+              "第一次送，程式不會記完成，會把完成前最後三步（做了什麼、結果應該是、程式回傳、你填的符合）列給你；"
+              "你逐步回顧是不是真的做成了，確定才在之後的輪再送一次，並寫 回顧（三步各自確認的結果，要寫字不能只寫數字）。沒做成就不要送，繼續做。")
+
+
+def plan_rule(n):
+    return _PLAN_RULE.replace("K", CN_NUM.get(n, str(n)))
+
+
+PLAN3_RULE = plan_rule(3)
 
 
 # ---------------------------------------------------------------- 速記解析
@@ -249,6 +269,8 @@ def _parse_call(item, cat):
     else:
         for k, v in zip(keys, args):
             params[k] = v
+        if keys and len(args) > len(keys):          # 10/18：回顧／下次 寫了逗號 → 多出來的併進最後一格，不丟掉
+            params[keys[-1]] = "，".join(args[len(keys) - 1:])
     return name, params
 
 
@@ -1664,11 +1686,41 @@ class Tools(ExtraTools):
         return "存到 記憶/遇到的問題.md（使用者會看）"
 
     # ---- 流程
-    def flow_step_done(self, 做了什麼=""):
-        return self._append("步驟.md", f"做完:{做了什麼}")
+    step_log = []          # 程式做過的每一步：{"做","結果應該是","回傳","符合"}（主迴圈填）
+    pending_done = None    # 送了一次、等回顧的小任務完成
 
-    def flow_task_done(self, 任務=""):
-        return self._append("任務.md", f"完成:{任務}")
+    def _recall3(self):
+        last = self.step_log[-3:]
+        if not last:
+            return "（還沒有做過的步驟紀錄）"
+        fz = {True: "true", False: "false"}
+        return NL.join(f"倒數第{len(last) - i}步 做:{st['做']}｜結果應該是:{st.get('結果應該是') or '（沒寫）'}"
+                       f"｜程式回傳:{str(st.get('回傳', ''))[:140]}｜你填的符合:{fz.get(st.get('符合'), '還沒填')}"
+                       for i, st in enumerate(last))
+
+    def _done_review(self, kind, what, review, fname, prefix):
+        """10/18 12:5x 使用者：「送完成前先回顧三步」——第一次送只列出完成前最後三步，回顧過再送一次才記完成。"""
+        rv = re.sub(r"^\s*回顧\s*[:：]\s*", "", str(review or "")).strip()
+        words = re.sub(r"[\d\s.,，、。:：;；|｜()（）\[\]\-+_/%]+", "", rv)
+        p = self.pending_done
+        if p and p["種類"] == kind and len(words) >= 6 and time.time() - p["時間"] <= 900:
+            self.pending_done = None
+            name = what or p["內容"]
+            self._append(fname, f"{prefix}{name}｜回顧:{rv}｜完成前三步:{' → '.join(str(x['做']) for x in p['三步']) or '無'}")
+            return f"{kind} 記下了：{name}（回顧：{rv}）"
+        self.pending_done = {"種類": kind, "內容": what, "時間": time.time(), "三步": [dict(x) for x in self.step_log[-3:]]}
+        head = ""
+        if rv:
+            head = ("回顧要寫真的內容（文字：三步各自確認了什麼），這次不算；" if (p and p["種類"] == kind)
+                    else "要先看過完成前的三步，下一輪再寫回顧；")
+        return (head + f"還沒算 {kind}。先回顧完成前最後三步：" + NL + self._recall3() + NL
+                + f"→ 逐步看是不是真的做成了（回傳有沒有反應、畫面有沒有變成預期）。確定就之後再送一次 {kind}({what or '…'},回顧:三步各自確認的結果)；沒做成就不要送，繼續做")
+
+    def flow_step_done(self, 做了什麼="", 回顧=""):
+        return self._done_review("這步做完", str(做了什麼).strip(), 回顧, "步驟.md", "做完:")
+
+    def flow_task_done(self, 任務="", 回顧=""):
+        return self._done_review("任務完成", str(任務).strip(), 回顧, "任務.md", "完成:")
 
     def flow_give_up(self, 為什麼=""):
         return self._append("放棄.md", f"放棄:{為什麼}")
@@ -1914,7 +1966,10 @@ def main():
     ap.add_argument("--lock-effort", action="store_true", help="思考強度 工具不能改（全程用 --effort）")
     ap.add_argument("--verify2", action="store_true", help="量測二次驗證：每個量測做兩次、回報兩個值與一不一致")
     ap.add_argument("--plan3", action="store_true", help="三步規劃：每輪排下三步，程式一口氣做完才截下一張圖")
+    ap.add_argument("--steps", type=int, default=0, help="每輪排幾步（10/18 12:5x 使用者「改成 預測兩步驟」→ 2）；0＝看 --plan3")
     args = ap.parse_args()
+    plan_n = max(0, min(5, args.steps)) or (3 if args.plan3 else 0)
+    kn = CN_NUM.get(plan_n, str(plan_n))
     live = bool(args.live) and not args.image
     from play_agent import stream_json, parse_json_loose, LAST_REASONING
 
@@ -1924,7 +1979,7 @@ def main():
     tools.effort_fixed = args.effort
     model = detect_model(args.endpoint)
     tools.endpoint, tools.model = args.endpoint, model
-    system = build_system(args.game, cat, args.plan3)
+    system = build_system(args.game, cat, plan_n)
     if live:
         # 10/18 防休眠：10/17 03:05 另開的 keep_awake.ps1 被系統因記憶體不足停掉 → 改由代理自己的主執行緒設定，代理在跑就不休眠、不關螢幕
         try:
@@ -1936,7 +1991,7 @@ def main():
     log_path = os.path.join(tools.mdir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     print(f"[工具版] 遊戲 {args.game}｜大腦 {model}｜{'LIVE 真的按' if live else 'dry-run 只印'}｜system {len(system)} 字｜工具 {len(cat['工具'])} 個"
           f"｜推理 {args.effort}{'（鎖定）' if args.lock_effort else ''}｜max_tokens {args.max_tokens}｜時限 {args.deadline:.0f}s"
-          f"｜二次驗證 {'開' if args.verify2 else '關'}｜三步規劃 {'開' if args.plan3 else '關'}")
+          f"｜二次驗證 {'開' if args.verify2 else '關'}｜規劃 {plan_n or '關'} 步")
     print(f"   紀錄 {log_path}")
 
     history = []        # 這個大任務期間的輪次摘要（大任務完成就清空）
@@ -1950,7 +2005,7 @@ def main():
             print("[stop.txt] 結束")
             break
         cat = tools.cat                                   # 他定義的新工具／補用途會讓清單變
-        system = build_system(args.game, cat, args.plan3)
+        system = build_system(args.game, cat, plan_n)
         im = tools.grab()
         if im is None:
             print(f"[{rnd}] 抓不到畫面（Roblox 不在前景？），等 3 秒")
@@ -1980,7 +2035,7 @@ def main():
             prev_txt = ("原因：" + prev.get("原因", "？") + NL
                         + NL.join(f"第{i + 1}步 做:{st['做']}｜結果應該是:{st['結果應該是'] or '（你沒寫）'}｜程式回傳:{st['回傳'][:160]}"
                                   for i, st in enumerate(prev["三步"]))
-                        + NL + "→ 看現在的畫面＋三個回傳，「上一輪實際」寫實際結果、「符合」逐步填 [true/false,…]；有 false 就在 先記 叫 檢討")
+                        + NL + f"→ 看現在的畫面＋{len(prev['三步'])}個回傳，「上一輪實際」寫實際結果、「符合」逐步填 [true/false,…]；有 false 就在 先記 叫 檢討")
         else:
             prev_txt = ("原因：" + prev.get("原因", "？") + "｜預期結果：" + prev.get("預期", "？") + "｜做了：" + prev.get("做了", "無")
                         + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
@@ -1993,7 +2048,7 @@ def main():
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
                  + (("【最近的檢討】（你自己寫的，照著做）" + NL + reviews_txt) if reviews_txt else "")
                  + "【這個大任務到目前為止】" + NL + (NL.join(history[-6:]) or "（剛開始）") + NL * 2
-                 + ("看畫面，規劃接下來三步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + PLAN3_FORMAT if args.plan3 else
+                 + (f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
                     "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))
         content.append({"type": "text", "text": panel})
         t0 = time.time()
@@ -2008,10 +2063,10 @@ def main():
         if isinstance(calls, str):
             calls = [calls]
         pre, steps, plan_notes = [], [], []
-        if args.plan3:
+        if plan_n:
             pre = o.get("先記") or []
             pre = [pre] if isinstance(pre, (str, dict)) else list(pre)
-            raw_steps = o.get("下三步") or []
+            raw_steps = o.get(f"下{kn}步") or o.get("下兩步") or o.get("下三步") or o.get("下幾步") or []
             if isinstance(raw_steps, (str, dict)):
                 raw_steps = [raw_steps]
             for st in raw_steps:
@@ -2020,22 +2075,27 @@ def main():
                                   "結果應該是": str(st.get("結果應該是") or "")[:80]})
                 elif st:
                     steps.append({"做": st, "結果應該是": ""})
-            if not steps and calls:                       # 他沒照格式、寫了舊的「用」：前三個當三步
-                steps = [{"做": c, "結果應該是": ""} for c in calls[:3]]
-                plan_notes.append("✗ 這次挑戰要寫「下三步」（每步 做＋結果應該是）；你寫了「用」，程式拿前三個當三步做")
-            if len(steps) > 3:
-                plan_notes.append(f"✗ 你排了 {len(steps)} 步，只做前三步")
-                steps = steps[:3]
-            elif 0 < len(steps) < 3:
-                plan_notes.append(f"✗ 你只排了 {len(steps)} 步（這次挑戰每輪排滿三步）")
+            if not steps and calls:                       # 他沒照格式、寫了舊的「用」：前 N 個當 N 步
+                steps = [{"做": c, "結果應該是": ""} for c in calls[:plan_n]]
+                plan_notes.append(f"✗ 這次挑戰要寫「下{kn}步」（每步 做＋結果應該是）；你寫了「用」，程式拿前{kn}個當{kn}步做")
+            if len(steps) > plan_n:
+                plan_notes.append(f"✗ 你排了 {len(steps)} 步，只做前{kn}步")
+                steps = steps[:plan_n]
+            elif 0 < len(steps) < plan_n:
+                plan_notes.append(f"✗ 你只排了 {len(steps)} 步（這次挑戰每輪排滿{kn}步）")
             calls = [x for x in pre[:2]] + [st["做"] for st in steps]
         actual = str(o.get("上一輪實際") or "")[:80]
         match = o.get("符合")
         if isinstance(match, str):
             match = match.strip().lower() in ("true", "是", "符合", "yes")
         if isinstance(match, list):
-            match = [(m if isinstance(m, bool) else str(m).strip().lower() in ("true", "是", "符合", "yes")) for m in match][:3]
+            match = [(m if isinstance(m, bool) else str(m).strip().lower() in ("true", "是", "符合", "yes")) for m in match][:5]
             match_all = (all(match) if match else None)
+            if prev and prev.get("三步"):                 # 他填的符合寫回上一輪那幾步（小任務完成的回顧要用）
+                n_prev = len(prev["三步"])
+                for i, m in enumerate(match[:n_prev]):
+                    if len(tools.step_log) >= n_prev:
+                        tools.step_log[-n_prev + i]["符合"] = m
         else:
             match_all = match
         names_called = [parse_call(x, cat)[0] for x in list(calls)[:5]]
@@ -2061,16 +2121,19 @@ def main():
             print(f"   ▶ {tag}{name} {params} → {r[:120].replace(NL, ' ')}")
             return r
 
-        if args.plan3:
+        if plan_n:
             groups = {t["名稱"]: t["類別"] for t in cat["工具"]}
             for item in pre[:2]:
                 name = parse_call(item, cat)[0]
                 if name and groups.get(name) not in PLAN3_PRE_GROUPS:
-                    rets.append(f"✗ 先記 只放 記錄／檢討／文件／學習類；「{name}」是遊戲動作，要排進 下三步（這次沒做）")
+                    rets.append(f"✗ 先記 只放 記錄／檢討／文件／學習類；「{name}」是遊戲動作，要排進 下{kn}步（這次沒做）")
                     continue
                 do(item, "先記 ")
-            for i, st in enumerate(steps):           # 三步一口氣做完，中間不回大腦
+            for i, st in enumerate(steps):           # N 步一口氣做完，中間不回大腦
                 st["回傳"] = do(st["做"], f"第{i + 1}步 ")
+                tools.step_log.append({"做": st["做"] if isinstance(st["做"], str) else json.dumps(st["做"], ensure_ascii=False),
+                                       "結果應該是": st["結果應該是"], "回傳": str(st["回傳"]), "符合": None})
+            tools.step_log = tools.step_log[-20:]
         else:
             for item in list(calls)[:5]:
                 do(item)
@@ -2082,7 +2145,7 @@ def main():
         m_expect = re.search(r"結果應該是[:：]\s*(.*?)(?:｜|\||$)", think)
         prev = {"原因": (m_reason.group(1) if m_reason else think[:40]), "預期": (m_expect.group(1) if m_expect else "（你沒寫 結果應該是）"),
                 "做了": "、".join(did) or "無"}
-        if args.plan3:
+        if plan_n:
             prev["三步"] = [{"做": (st["做"] if isinstance(st["做"], str) else json.dumps(st["做"], ensure_ascii=False)),
                             "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))} for st in steps]
         if tools.clear_flag:                              # 大任務完成：這個任務期間的紀錄全部清空
@@ -2095,8 +2158,9 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words,
-                                **({"先記": pre[:2], "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
-                                                              for st in steps]} if args.plan3 else {})},
+                                **({"先記": pre[:2], "步數": plan_n,
+                                    "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
+                                              for st in steps]} if plan_n else {})},
                                ensure_ascii=False) + NL)
         if not args.image and not live:
             time.sleep(1.0)
