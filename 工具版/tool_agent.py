@@ -1921,6 +1921,7 @@ def main():
     cat = load_catalog(args.game)
     tools = Tools(args.game, cat, live=live, image_path=args.image or None)
     tools.verify2, tools.effort_locked = bool(args.verify2), bool(args.lock_effort)
+    tools.effort_fixed = args.effort
     model = detect_model(args.endpoint)
     tools.endpoint, tools.model = args.endpoint, model
     system = build_system(args.game, cat, args.plan3)
