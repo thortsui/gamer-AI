@@ -1359,6 +1359,13 @@ class Tools(ExtraTools):
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
         time.sleep(0.3)
         after = self.grab()
+        redrag = ""
+        if self.diff(before, after) < 3 and abs(yaw) >= 3:
+            # 17:40 第一次轉完目標還在 0.75（沒轉）：中央有 E 提示時從中央壓右鍵會按到提示 → 跟 轉 一樣改從畫面上方重拖
+            self._drag(yaw * self.dx_deg, -pitch * self.dy_deg, fy=0.25)
+            time.sleep(0.3)
+            after = self.grab()
+            redrag = "（從中央拖畫面沒動——中央可能有提示擋住，改從畫面上方重拖一次）"
         out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"]
         loc1 = self._locate(patch, after) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
@@ -1373,11 +1380,26 @@ class Tools(ExtraTools):
                 final = self._locate(patch, after)
                 out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
         else:
-            out.append("轉完在新畫面找不到原本那一塊（可能被角色擋住、或那塊太平沒特徵），沒有補轉")
+            final = None
         ok = bool(final and final[2] >= 0.6 and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - 0.5) <= 0.08)
-        if final and final[2] >= 0.6:
-            out.append(self._v2("視角移動到", f"({loc1[0]:.2f},{loc1[1]:.2f})" if loc1 else "找不到",
+        if not (loc1 and loc1[2] >= 0.6):
+            # 17:38～17:43 三次「找不到」：目標轉到正中央剛好被自己的角色（第三人稱）擋住 → 改用整張畫面的左右位移驗證有沒有轉對
+            d_all = self.diff(before, after)
+            sh, _ = self._shift(before, after, d_all)
+            exp = 0.5 - fx
+            if sh is not None and abs(exp) >= 0.03:
+                ok_sh = abs(sh - exp) <= 0.05
+                out.append(f"轉完找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
+                           f"實測往{'左' if sh < 0 else '右'}移 {abs(sh) * 100:.0f}%（畫面變化 {d_all:.0f}）")
+                out.append(self._v2("視角移動到 位移", f"{exp * 100:+.0f}", f"{sh * 100:+.0f}", ok_sh, "%") + "（第一次＝應該移、第二次＝實測）")
+                ok = ok_sh
+            else:
+                out.append(f"轉完找不到原本那一塊，整張畫面的位移也量不出來（畫面變化 {d_all:.0f}），看下一張畫面確認")
+        if final and final[2] >= 0.6 and loc1 and loc1[2] >= 0.6:
+            out.append(self._v2("視角移動到", f"({loc1[0]:.2f},{loc1[1]:.2f})",
                                 f"({final[0]:.2f},{final[1]:.2f})", ok) + "（第一次＝轉完、第二次＝補轉後；目標應在 0.50,0.50 附近）")
+        if redrag:
+            out.insert(1, redrag)
         out.append("**已對準正中央**" if ok else "沒有完全對準；看下一張畫面，再用 視角移動到 或 轉 微調")
         try:
             self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜算 左右{yaw:+.0f} 上下{pitch:+.0f}｜結果 "
