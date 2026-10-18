@@ -1381,6 +1381,10 @@ class Tools(ExtraTools):
             self._drag(yaw * self.dx_deg, -pitch * self.dy_deg, fy=0.25)
             after = self._settled()
             redrag = "（從中央拖畫面沒動——中央可能有提示擋住，改從畫面上方重拖一次）"
+            if self.diff(before, after) < 3:
+                # 10/18 21:56：中央、上方都拖不動（整張畫面沒變）又補轉 → 直接回報，不補轉
+                return (f"視角移動到：算好要轉 左右 {yaw:+.0f}、上下 {pitch:+.0f} 度，但從畫面中央、上方拖兩次畫面都沒變——"
+                        "鏡頭現在轉不動（可能有面板／選單擋住滑鼠，或游標被鎖）；沒有補轉。先 關掉 面板或看看畫面上有什麼擋著")
         out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
