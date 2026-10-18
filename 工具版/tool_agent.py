@@ -1338,6 +1338,18 @@ class Tools(ExtraTools):
         iy, ix = np.unravel_index(int(np.argmax(ncc)), ncc.shape)
         return ((ix + pw / 2) / W, (iy + ph / 2) / H, float(ncc[iy, ix]))
 
+    def _settled(self, prev=None):
+        """轉完等畫面停下來再拍（19:28：0.3 秒就拍，遊戲畫面還沒更新 → 誤判「沒轉」又拖一次＝轉兩倍）。"""
+        time.sleep(0.35)
+        a = self.grab()
+        for _ in range(5):
+            time.sleep(0.25)
+            b = self.grab()
+            if self.diff(a, b) < 3:
+                return b
+            a = b
+        return a
+
     def look_at(self, x="", y=""):
         fx, fy = num(x, -1), num(y, -1)
         if not (0 <= fx <= 1 and 0 <= fy <= 1):
@@ -1362,14 +1374,12 @@ class Tools(ExtraTools):
         pitch = max(-60.0, min(60.0, pitch))
         self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
-        time.sleep(0.3)
-        after = self.grab()
+        after = self._settled()
         redrag = ""
         if self.diff(before, after) < 3 and abs(yaw) >= 3:
             # 17:40 第一次轉完目標還在 0.75（沒轉）：中央有 E 提示時從中央壓右鍵會按到提示 → 跟 轉 一樣改從畫面上方重拖
             self._drag(yaw * self.dx_deg, -pitch * self.dy_deg, fy=0.25)
-            time.sleep(0.3)
-            after = self.grab()
+            after = self._settled()
             redrag = "（從中央拖畫面沒動——中央可能有提示擋住，改從畫面上方重拖一次）"
         out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
@@ -1381,8 +1391,7 @@ class Tools(ExtraTools):
                 y2, p2 = self._angles_to(loc1[0], loc1[1], W, H)
                 self._drag(y2 * self.dx_deg, -p2 * self.dy_deg)
                 self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + p2))
-                time.sleep(0.3)
-                after = self.grab()
+                after = self._settled()
                 final = self._locate(patch, after, near=(0.5, 0.5, 0.3))
                 out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
         else:
@@ -1396,7 +1405,7 @@ class Tools(ExtraTools):
             if sh is not None and abs(exp) >= 0.03:
                 ok_sh = abs(sh - exp) <= 0.05
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住"
-                           + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + "）→ 改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
+                           + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + f"）→ 改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
                            f"實測往{'左' if sh < 0 else '右'}移 {abs(sh) * 100:.0f}%（畫面變化 {d_all:.0f}）")
                 out.append(self._v2("視角移動到 位移", f"{exp * 100:+.0f}", f"{sh * 100:+.0f}", ok_sh, "%") + "（第一次＝應該移、第二次＝實測）")
                 ok = ok_sh
