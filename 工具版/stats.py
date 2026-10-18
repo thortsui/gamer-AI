@@ -162,7 +162,8 @@ def main():
             last = t
             in_game, sanity = False, None       # 看到面板＝這局結束；之後回大廳不再另算一次
             continue
-        ms = re.search(r"(?:理智\s*(\d+)\s*%|(\d+)\s*%\s*[/、]?\s*\$|左下(?:理智)?\s*(\d+)\s*%)", sv)
+        # 10/18 08:1x：他寫「底左1%理智」「5%理智」（數字在前）→ 漏算 08:08 那次死亡，加 (\d+)%理智
+        ms = re.search(r"(?:理智\s*(\d+)\s*%|(\d+)\s*%\s*理智|(\d+)\s*%\s*[/、]?\s*\$|左下(?:理智)?\s*(\d+)\s*%)", sv)
         if ms:
             sanity = int(next(g for g in ms.groups() if g))
         if "輪班" in sv:
