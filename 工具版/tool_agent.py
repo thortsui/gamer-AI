@@ -1877,7 +1877,10 @@ class Tools(ExtraTools):
         vals = {"原因": 原因, "預期": 預期, "實際": 實際, "錯在哪": 錯在哪, "下次": 下次}
         bad = [k for k, v in vals.items() if not str(v).strip() or str(v).strip() == k or len(str(v).strip()) < 3]
         if bad:          # 12:1x 他把五格填成「原因、預期…」字面（跟早上審核照抄一樣）→ 退回
-            return "檢討 要寫真的內容，不能照抄格名：" + "、".join(bad) + " 沒寫。例：檢討(按E想開門,門打開,門沒動,距離太遠E沒亮,先走近看到E提示再按)"
+            # 10/19 03:1x：他只給 3～4 格被退回，連送 6 次同樣格式 → 回傳列出每格收到什麼，讓他看到少哪格
+            got = "、".join(f"{k}=「{str(v).strip()[:30] or '空'}」" for k, v in vals.items())
+            return ("檢討 沒記下（五格要各寫一格、用逗號分開）：" + "、".join(bad) + " 沒寫。程式收到的是：" + got
+                    + "。例：檢討(按E想開門,門打開,門沒動,距離太遠E沒亮,先走近看到E提示再按)")
         line = f"原因:{原因}｜預期:{預期}｜實際:{實際}｜錯在哪:{錯在哪}｜下次:{下次}"
         # 10/19 使用者「多多檢討多多找錯 避免重複犯錯」：跟這個大任務之前的檢討比，同樣的錯就告訴他第幾次、上次的下次寫什麼（只告訴，不擋）
         same = [r for r in self.reviews if similar_review(line, r)]
@@ -2077,14 +2080,17 @@ def top_right_words(im):
         import local_text
         from PIL import Image
         W, H = im.size
-        x0, y0, x1, y1 = int(W * 0.78), int(H * 0.06), W, int(H * 0.40)      # 10/18 真的任務字 y 0.14～0.37
-        crop = im.crop((x0, y0, x1, y1))
-        crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
-        res = local_text._win_read(crop) or []
+        # 右緣任務框（10/18 真的任務字 y 0.14～0.37）＋ 10/19 03:1x 加上方橫帶（「檢查病人的情況」10/18 讀在 0.64,0.08，輪班 旁邊）
+        res = []
+        for fx0, fy0, fx1, fy1 in ((0.78, 0.06, 1.0, 0.40), (0.30, 0.03, 0.78, 0.14)):
+            x0, y0 = int(W * fx0), int(H * fy0)
+            crop = im.crop((x0, y0, int(W * fx1), int(H * fy1)))
+            crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
+            res += [(r, x0, y0) for r in (local_text._win_read(crop) or [])]
     except Exception:  # noqa: BLE001
         return []
     out = []
-    for r in res:
+    for r, x0, y0 in res:
         try:
             box, txt = r[0], str(r[1]).strip()
             xs = [p[0] for p in box]
