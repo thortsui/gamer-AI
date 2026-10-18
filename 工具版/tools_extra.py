@@ -73,7 +73,7 @@ class ExtraTools:
             return "死亡檢討沒解析出來"
         line = "｜".join(f"{k}:{v}" for k, v in o.items() if isinstance(v, str))
         self._append("死亡檢討.md", line)
-        self.reviews.append("死亡檢討：" + line)
+        self.reviews.append(datetime.now().strftime("%H:%M") + " 死亡檢討：" + line)
         if o.get("要記的規則"):
             self.mem_note(str(o["要記的規則"]))
         return "死亡檢討記下了：" + line

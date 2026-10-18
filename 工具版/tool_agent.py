@@ -170,10 +170,16 @@ def build_system(game, cat, plan3=False):
             + "【每個行為三件事】（使用者定的）每一輪的「想」要寫清楚 ①做這個行為的原因（因為）②這個行為應該有的結果（結果應該是）；"
               "下一輪看到新畫面，先在「上一輪實際」寫 ③實際的結果、在「符合」填 true／false。"
               "**實際跟預期不同就直接開檢討**：同一輪叫 檢討(原因,預期,實際,錯在哪,下次)，不要跳過、不要等。符合才繼續下一步。" + NL
+            + "【這次測試：多檢討、多找錯】（使用者 10/19 交代）不是只有 符合:false 才檢討：每一輪都看上一輪有沒有做錯、做慢、做白工、可以做得更好的地方，"
+              "找到就在 先記 叫 檢討(原因,預期,實際,錯在哪,下次)。寫之前先看面板【這個大任務的檢討】：同樣的錯又出現，就在 錯在哪 寫「又犯：…」，"
+              "下次 要換一個跟之前不一樣、做得到的做法，避免重複犯錯。跑一段時間也可以自己叫 大檢討 做中間檢討。" + NL
+            + "【場景切換可能影響視角轉動速度】（使用者 10/19 交代）換場景之後（進出建築或房間、傳送、死亡重生、退出重進），"
+              "視角轉動速度（每度 dx／dy）可能跟之前量的不一樣；轉 的預期跟實測對不上時，先想是不是剛換過場景。" + NL
+            + "【遊戲任務字】面板每輪列程式讀到的右上角任務字（可能讀錯）；標「任務字換了」可能＝上一件做完了，要不要送 任務完成（先回顧三步）你自己決定。" + NL
             + "【少用中鍵縮放】（使用者 10/18 交代）捲（滑鼠中鍵）在遊戲畫面上會把鏡頭拉近拉遠，一縮放刻度、深度比例就變了、要重新量測；"
               "能不捲就不捲，要對準東西用 視角移動到(x,y) 或 轉。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
-              "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
+              "大任務完成之前，這個任務的每一輪紀錄和你寫的檢討都一直留在面板（程式重開也接著留）；做完送 大任務完成，程式才把這個任務期間的工具回傳、紀錄與檢討清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
@@ -1873,9 +1879,16 @@ class Tools(ExtraTools):
         if bad:          # 12:1x 他把五格填成「原因、預期…」字面（跟早上審核照抄一樣）→ 退回
             return "檢討 要寫真的內容，不能照抄格名：" + "、".join(bad) + " 沒寫。例：檢討(按E想開門,門打開,門沒動,距離太遠E沒亮,先走近看到E提示再按)"
         line = f"原因:{原因}｜預期:{預期}｜實際:{實際}｜錯在哪:{錯在哪}｜下次:{下次}"
-        self.reviews.append(line)
-        self._append("檢討.md", line)
-        return "檢討記下了（之後每輪面板【最近的檢討】會提醒你）：" + line
+        # 10/19 使用者「多多檢討多多找錯 避免重複犯錯」：跟這個大任務之前的檢討比，同樣的錯就告訴他第幾次、上次的下次寫什麼（只告訴，不擋）
+        same = [r for r in self.reviews if similar_review(line, r)]
+        self.reviews.append(datetime.now().strftime("%H:%M") + " " + line)
+        self._append("檢討.md", line + (f"｜（重複第 {len(same) + 1} 次）" if same else ""))
+        ret = "檢討記下了（大任務完成前每輪面板【這個大任務的檢討】都會列著）：" + line
+        if same:
+            m = re.search(r"下次:(.*)$", same[0])
+            ret += (NL + f"⚠ 這個錯在這個大任務已經檢討過 {len(same)} 次（第一次 {same[0][:5]}），那次 下次 寫「{m.group(1) if m else '？'}」。"
+                    "那次的下次為什麼沒擋住這次？這次的 下次 要寫一個不一樣、做得到的做法")
+        return ret
 
     # ---- 大任務（2026-10-15 使用者：每次導入的只有前面那些加上目前的大任務，執行完再清空接下一個）
     big = None            # {"名稱","成功條件","開始輪"}
@@ -1898,6 +1911,7 @@ class Tools(ExtraTools):
         name = self.big["名稱"] if self.big else "（沒設大任務）"
         self._append("大任務.md", f"完成:{name}｜結果:{結果}")
         self.clear_flag = True
+        self.reviews = []
         if self.big_queue:
             nxt = self.big_queue.pop(0)
             self.big = {"名稱": nxt, "成功條件": "", "開始": datetime.now().strftime("%H:%M")}
@@ -2051,26 +2065,157 @@ def _close_brackets(frag):
     return None
 
 
+TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請", "職業", "日誌", "啟用", "重生", "繼續", "速度", "好友", "最高")
+
+
 def top_right_words(im):
-    """畫面右半上半部的字（遊戲任務字在右上／右側）：[(字, x, y)]，只留 3 個字以上的。"""
+    """10/19 任務字整併：只裁畫面右緣任務列（x 0.78～1、y 0.06～0.48）放大兩倍再 OCR（10/18 整張讀多是海報／招牌亂碼）；
+    去掉 HUD、純英文招牌、少於 3 個中文字的。回 [(字, x, y)]，座標換回整張畫面比例、由上往下排。"""
     try:
         import local_text
-        res = local_text._win_read(im) or []
+        from PIL import Image
+        W, H = im.size
+        x0, y0, x1, y1 = int(W * 0.78), int(H * 0.06), W, int(H * 0.48)
+        crop = im.crop((x0, y0, x1, y1))
+        crop = crop.resize((crop.width * 2, crop.height * 2), Image.LANCZOS)
+        res = local_text._win_read(crop) or []
     except Exception:  # noqa: BLE001
         return []
-    W, H = im.size
     out = []
     for r in res:
         try:
             box, txt = r[0], str(r[1]).strip()
             xs = [p[0] for p in box]
             ys = [p[1] for p in box]
-            cx, cy = (min(xs) + max(xs)) / 2 / W, (min(ys) + max(ys)) / 2 / H
-            if cx >= 0.6 and cy <= 0.6 and len(re.sub(r"[\s\d\W_]+", "", txt)) >= 3:
+            cx, cy = (x0 + (min(xs) + max(xs)) / 4) / W, (y0 + (min(ys) + max(ys)) / 4) / H
+            if len(re.findall(r"[\u4e00-\u9fff]", txt)) >= 3 and not any(h in txt for h in TASK_HUD):
                 out.append([txt, round(cx, 2), round(cy, 2)])
         except Exception:  # noqa: BLE001
             continue
-    return out[:12]
+    out.sort(key=lambda w: w[2])
+    return out[:8]
+
+
+class TaskWords:
+    """10/19 任務字進工作流程：連兩輪都讀到、而且前面幾輪沒出現過的字 → 任務字換了。只給讀數，不替他判斷完成。"""
+
+    def __init__(self):
+        self.hist, self.current, self.events, self.last_text, self.prev_text = [], [], [], "", ""
+
+    @staticmethod
+    def norm(t):
+        return "".join(re.findall(r"[\u4e00-\u9fff]", str(t)))
+
+    @staticmethod
+    def same(a, b):
+        import difflib
+        return a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.6
+
+    def update(self, words):
+        """回 (這輪讀到的字串, 這輪的換字事件或 None)"""
+        cur = [self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 3]
+        text = "、".join(w[0] for w in words) or "（沒讀到）"
+        ev = None
+        if self.hist:
+            last = self.hist[-1]
+            confirmed = [w for w in cur if any(self.same(w, x) for x in last)]
+            pool = [w for st in self.hist[-7:-1] for w in st] + list(self.current)
+            new = [w for w in confirmed if not any(self.same(w, p) for p in pool)]
+            if new and (self.current or self.events):
+                ev = {"時間": datetime.now().strftime("%H:%M"), "舊": "、".join(self.current) or "（沒有）", "新": "、".join(new)}
+                self.events.append(ev)
+            if confirmed:
+                self.current = confirmed
+        self.hist.append(cur)
+        self.hist = self.hist[-10:]
+        self.prev_text, self.last_text = self.last_text, text
+        return text, ev
+
+    def panel(self, ev, big):
+        line = (f"【遊戲任務字】（程式每輪裁右上角任務列放大讀，可能讀錯；只給讀數）現在：「{self.last_text}」｜上一輪：「{self.prev_text or '（沒讀）'}」"
+                f"｜目前認定的任務字：「{'、'.join(self.current) or '（還沒有）'}」")
+        if ev:
+            line += (NL + f"⚑ 任務字換了：「{ev['舊']}」→「{ev['新']}」（{ev['時間']}）——換了可能＝上一件做完了；"
+                     "要不要送 任務完成（照規則先回顧三步）你自己決定")
+            if big and re.search(r"任務字|右上|任務列|下一件", str(big.get("成功條件", ""))):
+                line += NL + f"⚑ 你的大任務「{big['名稱']}」成功條件寫到右上任務字（{big['成功條件']}）——要不要送 大任務完成 你自己決定"
+        elif self.events:
+            e = self.events[-1]
+            line += f"｜上次換：{e['時間']}「{e['舊']}」→「{e['新']}」"
+        return line
+
+
+# ---- 10/19 使用者「記憶改成大任務完成前都記住」：大任務、這個任務的輪次紀錄與檢討存檔，程式重開也接著留，大任務完成才清
+def _fz(m):
+    if isinstance(m, list):
+        return "".join("✓" if x else "✗" for x in m)
+    return {True: "✓", False: "✗"}.get(m, "")
+
+
+def history_text(history, full_n=8, budget=9000):
+    if not history:
+        return "（剛開始）"
+    from collections import Counter as _C
+    full, old = history[-full_n:], history[:-full_n]
+
+    def compact(h):
+        names = [str(d).split("(")[0] for d in h.get("用") or []]
+        return (f"[{h['輪']}]{h.get('時間', '')[:5]} 想:{str(h.get('想', ''))[:24]}｜用:{'、'.join(names) or '無'}"
+                + (f"｜符合:{_fz(h.get('符合'))}" if h.get("符合") is not None else ""))
+
+    lines = [compact(h) for h in old]
+    head, i = [], 0
+    while sum(len(x) for x in head + lines[i:]) > budget and i < len(old):
+        chunk = old[i:i + 20]
+        cnt = _C(str(d).split("(")[0] for h in chunk for d in h.get("用") or [])
+        ok = sum(1 for h in chunk if _fz(h.get("符合")) and "✗" not in _fz(h.get("符合")))
+        head.append(f"[{chunk[0]['輪']}～{chunk[-1]['輪']} 輪 {chunk[0].get('時間', '')[:5]}～{chunk[-1].get('時間', '')[:5]}] "
+                    f"用最多:{'、'.join(f'{k}×{v}' for k, v in cnt.most_common(4))}｜全符合 {ok}/{len(chunk)}")
+        i += 20
+    out = head + lines[i:]
+    out += [f"[{h['輪']}] {h.get('時間', '')[:5]} 看到:{h.get('看到', '')}｜想:{str(h.get('想', ''))[:80]}｜用:{'、'.join(h.get('用') or []) or '無'}"
+            + (f"｜上一輪實際:{h.get('實際', '')}｜符合:{h.get('符合')}" if h.get("符合") is not None else "") for h in full]
+    return NL.join(out)
+
+
+def _bigrams(s):
+    s = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", s)
+    return {s[i:i + 2] for i in range(len(s) - 1)}
+
+
+def _review_core(line):
+    m = re.search(r"錯在哪:(.*?)(?:｜|$)", line)
+    n = re.search(r"實際:(.*?)(?:｜|$)", line)
+    return (m.group(1) if m else line) + (n.group(1) if n else "")
+
+
+def similar_review(a, b):
+    A, B = _bigrams(_review_core(a)), _bigrams(_review_core(b))
+    return bool(A and B) and len(A & B) / len(A | B) >= 0.4
+
+
+def reviews_text(reviews, budget=5000):
+    """這個大任務的檢討全部列，同類的錯合併成一條＋次數與時間。"""
+    groups = []
+    for r in reviews:
+        for g in groups:
+            if similar_review(r, g["最新"]):
+                g["最新"], g["次"] = r, g["次"] + 1
+                g["時間"].append(r[:5])
+                break
+        else:
+            groups.append({"最新": r, "次": 1, "時間": [r[:5]]})
+    lines = [("- " + g["最新"] + (f"（⚠ 同樣的錯 ×{g['次']}：{'、'.join(g['時間'][-6:])}）" if g["次"] > 1 else "")) for g in groups]
+    while sum(len(x) for x in lines) > budget:     # 太長：最舊的只留 錯在哪＋下次
+        for k, x in enumerate(lines):
+            if not x.startswith("- (舊)"):
+                m = re.search(r"錯在哪:(.*?)(?:｜|$)", x)
+                n = re.search(r"下次:(.*?)(?:（|$)", x)
+                lines[k] = "- (舊)" + (f"錯在哪:{m.group(1)}｜下次:{n.group(1) if n else ''}" if m else x[2:60])
+                break
+        else:
+            break
+    return NL.join(lines)
 
 
 def img_uri(im, width=1024):
@@ -2133,9 +2278,34 @@ def main():
           f"｜二次驗證 {'開' if args.verify2 else '關'}｜規劃 {plan_n or '關'} 步")
     print(f"   紀錄 {log_path}")
 
-    history = []        # 這個大任務期間的輪次摘要（大任務完成就清空）
+    history = []        # 這個大任務期間的輪次紀錄（dict；大任務完成才清空，10/19 起存檔、重開接續）
     tool_returns = ""   # 上一輪工具回傳
     task_round = 0
+    tw = TaskWords()
+    state_path = os.path.join(tools.mdir, "目前大任務.json")
+    if live:
+        try:
+            st0 = json.load(open(state_path, encoding="utf-8"))
+            tools.big, tools.big_queue = st0.get("大任務"), list(st0.get("排大任務") or [])
+            history, task_round = list(st0.get("紀錄") or []), int(st0.get("輪數") or 0)
+            tools.reviews = list(st0.get("檢討") or [])
+            tw.current, tw.events = list(st0.get("任務字", {}).get("現在") or []), list(st0.get("任務字", {}).get("換") or [])
+            if tools.big or history or tools.reviews:
+                tool_returns = (f"（程式重開，接續上次存的：大任務「{(tools.big or {}).get('名稱', '沒設')}」、"
+                                f"前面 {len(history)} 輪紀錄、{len(tools.reviews)} 條檢討都還在）")
+                print(f"   接續存檔（{st0.get('存檔', '?')}）：大任務「{(tools.big or {}).get('名稱', '沒設')}」、{len(history)} 輪、{len(tools.reviews)} 條檢討")
+        except (OSError, ValueError):
+            pass
+
+    def save_state():
+        try:
+            with open(state_path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump({"存檔": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "大任務": tools.big, "排大任務": tools.big_queue,
+                           "輪數": task_round, "紀錄": history, "檢討": tools.reviews,
+                           "任務字": {"現在": tw.current, "換": tw.events[-20:]}}, f, ensure_ascii=False)
+            os.replace(state_path + ".tmp", state_path)
+        except OSError as e:
+            print(f"   存檔失敗：{e}")
     prev = None         # 上一輪的 原因／預期／做了（12:1x 使用者：三件事＋不符就檢討）
     missed_review = False
     match_stat = {"符合": 0, "不符": 0, "不符沒檢討": 0}
@@ -2150,7 +2320,8 @@ def main():
             print(f"[{rnd}] 抓不到畫面（Roblox 不在前景？），等 3 秒")
             time.sleep(3)
             continue
-        task_words = top_right_words(im) if live else []      # 10/18：右上／右側的字（遊戲任務字）每輪記一次，stats 算任務字換了幾次
+        task_words = top_right_words(im) if live else []      # 10/19：裁右上任務列放大讀，進面板＋stats
+        _, task_ev = tw.update(task_words)
         content = [{"type": "image_url", "image_url": {"url": img_uri(im)}}]
         for tag, shot in tools.extra_images:
             content.append({"type": "text", "text": f"（看四周：{tag}）"})
@@ -2179,14 +2350,15 @@ def main():
             prev_txt = ("原因：" + prev.get("原因", "？") + "｜預期結果：" + prev.get("預期", "？") + "｜做了：" + prev.get("做了", "無")
                         + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
-        reviews_txt = (NL.join("- " + r for r in tools.reviews[-3:]) + NL * 2) if tools.reviews else ""
+        reviews_txt = (reviews_text(tools.reviews) + NL * 2) if tools.reviews else ""
         panel = ("【開工數值】" + tools.startup_text() + NL
                  + "【目前的大任務】" + big_txt + NL
+                 + tw.panel(task_ev, big) + NL
                  + plan_txt + watch_txt + NL
                  + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
-                 + (("【最近的檢討】（你自己寫的，照著做）" + NL + reviews_txt) if reviews_txt else "")
-                 + "【這個大任務到目前為止】" + NL + (NL.join(history[-6:]) or "（剛開始）") + NL * 2
+                 + (("【這個大任務的檢討】（你自己寫的，大任務完成前都留著；⚠ ×N＝同樣的錯犯了 N 次，照著改）" + NL + reviews_txt) if reviews_txt else "")
+                 + "【這個大任務到目前為止】（大任務完成前全部記著；舊的縮成一行，最近 8 輪完整）" + NL + history_text(history) + NL * 2
                  + (f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
                     "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))
         content.append({"type": "text", "text": panel})
@@ -2278,8 +2450,8 @@ def main():
                 do(item)
         tool_returns = NL.join(rets)
         tools.remember_round(rnd, seen, think, did, rets)
-        history.append(f"[{rnd}] 看到:{seen}｜想:{think[:80]}｜用:{'、'.join(did) or '無'}"
-                       + (f"｜上一輪實際:{actual}｜符合:{match}" if prev else ""))
+        history.append({"輪": rnd, "時間": datetime.now().strftime("%H:%M:%S"), "看到": seen, "想": think[:120], "用": did,
+                        "實際": actual, "符合": (match if prev else None)})
         m_reason = re.search(r"因為[:：]\s*(.*?)(?:｜|\|)", think)
         m_expect = re.search(r"結果應該是[:：]\s*(.*?)(?:｜|\||$)", think)
         prev = {"原因": (m_reason.group(1) if m_reason else think[:40]), "預期": (m_expect.group(1) if m_expect else "（你沒寫 結果應該是）"),
@@ -2290,13 +2462,15 @@ def main():
         if tools.clear_flag:                              # 大任務完成：這個任務期間的紀錄全部清空
             tools.clear_flag = False
             history, task_round = [], 0
-            tool_returns = "（上一個大任務已完成、紀錄清空）" + NL + tool_returns
+            tool_returns = "（上一個大任務已完成、紀錄與檢討清空）" + NL + tool_returns
             print("   🧹 大任務完成，紀錄清空")
+        if live:
+            save_state()
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({"時間": datetime.now().strftime("%H:%M:%S"), "輪": rnd, "秒": round(dt, 1),
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
-                                "符合統計": dict(match_stat), "右上字": task_words,
+                                "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev,
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

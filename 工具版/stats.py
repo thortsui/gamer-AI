@@ -222,6 +222,7 @@ def main():
     trunc = sum(1 for r in recs if r.get("截斷"))
     print(f"截斷：{trunc} 輪（{trunc / len(recs) * 100:.0f}%）")
     task_changes(recs)
+    review_stats(recs)
     plan3_stats(recs)
     verify2_stats(recs)
 
@@ -265,6 +266,28 @@ def task_changes(recs):
     """10/18 使用者「stats 加任務字換了幾次、隔多久」：每輪程式 OCR 右上／右側的字（jsonl「右上字」），
     出現一段原本沒有的字（4 個字以上、不是 HUD）而且下一輪還在 → 算任務字換一次。"""
     import difflib
+    new_rows = [r for r in recs if r.get("任務字讀法")]
+    if new_rows:            # 10/19 起：程式裁右上任務列放大讀，每輪記「任務字換」事件（連兩輪讀到、前面沒出現過）
+        events = [(r["時間"], r["任務字換"]) for r in new_rows if r.get("任務字換")]
+        read = sum(1 for r in new_rows if r.get("右上字"))
+        sent = done = 0
+        for r in new_rows:
+            for ret in r.get("回傳") or []:
+                if ret.startswith("● 任務完成"):
+                    sent += "還沒算" in ret
+                    done += "記下了" in ret
+        line = f"任務字（裁切讀法）：{len(new_rows)} 輪有 {read} 輪讀到字｜換了 {len(events)} 次"
+        if len(events) >= 2:
+            gaps = [(_hms(events[i][0]) - _hms(events[i - 1][0])) / 60 for i in range(1, len(events))]
+            line += f"，平均隔 {statistics.mean(gaps):.0f} 分鐘（最短 {min(gaps):.0f}、最長 {max(gaps):.0f}）"
+        line += f"｜他送 任務完成：第一次 {sent}、回顧後記下 {done}"
+        if events:
+            line += "｜" + "、".join(f"{t[:5]}「{e['舊'][:8]}→{e['新'][:8]}」" for t, e in events[-8:])
+        print(line)
+        recs = [r for r in recs if not r.get("任務字讀法")]
+        if not recs:
+            return
+        print("（以下是舊讀法的輪）")
     rows = [r for r in recs if "右上字" in r]
     if not rows:
         print("任務字：這段沒有「右上字」紀錄（10/18 起才有）")
@@ -341,6 +364,22 @@ def plan3_stats(recs):
                     done += 1
     if sent or done:
         print(f"小任務完成回顧：送出等回顧 {sent} 次、回顧後記下 {done} 次")
+
+
+def review_stats(recs):
+    """10/19 使用者「多多檢討多多找錯 避免重複犯錯」：檢討幾次（符合時也檢討幾次）、程式比對出同樣的錯幾次。"""
+    tot = rep_n = while_ok = 0
+    for r in recs:
+        rets = [x for x in r.get("回傳") or [] if x.startswith("● 檢討")]
+        ok = [x for x in rets if "檢討記下了" in x]
+        tot += len(ok)
+        rep_n += sum(1 for x in ok if "已經檢討過" in x)
+        m = r.get("符合")
+        if ok and (m is True or (isinstance(m, list) and m and all(v is True for v in m))):
+            while_ok += len(ok)
+    rounds = len(recs)
+    print(f"檢討：{tot} 次（{rounds} 輪，每 {rounds / tot:.1f} 輪一次）" if tot else f"檢討：0 次（{rounds} 輪）", end="")
+    print(f"｜符合時也檢討 {while_ok}｜同樣的錯又犯 {rep_n}")
 
 
 def verify2_stats(recs):
