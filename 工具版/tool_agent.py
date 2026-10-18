@@ -170,6 +170,8 @@ def build_system(game, cat, plan3=False):
             + "【每個行為三件事】（使用者定的）每一輪的「想」要寫清楚 ①做這個行為的原因（因為）②這個行為應該有的結果（結果應該是）；"
               "下一輪看到新畫面，先在「上一輪實際」寫 ③實際的結果、在「符合」填 true／false。"
               "**實際跟預期不同就直接開檢討**：同一輪叫 檢討(原因,預期,實際,錯在哪,下次)，不要跳過、不要等。符合才繼續下一步。" + NL
+            + "【少用中鍵縮放】（使用者 10/18 交代）捲（滑鼠中鍵）在遊戲畫面上會把鏡頭拉近拉遠，一縮放刻度、深度比例就變了、要重新量測；"
+              "能不捲就不捲，要對準東西用 視角移動到(x,y) 或 轉。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "做完送 大任務完成，程式會把這個任務期間的工具回傳與紀錄清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
@@ -1300,6 +1302,90 @@ class Tools(ExtraTools):
                 + "；" + self._v2("水平", lv(was), lv(now), ok) + "（第一次＝修之前、第二次＝修之後應約水平）"
                 + "。水平儀已歸零")
 
+    # ---- 視角移動到（10/18 16:5x 使用者）：給畫面上的點，程式算角度、一次轉過去讓它到正中央
+    V_FOV = 70.0          # Roblox 預設垂直視角；10/18 刻度樣本：轉 10／20／30 度實測位移 6／12／19%，照這個針孔模型算 6.5／13／21%
+
+    def _angles_to(self, fx, fy, W, H):
+        import math
+        tv = math.tan(math.radians(self.V_FOV / 2))
+        th = tv * W / H
+        yaw = math.degrees(math.atan((fx - 0.5) * 2 * th))        # 正＝往右
+        pitch = math.degrees(math.atan((0.5 - fy) * 2 * tv))      # 正＝往上
+        return yaw, pitch
+
+    @staticmethod
+    def _locate(patch_im, im, near=None):
+        """在 im 裡找 patch（灰階縮小後 SSD 比對）→ (x, y 0~1, 相似度 0~1)；near＝預期位置附近優先。"""
+        import numpy as np
+        W, H = 240, 124
+        a = np.asarray(im.convert("L").resize((W, H)), dtype=np.float32)
+        p = np.asarray(patch_im.convert("L"), dtype=np.float32)
+        ph, pw = p.shape
+        if ph >= H or pw >= W:
+            return None
+        from numpy.lib.stride_tricks import sliding_window_view
+        win = sliding_window_view(a, (ph, pw))
+        pm = p - p.mean()
+        wm = win - win.mean(axis=(2, 3), keepdims=True)
+        num = (wm * pm).sum(axis=(2, 3))
+        den = np.sqrt((wm ** 2).sum(axis=(2, 3)) * (pm ** 2).sum()) + 1e-6
+        ncc = num / den
+        iy, ix = np.unravel_index(int(np.argmax(ncc)), ncc.shape)
+        return ((ix + pw / 2) / W, (iy + ph / 2) / H, float(ncc[iy, ix]))
+
+    def look_at(self, x="", y=""):
+        fx, fy = num(x, -1), num(y, -1)
+        if not (0 <= fx <= 1 and 0 <= fy <= 1):
+            return "視角移動到 要給畫面上的座標（0~1），例如 視角移動到(0.72,0.45)：x 是左右、y 是上下"
+        if self.image_path or not self.live:
+            im = self.grab()
+            W, H = (im.width, im.height) if im is not None else (1920, 991)
+            yaw, pitch = self._angles_to(fx, fy, W, H)
+            return f"[dry-run] 會轉 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度，讓 ({fx:.2f},{fy:.2f}) 到畫面正中央"
+        before = self.grab()
+        if before is None:
+            return "抓不到畫面"
+        W, H = before.width, before.height
+        # 目標附近一小塊當「長相」，轉完在新畫面找它，確認到了中央沒有
+        SW, SH = 240, 124
+        small = before.resize((SW, SH))
+        cx, cy = int(fx * SW), int(fy * SH)
+        pw, ph = 24, 16
+        box = (max(0, cx - pw // 2), max(0, cy - ph // 2), min(SW, cx + pw // 2), min(SH, cy + ph // 2))
+        patch = small.crop(box)
+        yaw, pitch = self._angles_to(fx, fy, W, H)
+        pitch = max(-60.0, min(60.0, pitch))
+        self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
+        self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
+        time.sleep(0.3)
+        after = self.grab()
+        out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"]
+        loc1 = self._locate(patch, after) if (patch.width >= 8 and patch.height >= 8) else None
+        final = loc1
+        if loc1 and loc1[2] >= 0.6:
+            out.append(f"轉完找目標：在 ({loc1[0]:.2f},{loc1[1]:.2f})（相似度 {loc1[2]:.2f}）")
+            if abs(loc1[0] - 0.5) > 0.04 or abs(loc1[1] - 0.5) > 0.06:      # 偏了補一次
+                y2, p2 = self._angles_to(loc1[0], loc1[1], W, H)
+                self._drag(y2 * self.dx_deg, -p2 * self.dy_deg)
+                self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + p2))
+                time.sleep(0.3)
+                after = self.grab()
+                final = self._locate(patch, after)
+                out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
+        else:
+            out.append("轉完在新畫面找不到原本那一塊（可能被角色擋住、或那塊太平沒特徵），沒有補轉")
+        ok = bool(final and final[2] >= 0.6 and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - 0.5) <= 0.08)
+        if final and final[2] >= 0.6:
+            out.append(self._v2("視角移動到", f"({loc1[0]:.2f},{loc1[1]:.2f})" if loc1 else "找不到",
+                                f"({final[0]:.2f},{final[1]:.2f})", ok) + "（第一次＝轉完、第二次＝補轉後；目標應在 0.50,0.50 附近）")
+        out.append("**已對準正中央**" if ok else "沒有完全對準；看下一張畫面，再用 視角移動到 或 轉 微調")
+        try:
+            self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜算 左右{yaw:+.0f} 上下{pitch:+.0f}｜結果 "
+                         + (f"({final[0]:.2f},{final[1]:.2f}) 相似{final[2]:.2f}" if final else "找不到") + f"｜{'對準' if ok else '沒對準'}")
+        except Exception:  # noqa: BLE001
+            pass
+        return "；".join(out)
+
     def look_level_zero(self):
         """水平歸零：你確認畫面已經水平，把水平儀（仰 的累計）歸零。"""
         old = self.pitch_acc
@@ -1576,7 +1662,9 @@ class Tools(ExtraTools):
                 time.sleep(0.05)
         else:
             print(f"   [dry-run] 捲 {n}")
-        return f"捲了 {n} 格（正＝往上／拉近，負＝往下／拉遠）"
+        # 10/18 16:5x 使用者：「減少中鍵用於縮放視角，避免每次都要重新量測」→ 回傳提醒（不擋）
+        return (f"捲了 {n} 格（正＝往上／拉近，負＝往下／拉遠）。在遊戲畫面上捲＝鏡頭遠近變了，"
+                "每度 dx／dy、深度比例、轉頭位移都會跟著變，量過的刻度就不準了；能不捲就不捲（使用者交代）")
 
     def wait(self, 秒=""):
         d = max(0.2, min(5.0, num(秒, 1.0)))
