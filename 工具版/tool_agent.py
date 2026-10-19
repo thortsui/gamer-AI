@@ -394,7 +394,9 @@ class Tools(ExtraTools):
             a, b = words(before), words(self.grab())
         except Exception:  # noqa: BLE001
             return ""
-        new = [w for w in b if not any(TaskWords.same(w, x) for x in a)]
+        import difflib
+        # 06:5x「列印章→列印徽章」OCR 漏一個字被報成換字 → 長短不一的也用相似度比
+        new = [w for w in b if not any(TaskWords.same(w, x) or difflib.SequenceMatcher(None, w, x).ratio() >= 0.6 for x in a)]
         if a and new:
             return f"；⚑ 右上任務字變了：「{'、'.join(a)}」→「{'、'.join(b)}」（按之前／之後各讀一次任務框）"
         return ""
