@@ -178,7 +178,10 @@ def build_system(game, cat, plan3=False):
             + "【場景切換可能影響視角轉動速度】（使用者 10/19 交代）換場景之後（進出建築或房間、傳送、死亡重生、退出重進），"
               "視角轉動速度（每度 dx／dy）可能跟之前量的不一樣；轉 的預期跟實測對不上時，先想是不是剛換過場景。" + NL
             + "【遊戲任務字】面板每輪列程式讀到的右上角任務字（可能讀錯）；標「任務字換了」可能＝上一件做完了，要不要送 任務完成（先回顧三步）你自己決定。" + NL
-            + "【少用中鍵縮放】（使用者 10/18 交代）捲（滑鼠中鍵）在遊戲畫面上會把鏡頭拉近拉遠，一縮放刻度、深度比例就變了、要重新量測；"
+            + "【第幾人稱】（使用者 10/19 交代）要記錄應該是第幾人稱：用 記應該人稱(第一人稱或第三人稱,為什麼) 記下。"
+              "如果畫面是第三人稱（應該是第一人稱）就要放大鏡頭：中鍵 捲(正數) 拉近；相反也一樣：捲(負數) 拉遠。"
+              "調完看畫面用 回報人稱 回報現在是第幾人稱。**但是如果有對鏡頭做縮放就要重新測量**：開工測試＋驗開工（面板【開工數值】會標「捲過」直到重量）。面板【人稱】每輪比 應該 跟 現在。" + NL
+            + "【少用中鍵縮放】（使用者 10/18 交代；切換人稱除外）捲（滑鼠中鍵）在遊戲畫面上會把鏡頭拉近拉遠，一縮放刻度、深度比例就變了、要重新量測；"
               "能不捲就不捲，要對準東西用 視角移動到(x,y) 或 轉。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
               "大任務完成之前，這個任務的每一輪紀錄和你寫的檢討都一直留在面板（程式重開也接著留）；做完送 大任務完成，程式才把這個任務期間的工具回傳、紀錄與檢討清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
@@ -767,14 +770,16 @@ class Tools(ExtraTools):
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
                     pass
-            return (f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{retry_note}{hud_txt}{v2_txt}。"
+            return ((f"⚠ 刻度是捲鏡頭之前量的（{self.zoomed_at}），還沒重量；" if getattr(self, "zoomed_at", "") else "")
+                    + f"預期：轉 {deg:.0f} 度（dx {px:.0f}，照刻度每度 {self.dx_deg}）→ 實測：{sh_txt}、畫面變化 {d:.0f}{retry_note}{hud_txt}{v2_txt}。"
                     "跟你腦中的對不上就 量刻度 重量")
         v2_txt = ""
         if self.verify2:
             time.sleep(0.3)
             d2 = self.diff(before, self.grab())
             v2_txt = "；" + self._v2("上下轉有沒有動", f"{d:.0f}", f"{d2:.0f}", (d >= 2) == (d2 >= 2))
-        return (f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
+        return ((f"⚠ 刻度是捲鏡頭之前量的（{self.zoomed_at}），還沒重量；" if getattr(self, "zoomed_at", "") else "")
+                + f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + v2_txt + "。對不上就 量刻度 重量")
 
     def _shift(self, before, after, d):
@@ -860,7 +865,9 @@ class Tools(ExtraTools):
         v = s.get("驗證")
         v_txt = ("⑥驗證 " + "、".join(f"{k}{'✓' if ok else '✗'}" for k, ok in v.items())
                  + ("（全過，開工完成）" if all(v.values()) else "（有 ✗：照回傳的指示重量再驗）")) if v else "⑥驗證 還沒驗（用 驗開工；全過才算開工完成）"
-        return (f"①畫面 {s.get('畫面', '?')}｜②每度 dx {s.get('每度dx', '?')}｜③每度 dy {s.get('每度dy', '?')}"
+        zoom = ("⚠ 量完之後捲過鏡頭（" + self.zoomed_at + "）：②③④ 是捲之前量的、已經不準——要重新 開工測試＋驗開工（使用者交代：縮放過就要重新測量）｜"
+                if getattr(self, "zoomed_at", "") else "")
+        return (zoom + f"①畫面 {s.get('畫面', '?')}｜②每度 dx {s.get('每度dx', '?')}｜③每度 dy {s.get('每度dy', '?')}"
                 f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜{v_txt}｜量於 {s.get('時間', '?')}")
 
     def cal_verify(self):
@@ -1007,6 +1014,7 @@ class Tools(ExtraTools):
         self.startup["時間"] = datetime.now().strftime("%H:%M")
         self.startup.pop("人稱", None)
         self.startup.pop("驗證", None)          # 重量過就要重驗
+        self.zoomed_at = ""                      # 10/19 10:3x：重量過，捲過的標記清掉
         line = f"🧪 開工測試：{self.startup_text()}"
         print("   " + line)
         self._append("開工數值.md", self.startup_text())
@@ -1016,6 +1024,37 @@ class Tools(ExtraTools):
                 + f"④ 深度比例：{self.startup.get('深度比例', '沒量到')}（{r3}）" + NL
                 + "⑤ 第幾人稱：你看現在的畫面回報——看得到自己背影＝第三人稱，畫面中央有準心＝第一人稱 → 送 回報人稱(第幾人稱)。" + NL
                 + "⑥ 然後**必須** 驗開工：程式照這些數值轉一圈、上下來回、走退來回，確認全部回到原點；全過才算開工完成，之後才做別的")
+
+    # ---- 10/19 10:2x 使用者：「他要記錄應該是第幾人稱，如果畫面是第三人稱就要放大鏡頭（中鍵），相反也一樣」
+    def _persp_should(self):
+        if not hasattr(self, "_persp"):
+            try:
+                self._persp = json.load(open(os.path.join(self.mdir, "人稱.json"), encoding="utf-8"))
+            except (OSError, ValueError):
+                self._persp = {}
+        return self._persp
+
+    def cal_persp_should(self, 人稱="", 為什麼=""):
+        v = str(人稱).strip()
+        if v not in ("第一人稱", "第三人稱"):
+            return "要寫 第一人稱 或 第三人稱，例：記應該人稱(第一人稱,看得到正前方不會被自己的角色擋)"
+        self._persp = {"應該": v, "為什麼": str(為什麼).strip(), "時間": datetime.now().strftime("%H:%M")}
+        with open(os.path.join(self.mdir, "人稱.json"), "w", encoding="utf-8") as f:
+            json.dump(self._persp, f, ensure_ascii=False)
+        self._append("開工數值.md", f"應該人稱:{v}｜為什麼:{為什麼}")
+        return f"記下：應該是 {v}（{為什麼 or '沒寫為什麼'}）。之後每輪面板【人稱】會比 應該 跟 現在（你 回報人稱 的）。" + NL + self.persp_text()
+
+    def persp_text(self):
+        should = self._persp_should().get("應該")
+        now = self.startup.get("人稱")
+        head = (f"【人稱】應該：{should or '（還沒記，用 記應該人稱(第一人稱或第三人稱,為什麼) 記下）'}"
+                f"｜現在：{now or '（還沒回報，看畫面用 回報人稱）'}")
+        if should and now and should not in now and now in ("第一人稱", "第三人稱"):
+            if should == "第一人稱":
+                head += "｜⚑ 不一樣：照使用者交代放大鏡頭——捲(正數，例 捲(5)) 拉近到第一人稱，調完 回報人稱，刻度變了要重量"
+            else:
+                head += "｜⚑ 不一樣：照使用者交代拉遠鏡頭——捲(負數，例 捲(-5)) 拉遠到第三人稱，調完 回報人稱，刻度變了要重量"
+        return head
 
     def cal_persp(self, 人稱=""):
         v = str(人稱).strip()
@@ -1722,8 +1761,17 @@ class Tools(ExtraTools):
         else:
             print(f"   [dry-run] 捲 {n}")
         # 10/18 16:5x 使用者：「減少中鍵用於縮放視角，避免每次都要重新量測」→ 回傳提醒（不擋）
+        # 10/19 10:2x：切換第一／第三人稱就是要捲 → 捲過人稱可能變了，先標成要重新回報
+        if "人稱" in self.startup:
+            self.startup["人稱"] = "（捲過，看畫面重新 回報人稱）"
+        # 10/19 10:3x 使用者：「但是如果有對鏡頭做縮放就要重新測量」→ 量過的刻度標成失效、驗證作廢，直到再 開工測試
+        if self.live and n:
+            self.zoomed_at = datetime.now().strftime("%H:%M") + f" 捲 {n} 格"
+            self.startup.pop("驗證", None)
         return (f"捲了 {n} 格（正＝往上／拉近，負＝往下／拉遠）。在遊戲畫面上捲＝鏡頭遠近變了，"
-                "每度 dx／dy、深度比例、轉頭位移都會跟著變，量過的刻度就不準了；能不捲就不捲（使用者交代）")
+                "每度 dx／dy、深度比例、轉頭位移都會跟著變，量過的刻度就不準了。"
+                "要切換第一／第三人稱才捲（使用者交代）；捲完看畫面用 回報人稱 回報現在是第幾人稱，"
+                "**縮放過就要重新測量**（使用者交代）：開工測試＋驗開工，面板【開工數值】會標「捲過」直到重量")
 
     def wait(self, 秒=""):
         d = max(0.2, min(5.0, num(秒, 1.0)))
@@ -2367,6 +2415,7 @@ def main():
         panel = ("【開工數值】" + tools.startup_text() + NL
                  + "【目前的大任務】" + big_txt + NL
                  + tw.panel(task_ev, big) + NL
+                 + tools.persp_text() + NL
                  + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
                  + plan_txt + watch_txt + NL
                  + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL
