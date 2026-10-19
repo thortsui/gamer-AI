@@ -380,6 +380,26 @@ class Tools(ExtraTools):
         return b2, self.diff(b1, b2)
 
     def _changed(self, before, noise=None):
+        out = self._changed_px(before, noise)
+        if self.live and not self.image_path:
+            out += self._task_note(before)
+        return out
+
+    def _task_note(self, before):
+        """10/20 05:3x：長按 E 蓋印，右上任務字當場「蓋印表格→拍照」，回傳卻寫「畫面變化 4＝看不出有反應」，他檢討成「E 沒反應」
+        → 按之前／之後各讀一次右上任務框，換字就寫在回傳（只給讀數）。"""
+        try:
+            def words(im):
+                return [TaskWords.norm(w[0]) for w in top_right_words(im) if w[1] >= 0.78 and len(TaskWords.norm(w[0])) >= 2]
+            a, b = words(before), words(self.grab())
+        except Exception:  # noqa: BLE001
+            return ""
+        new = [w for w in b if not any(TaskWords.same(w, x) for x in a)]
+        if a and new:
+            return f"；⚑ 右上任務字變了：「{'、'.join(a)}」→「{'、'.join(b)}」（按之前／之後各讀一次任務框）"
+        return ""
+
+    def _changed_px(self, before, noise=None):
         if self.image_path:
             return "（離線模式，畫面不會變）"
         th = 2.0 if noise is None else max(2.0, noise * 2 + 4)
