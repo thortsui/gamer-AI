@@ -554,7 +554,7 @@ class Tools(ExtraTools):
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else
-                     ("；中央放大量不出來（這次不算距離）" + self._center_note(dd)) if (k == "w" and dd >= 2) else "")
+                     ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
             if self.verify2:
                 time.sleep(0.3)
                 after2 = self.grab()
@@ -1137,13 +1137,17 @@ class Tools(ExtraTools):
         lines.append(self.persp_text())
         return NL.join(lines)
 
-    def _center_note(self, d):
+    def _center_note(self, d, a=None, b=None):
         """10/19 11:0x：原本寫死「角色擋在畫面中央」——醫院裡是第一人稱、中央根本沒有角色，他整天讀成「被中央角色擋」。
-        改成：確認是第三人稱才說中央是你自己；畫面有變化就說你有走動。"""
+        11:4x：用回報的人稱判斷也會過期（大廳回報第三人稱、走進醫院變第一人稱）→ 直接用這次走路前後兩張畫面量：
+        中央那塊留在原位、背景在動＝自己的角色；中央跟背景一起動＝中央沒東西擋。"""
         moved = f"；畫面變化 {d:.0f}＝你有走動、不是被擋" if d >= 5 else ""
-        if self.startup.get("人稱") == "第三人稱":
-            return "（第三人稱：畫面中央是**你自己的角色**、鏡頭跟著你走，不是障礙）" + moved
-        return moved
+        r = self._pc_pair(a, b) if (a is not None and b is not None) else (None, None, None, None)
+        if r[3] is True:
+            return f"（這次走路：畫面中央那塊留在原位、背景在動（比值 {r[2]:.2f}）＝第三人稱，中央是**你自己的角色**，不是障礙）" + moved
+        if r[3] is False:
+            return f"（這次走路：中央跟背景一起動（比值 {r[2]:.2f}）＝中央沒有東西跟著你、也沒擋住；量不出多半是正前方太近或沒紋理）" + moved
+        return "（原因不確定；要知道自己第幾人稱就叫 確認人稱）" + moved
 
     def cal_persp(self, 人稱=""):
         v = str(人稱).strip()
