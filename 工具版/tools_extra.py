@@ -299,23 +299,34 @@ class ExtraTools:
         qb = self._bg(q)
         pool = [("準則", f"{r['對象']}｜{r['準則']}" + (f"（記了 {r['次數']} 次）" if r["次數"] > 1 else "")) for r in self._rules_load()]
         pool += [(src, l) for src, f in (("筆記", "筆記.md"), ("卡法", "卡法.md"), ("互動物", "互動物.md")) for l in self._mem_lines(f)]
-        pool += [("檢討", r) for r in list(self.reviews)] + [("舊檢討", l) for l in self._mem_lines("檢討.md", 600)]
+        pool += [("檢討", r) for r in list(self.reviews)] + [("舊檢討", l) for l in self._mem_lines("檢討.md", 300)]
+        # 10/20：以前只要一半字組對上就算，一次回報幾百條 → 收緊：整句出現，或至少對上 2 組且 6 成（短的 8 成）；
+        # 再把相近的合併成一條（×N＝同一件事記了 N 次）
+        need = 0.8 if len(qb) <= 3 else 0.6
         scored, seen = [], set()
         for src, txt in pool:
             key = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", txt)
             if key in seen:
                 continue
             seen.add(key)
-            hit = 10 if q in txt else 0
-            tb = self._bg(txt)
-            ov = len(qb & tb) / max(1, len(qb))
-            sc = hit + ov * 5 + (3 if src == "準則" else 0)
-            if hit or ov >= 0.5:
-                scored.append((sc, src, txt))
+            hit = q in txt
+            tb = self._bg(key)
+            m = len(qb & tb)
+            if hit or (m >= 2 and m / max(1, len(qb)) >= need):
+                scored.append([(10 if hit else 0) + m / max(1, len(qb)) * 5 + {"準則": 3, "檢討": 1}.get(src, 0), src, txt, tb, 1])
         scored.sort(key=lambda x: -x[0])
-        if not scored:
+        kept = []
+        for x in scored:
+            near = next((y for y in kept if len(x[3] & y[3]) / max(1, len(x[3] | y[3])) >= 0.45), None)
+            if near:
+                near[4] += 1
+            else:
+                kept.append(x)
+        if not kept:
             return f"沒有跟「{q}」有關的準則或紀錄。做了之後學到什麼就 記準則({q},…)"
-        return f"跟「{q}」有關的（{len(scored)} 條，列前 8）：" + NL + NL.join(f"- [{src}] {txt[:160]}" for _, src, txt in scored[:8])
+        n_rule = sum(1 for x in kept if x[1] == "準則")
+        return (f"跟「{q}」有關的：準則 {n_rule} 條、其他 {len(kept) - n_rule} 種（相近的已合併，×N＝同一件事記了 N 次；列前 8）：" + NL
+                + NL.join(f"- [{src}{f' ×{n}' if n > 1 else ''}] {txt[:160]}" for _, src, txt, _, n in kept[:8]))
 
     def mem_history_find(self, 關鍵字=""):
         q = str(關鍵字).strip()
