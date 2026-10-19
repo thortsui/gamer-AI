@@ -2302,7 +2302,10 @@ class TaskWords:
     @staticmethod
     def same(a, b):
         import difflib
-        return a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.6
+        r = difflib.SequenceMatcher(None, a, b).ratio()
+        if min(len(a), len(b)) <= 3:          # 14:4x：短字 OCR 抖動（拍照／拍昭）被當成換字兩次 → 短字差一個字、長度一樣也算同一個
+            return a == b or a in b or b in a or (len(a) == len(b) and r >= 0.5)
+        return a in b or b in a or r >= 0.6
 
     def update(self, words):
         """回 (這輪讀到的字串, 這輪的換字事件或 None)"""
