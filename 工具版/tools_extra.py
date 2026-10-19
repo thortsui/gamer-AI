@@ -101,7 +101,8 @@ class ExtraTools:
         steps = o.get("步驟") or []
         line = f"做成:{o.get('做成的事', 做成了什麼)}｜關鍵:{o.get('關鍵是哪一步', '')}｜步驟:{'→'.join(map(str, steps))}｜更快:{o.get('下次怎麼更快', '')}"
         self._append("成功做法.md", line)
-        return "成功做法記下了：" + line + "。想變成一個工具就 新工具(名稱,用途," + "→".join(map(str, steps)) + ")"
+        return ("成功做法記下了：" + line + "。想變成一個工具就 新工具(名稱,用途," + "→".join(map(str, steps)) + ")"
+                + "；這是你自己的新發現，也可以留一條 記準則(對象,準則)")
 
     def learn_organize(self):
         """學習整理：把筆記／卡法／因果／檢討濃縮成最多 12 條規則，之後每輪開機帶著。"""
@@ -269,6 +270,12 @@ class ExtraTools:
             return "記準則 要給 對象,準則，例：記準則(咖啡機,長按E泡咖啡要等93秒，喝了加理智)"
         rules = self._rules_load()
         now = datetime.now().strftime("%m/%d %H:%M")
+        if rule.startswith("更正"):              # 發現以前的準則不對：取代這個對象的舊準則
+            new = re.sub(r"^更正\s*[:：]?\s*", "", rule)
+            old = [r for r in rules if r["對象"] == obj]
+            rules = [r for r in rules if r["對象"] != obj] + [{"對象": obj, "準則": new, "時間": now, "次數": 1}]
+            self._rules_save(rules)
+            return f"已更正：{obj} 的 {len(old)} 條舊準則換成「{new}」"
         for r in rules:
             if r["對象"] == obj and self._wf_similar(r["準則"], rule):
                 r["次數"] += 1
@@ -437,6 +444,7 @@ class ExtraTools:
             self._wf_save(wf)
         elif not ok:
             ret += NL + "不合理 → 沒有加進工作流；照 為什麼 想清楚，有錯就 檢討"
+        ret += NL + "這次發現了什麼（某個東西是什麼、能不能做、怎麼做）就自己 記準則(對象,準則)"
         return ret
 
     # ---------------- 程序

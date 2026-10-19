@@ -110,6 +110,7 @@ def main():
               '"補用途":[{"工具":"","情況":""}],'
               '"記卡法":[{"情況":"","解法":""}],'
               '"記筆記":["一句一條，表格式，確定的事才寫"],'
+              '"記準則":[{"對象":"東西或情況","準則":"一句：能不能、怎麼做（你今天自己發現的）"}],'
               '"要改的習慣":["例如：E 一律先長按 1.5 秒再試短按；右上角黑底白字是任務不是按鈕；填 false 當輪就檢討"]}')
     t0 = time.time()
     if a.reuse:
@@ -153,9 +154,12 @@ def main():
     for t in o.get("記筆記") or []:
         if isinstance(t, str) and t.strip():
             applied.append("記筆記 → " + tools.mem_note(t))
+    for t in o.get("記準則") or []:          # 10/19 12:4x 使用者：「他也能按照他的發現去自己製作新的準則」
+        if isinstance(t, dict):
+            applied.append("記準則 → " + tools.mem_rule(t.get("對象", ""), t.get("準則", "")))
 
     out = [f"# 大檢討 {a.date}（{datetime.now().strftime('%m/%d %H:%M')}，{a.effort}，{dt:.0f} 秒{'，JSON 從推理取出' if from_reason else ''}）", ""]
-    for k in ("今天做了什麼", "卡最久的三件事", "大任務為什麼沒完成", "卡法歸納", "明天開場要做什麼", "新工具", "補用途", "記卡法", "記筆記", "要改的習慣"):
+    for k in ("今天做了什麼", "卡最久的三件事", "大任務為什麼沒完成", "卡法歸納", "明天開場要做什麼", "新工具", "補用途", "記卡法", "記筆記", "記準則", "要改的習慣"):
         v = o.get(k)
         if v is None:
             continue
