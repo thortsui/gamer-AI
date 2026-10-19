@@ -245,6 +245,99 @@ class ExtraTools:
             f.write(s)
         return f"你的提示改成（{len(s)} 字，之後每輪帶著）：{s[:80]}…"
 
+    # ---------------- 準則（2026-10-19 12:2x 使用者：「為什麼越記憶越多越慢？檢討後是製作成工具或只留準則，
+    # 例如：吃了椅子發現椅子不能吃，在他去確認能不能吃時才會呼叫出來看能不能吃」）
+    # 面板不再每輪帶全部紀錄與檢討；教訓存成準則，要做某件事前用 查準則 叫出來。
+    def _rules_load(self):
+        try:
+            return json.load(open(os.path.join(self.mdir, "準則.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+
+    def _rules_save(self, rules):
+        with open(os.path.join(self.mdir, "準則.json"), "w", encoding="utf-8") as f:
+            json.dump(rules, f, ensure_ascii=False, indent=1)
+
+    @staticmethod
+    def _bg(x):
+        x = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(x))
+        return {x[i:i + 2] for i in range(len(x) - 1)}
+
+    def mem_rule(self, 對象="", 準則=""):
+        obj, rule = str(對象).strip(), str(準則).strip()
+        if len(re.sub(r"\W", "", obj)) < 1 or len(re.sub(r"\W", "", rule)) < 3:
+            return "記準則 要給 對象,準則，例：記準則(咖啡機,長按E泡咖啡要等93秒，喝了加理智)"
+        rules = self._rules_load()
+        now = datetime.now().strftime("%m/%d %H:%M")
+        for r in rules:
+            if r["對象"] == obj and self._wf_similar(r["準則"], rule):
+                r["次數"] += 1
+                r["準則"], r["時間"] = rule, now
+                self._rules_save(rules)
+                return f"這條跟以前的準則一樣（第 {r['次數']} 次），更新成：{obj}｜{rule}"
+        rules.append({"對象": obj, "準則": rule, "時間": now, "次數": 1})
+        self._rules_save(rules)
+        return f"準則記下了：{obj}｜{rule}（共 {len(rules)} 條；要對 {obj} 動手前用 查準則({obj}) 叫出來）"
+
+    def _mem_lines(self, fname, tail=400):
+        try:
+            return [l.strip("- ").strip() for l in open(os.path.join(self.mdir, fname), encoding="utf-8").read().splitlines()[-tail:] if l.strip()]
+        except OSError:
+            return []
+
+    def mem_rule_find(self, 對象或情況=""):
+        q = str(對象或情況).strip()
+        if not q:
+            return "查準則 要給 對象或情況，例：查準則(咖啡機)"
+        qb = self._bg(q)
+        pool = [("準則", f"{r['對象']}｜{r['準則']}" + (f"（記了 {r['次數']} 次）" if r["次數"] > 1 else "")) for r in self._rules_load()]
+        pool += [(src, l) for src, f in (("筆記", "筆記.md"), ("卡法", "卡法.md"), ("互動物", "互動物.md")) for l in self._mem_lines(f)]
+        pool += [("檢討", r) for r in list(self.reviews)] + [("舊檢討", l) for l in self._mem_lines("檢討.md", 600)]
+        scored, seen = [], set()
+        for src, txt in pool:
+            key = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", txt)
+            if key in seen:
+                continue
+            seen.add(key)
+            hit = 10 if q in txt else 0
+            tb = self._bg(txt)
+            ov = len(qb & tb) / max(1, len(qb))
+            sc = hit + ov * 5 + (3 if src == "準則" else 0)
+            if hit or ov >= 0.5:
+                scored.append((sc, src, txt))
+        scored.sort(key=lambda x: -x[0])
+        if not scored:
+            return f"沒有跟「{q}」有關的準則或紀錄。做了之後學到什麼就 記準則({q},…)"
+        return f"跟「{q}」有關的（{len(scored)} 條，列前 8）：" + NL + NL.join(f"- [{src}] {txt[:160]}" for _, src, txt in scored[:8])
+
+    def mem_history_find(self, 關鍵字=""):
+        q = str(關鍵字).strip()
+        try:
+            hist = json.load(open(os.path.join(self.mdir, "目前大任務.json"), encoding="utf-8")).get("紀錄") or []
+        except (OSError, ValueError):
+            hist = []
+        if not q:
+            return f"這個大任務存了 {len(hist)} 輪；查紀錄 要給 關鍵字，例：查紀錄(咖啡機)"
+        qb = self._bg(q)
+        hits = [h for h in hist if q in json.dumps(h, ensure_ascii=False) or len(qb & self._bg(json.dumps(h, ensure_ascii=False))) / max(1, len(qb)) >= 0.6]
+        if not hits:
+            return f"這個大任務 {len(hist)} 輪裡沒有「{q}」"
+        return f"「{q}」出現在 {len(hits)} 輪（列最近 6 輪）：" + NL + NL.join(
+            f"- {h.get('時間', '')[:5]} 看到:{str(h.get('看到', ''))[:50]}｜用:{'、'.join(h.get('用') or [])[:80]}｜實際:{str(h.get('實際', ''))[:50]}｜符合:{h.get('符合')}"
+            for h in hits[-6:])
+
+    def rules_panel(self, seen=""):
+        """面板只給指標：幾條準則＋畫面上看到你記過的東西（內容要 查準則 才叫出來）。"""
+        rules = self._rules_load()
+        names = {r["對象"] for r in rules}
+        for l in self._mem_lines("互動物.md"):
+            m = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", l).split("｜")[0].strip()
+            if 2 <= len(m) <= 8:
+                names.add(m)
+        here = sorted({n for n in names if n and n in str(seen)})[:6]
+        return (f"【準則】{len(rules)} 條準則＋{len(self.reviews)} 條這個大任務的檢討（不放面板；要做某件事前用 查準則(對象或情況) 叫出來，舊的輪用 查紀錄(關鍵字)）"
+                + (f"｜畫面上有你記過的：{'、'.join(here)} → 要碰之前先 查準則" if here else ""))
+
     # ---------------- 突發狀況與工作流（2026-10-19 07:5x 使用者：「新增工具：突發狀況——出現不合預期的情況時使用，
     # 用於在突然出現不符合預期的時候可以去思考這個情況是否符合工作流的合理性」「如果符合就先加入工作流的可能事項」
     # 「連續遇到多次就新增到工作流內」）
