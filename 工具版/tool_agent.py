@@ -181,7 +181,8 @@ def build_system(game, cat, plan3=False):
             + "【遊戲任務字】面板每輪列程式讀到的右上角任務字（可能讀錯）；標「任務字換了」可能＝上一件做完了，要不要送 任務完成（先回顧三步）你自己決定。" + NL
             + "【第幾人稱】（使用者 10/19 交代）要記錄應該是第幾人稱：用 記應該人稱(第一人稱或第三人稱,為什麼) 記下。"
               "如果畫面是第三人稱（應該是第一人稱）就要放大鏡頭：中鍵 捲(正數) 拉近；相反也一樣：捲(負數) 拉遠。"
-              "調完看畫面用 回報人稱 回報現在是第幾人稱。**但是如果有對鏡頭做縮放就要重新測量**：開工測試＋驗開工（面板【開工數值】會標「捲過」直到重量）。面板【人稱】每輪比 應該 跟 現在。" + NL
+              "不確定現在第幾人稱就叫 確認人稱（程式量三件事：畫面中間有沒有東西、會不會跟著你移動、判斷第幾人稱）。"
+              "調完再 確認人稱。**但是如果有對鏡頭做縮放就要重新測量**：開工測試＋驗開工（面板【開工數值】會標「捲過」直到重量）。面板【人稱】每輪比 應該 跟 現在。" + NL
             + "【少用中鍵縮放】（使用者 10/18 交代；切換人稱除外）捲（滑鼠中鍵）在遊戲畫面上會把鏡頭拉近拉遠，一縮放刻度、深度比例就變了、要重新量測；"
               "能不捲就不捲，要對準東西用 視角移動到(x,y) 或 轉。" + NL
             + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
@@ -553,7 +554,7 @@ class Tools(ExtraTools):
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else
-                     "；中央放大量不出來（角色擋在畫面中央、鏡頭跟著走，這次不算距離）" if (k == "w" and dd >= 2) else "")
+                     ("；中央放大量不出來（這次不算距離）" + self._center_note(dd)) if (k == "w" and dd >= 2) else "")
             if self.verify2:
                 time.sleep(0.3)
                 after2 = self.grab()
@@ -976,7 +977,7 @@ class Tools(ExtraTools):
             if not ok:
                 if k is None and k2 is None and d >= 15 and d2 >= 15:
                     # 10/18 04:4x：兩次都「有走、但放大量不出」他只看到「換空曠處再量」→ 17 輪叫了 12 次量比例。這種是量法本身的限制，要講清楚
-                    return (v2 + f"（兩次都有走出去：畫面變化 {d:.0f}、{d2:.0f}，但中央放大量不出來——第三人稱角色擋在畫面中央、鏡頭跟著走，"
+                    return (v2 + f"（兩次都有走出去：畫面變化 {d:.0f}、{d2:.0f}，但中央放大量不出來" + self._center_note(d) + "——"
                             "換地方重量也一樣量不出；校準檔沒改）。深度比例目前量不準，估距離用 找東西／估距 的框高")
                 return (v2 + "（兩次差超過 0.15 倍或有一次量不出＝這次不算，校準檔沒改）；"
                         f"第一次畫面變化 {d:.0f}、第二次 {d2:.0f}。換前方空曠、走 2 秒都不會撞牆的地方再量比例")
@@ -985,7 +986,7 @@ class Tools(ExtraTools):
         if d < 2:
             return "走 1 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
         if k is None:
-            return (f"走 1 秒畫面變化 {d:.0f}，但中央放大量不出來（角色擋在畫面中央、鏡頭跟著走），這次不算，校準檔沒改；"
+            return (f"走 1 秒畫面變化 {d:.0f}，但中央放大量不出來" + self._center_note(d) + "，這次不算，校準檔沒改；"
                     "深度比例目前量不準，估距離用 找東西／估距 的框高")
         if k <= 1.05 or d < 15:
             # 10/16 03:1x：貼牆走畫面變化 6～7、放大 1.0～1.1 倍也被寫進校準檔 → 這種不算量到
@@ -1049,13 +1050,100 @@ class Tools(ExtraTools):
         should = self._persp_should().get("應該")
         now = self.startup.get("人稱")
         head = (f"【人稱】應該：{should or '（還沒記，用 記應該人稱(第一人稱或第三人稱,為什麼) 記下）'}"
-                f"｜現在：{now or '（還沒回報，看畫面用 回報人稱）'}")
+                f"｜現在：{now or '（還沒確認，用 確認人稱 讓程式量，或看畫面 回報人稱）'}")
         if should and now and should not in now and now in ("第一人稱", "第三人稱"):
             if should == "第一人稱":
                 head += "｜⚑ 不一樣：照使用者交代放大鏡頭——捲(正數，例 捲(5)) 拉近到第一人稱，調完 回報人稱，刻度變了要重量"
             else:
                 head += "｜⚑ 不一樣：照使用者交代拉遠鏡頭——捲(負數，例 捲(-5)) 拉遠到第三人稱，調完 回報人稱，刻度變了要重量"
         return head
+
+    # ---- 10/19 10:5x 使用者：「他需要知道自己在第幾人稱，需要三個：這個工具可以確保第幾人稱、是否畫面中間有東西、
+    #      而且會跟隨玩家移動」→ 確認人稱：程式自己轉頭／走一下，量中央那塊跟不跟著動
+    PC_CENTER = (0.42, 0.40, 0.58, 0.82)                                  # 第三人稱自己的角色在這附近
+    PC_SIDES = ((0.14, 0.15, 0.32, 0.70), (0.66, 0.15, 0.82, 0.70))       # 兩側背景（避開左側按鈕、右側任務框、左下 HUD）
+
+    @staticmethod
+    def _gray(im):
+        import numpy as np
+        return np.asarray(im.convert("L").resize((320, 180)), dtype=float)
+
+    @staticmethod
+    def _box(g, b):
+        h, w = g.shape
+        return g[int(b[1] * h):int(b[3] * h), int(b[0] * w):int(b[2] * w)]
+
+    def _pc_pair(self, a, b):
+        """一對畫面：中央變化、兩側變化、比值、跟不跟著動。"""
+        import numpy as np
+        ga, gb = self._gray(a), self._gray(b)
+        c = float(np.mean(np.abs(self._box(ga, self.PC_CENTER) - self._box(gb, self.PC_CENTER))))
+        side = float(np.mean([np.mean(np.abs(self._box(ga, x) - self._box(gb, x))) for x in self.PC_SIDES]))
+        if side < 6:
+            return c, side, None, None                        # 背景沒動：量不出
+        ratio = c / side
+        return c, side, ratio, ratio < 0.5
+
+    def cal_persp_check(self):
+        """確認人稱：①畫面中間有沒有東西 ②那個東西跟不跟著玩家移動（轉頭兩次＋走一下）③判斷第幾人稱並記下。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能確認人稱"
+        import numpy as np
+        a = self.grab()
+        if a is None:
+            return "抓不到畫面"
+        g = self._gray(a)
+        center, ring = self._box(g, self.PC_CENTER), np.concatenate([self._box(g, x).ravel() for x in self.PC_SIDES])
+        tex = float(np.std(center))
+        contrast = abs(float(np.mean(center)) - float(np.mean(ring)))
+        has_thing = tex >= 12 or contrast >= 20
+        px = 30 * self.dx_deg
+        self._drag(px, 0)
+        time.sleep(0.4)
+        b = self.grab()
+        self._drag(-px, 0)
+        time.sleep(0.4)
+        c = self.grab()
+        self._key("w", 0.4)
+        time.sleep(0.3)
+        d = self.grab()
+        self._key("s", 0.4)
+        time.sleep(0.2)
+        t1, t2, wk = self._pc_pair(a, b), self._pc_pair(b, c), self._pc_pair(c, d)
+
+        def fmt(name, r):
+            cc, ss, ratio, fol = r
+            if ratio is None:
+                return f"{name}：背景只變 {ss:.0f}（幾乎沒動），量不出"
+            return f"{name}：兩側背景變 {ss:.0f}、中央變 {cc:.0f}（比值 {ratio:.2f}）→ {'中央那塊跟著你、留在畫面中間' if fol else '中央跟背景一起動'}"
+        votes = [r[3] for r in (t1, t2, wk) if r[3] is not None]
+        if not votes:
+            verdict = None
+        elif sum(votes) >= 2 or (len(votes) == 1 and votes[0]):
+            verdict = "第三人稱" if has_thing or sum(votes) >= 2 else None
+        else:
+            verdict = "第一人稱" if sum(1 for v in votes if not v) >= max(1, len(votes) - 1) else None
+        v2 = ""
+        if self.verify2 and t1[3] is not None and t2[3] is not None:
+            v2 = "；" + self._v2("確認人稱 轉頭", "跟著" if t1[3] else "不跟", "跟著" if t2[3] else "不跟", t1[3] == t2[3])
+        lines = [f"① 畫面中間有沒有東西：{'有' if has_thing else '看不太出來'}（中央紋理 {tex:.0f}、跟兩側亮度差 {contrast:.0f}）",
+                 "② 會不會跟著你移動：" + "；".join([fmt("轉右 30 度", t1), fmt("轉回來", t2), fmt("走 0.4 秒", wk)]) + v2]
+        if verdict:
+            self.startup["人稱"] = verdict
+            self._append("開工數值.md", f"人稱:{verdict}（確認人稱 量的：轉 {t1[2]}／{t2[2]}、走 {wk[2]}）")
+            lines.append(f"③ 判斷：**{verdict}**（{'中間有東西、而且轉頭和走路時都留在畫面中間＝你自己的角色' if verdict == '第三人稱' else '中間沒有跟著你的東西，整張畫面一起動'}）→ 已記成現在的人稱")
+        else:
+            lines.append("③ 判斷：量不出來（背景沒動或結果互相矛盾；可能開著選單、貼著牆）→ 沒改現在的人稱；離開選單／離牆再叫一次，或自己看畫面 回報人稱")
+        lines.append(self.persp_text())
+        return NL.join(lines)
+
+    def _center_note(self, d):
+        """10/19 11:0x：原本寫死「角色擋在畫面中央」——醫院裡是第一人稱、中央根本沒有角色，他整天讀成「被中央角色擋」。
+        改成：確認是第三人稱才說中央是你自己；畫面有變化就說你有走動。"""
+        moved = f"；畫面變化 {d:.0f}＝你有走動、不是被擋" if d >= 5 else ""
+        if self.startup.get("人稱") == "第三人稱":
+            return "（第三人稱：畫面中央是**你自己的角色**、鏡頭跟著你走，不是障礙）" + moved
+        return moved
 
     def cal_persp(self, 人稱=""):
         v = str(人稱).strip()
@@ -1764,7 +1852,7 @@ class Tools(ExtraTools):
         # 10/18 16:5x 使用者：「減少中鍵用於縮放視角，避免每次都要重新量測」→ 回傳提醒（不擋）
         # 10/19 10:2x：切換第一／第三人稱就是要捲 → 捲過人稱可能變了，先標成要重新回報
         if "人稱" in self.startup:
-            self.startup["人稱"] = "（捲過，看畫面重新 回報人稱）"
+            self.startup["人稱"] = "（捲過，用 確認人稱 重新量）"
         # 10/19 10:3x 使用者：「但是如果有對鏡頭做縮放就要重新測量」→ 量過的刻度標成失效、驗證作廢，直到再 開工測試
         if self.live and n:
             self.zoomed_at = datetime.now().strftime("%H:%M") + f" 捲 {n} 格"
