@@ -30,13 +30,25 @@ class ExtraTools:
     model = ""
 
     # ---------------- 共用
-    def _ask(self, system, user, effort="慢想", max_tokens=2500, deadline=300):
+    def _ask(self, system, user, effort="慢想", max_tokens=2500, deadline=300, image=None):
         from play_agent import stream_json, parse_json_loose, LAST_REASONING
         import tool_agent as T
+        content = [{"type": "text", "text": user}]
+        if image is not None:                       # 10/19 突發狀況：帶現在的畫面
+            content = [{"type": "image_url", "image_url": {"url": T.img_uri(image)}}] + content
         raw, trunc, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), system,
-                                       [{"type": "text", "text": user}], max_tokens, time.time() + deadline, 0.3, effort=effort)
+                                       content, max_tokens, time.time() + deadline, 0.3, effort=effort)
+        reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
-        return parse_json_loose(T.repair_json(raw)) or {}, raw
+        o = parse_json_loose(T.repair_json(raw)) or {}
+        if not o and reason:                        # 10/19 05:2x：JSON 寫在推理、輸出空 → 從推理最後一個 { 取
+            i = reason.rfind("{")
+            while i >= 0 and not o:
+                o = parse_json_loose(T.repair_json(reason[i:])) or {}
+                i = reason.rfind("{", 0, i)
+                if o and len(o) < 2:
+                    o = {}
+        return o, raw
 
     def remember_round(self, rnd, seen, think, did, rets):
         self.rounds.append({"輪": rnd, "看到": seen, "想": think, "用": list(did), "回傳": [r[:160] for r in rets]})
@@ -232,6 +244,107 @@ class ExtraTools:
         with open(p, "w", encoding="utf-8") as f:
             f.write(s)
         return f"你的提示改成（{len(s)} 字，之後每輪帶著）：{s[:80]}…"
+
+    # ---------------- 突發狀況與工作流（2026-10-19 07:5x 使用者：「新增工具：突發狀況——出現不合預期的情況時使用，
+    # 用於在突然出現不符合預期的時候可以去思考這個情況是否符合工作流的合理性」「如果符合就先加入工作流的可能事項」
+    # 「連續遇到多次就新增到工作流內」）
+    WF_PROMOTE = 3          # 同一件可能事項連續碰到幾次就寫進工作流
+
+    def _wf_load(self):
+        try:
+            return json.load(open(os.path.join(self.mdir, "工作流.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"工作流": [], "可能事項": []}
+
+    def _wf_save(self, wf):
+        with open(os.path.join(self.mdir, "工作流.json"), "w", encoding="utf-8") as f:
+            json.dump(wf, f, ensure_ascii=False, indent=1)
+
+    @staticmethod
+    def _wf_similar(a, b):
+        def bg(x):
+            x = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(x))
+            return {x[i:i + 2] for i in range(len(x) - 1)}
+        A, B = bg(a), bg(b)
+        return bool(A and B) and len(A & B) / len(A | B) >= 0.4
+
+    def workflow_text(self):
+        """面板用：工作流（確定的）＋可能事項（還在觀察的，附連續次數）。"""
+        wf = self._wf_load()
+        if not wf["工作流"] and not wf["可能事項"]:
+            return ""
+        out = []
+        if wf["工作流"]:
+            out.append("【工作流】（突發狀況連續碰到 %d 次的事項，程式寫進來的）" % self.WF_PROMOTE)
+            out += [f"- {w['事項']}" for w in wf["工作流"][-12:]]
+        if wf["可能事項"]:
+            out.append("【工作流的可能事項】（突發狀況判斷合理、還在觀察；連續 %d 次就寫進工作流）" % self.WF_PROMOTE)
+            out += [f"- {p['事項']}（遇到 {p['次數']} 次、連續 {p['連續']}）" for p in sorted(wf["可能事項"], key=lambda p: -p["次數"])[:8]]
+        return NL.join(out)
+
+    def learn_surprise(self, 情況="", 預期=""):
+        """突發狀況：看現在的畫面＋最近幾步＋工作流，想這個意外在工作流裡合不合理；合理就進可能事項，連續多次就進工作流。"""
+        what = str(情況).strip()
+        if len(re.sub(r"\W", "", what)) < 3:
+            return "突發狀況 要寫發生了什麼意外，例：突發狀況(長按E後畫面變成攝影機畫面、下方有辦理入住和出口,預期跳登記畫面)"
+        im = self.grab() if hasattr(self, "grab") else None
+        words = ""
+        try:
+            words = self.see_text()
+        except Exception:  # noqa: BLE001
+            pass
+        big = self.big or {}
+        wf = self._wf_load()
+        last = list(getattr(self, "step_log", []))[-3:]
+        steps = NL.join(f"- 做:{x.get('做')}｜結果應該是:{x.get('結果應該是') or '（沒寫）'}｜程式回傳:{str(x.get('回傳', ''))[:140]}" for x in last) or "（沒有）"
+        o, raw = self._ask(
+            self._identity() + "現在出現了你沒預期到的情況。先別急著繞開或重試，想清楚這件事在你的工作流裡合不合理。",
+            f"目前的大任務：{big.get('名稱', '（沒設）')}｜成功條件：{big.get('成功條件', '')}" + NL
+            + f"突發狀況：{what}" + NL + (f"你原本預期：{預期}" + NL if str(預期).strip() else "")
+            + "現在畫面上讀到的字：" + (words or "（沒讀到）") + NL
+            + "最後三步：" + NL + steps + NL
+            + "最近幾輪：" + NL + self._recent_text(6) + NL
+            + "你的工作流：" + NL + (self.workflow_text() or "（還沒有）") + NL * 2
+            + "看附的現在畫面，想：這個意外到底是什麼（是障礙？是要找的目標？是換到新畫面／新模式？是遊戲事件？是你自己的角色？是程式量測的問題？），"
+              "發生在工作流的哪一步、在工作流裡合不合理（合理＝照工作流做下去本來就可能遇到）。"
+              '只輸出 JSON：{"是什麼":"<=40字","在哪一步":"<=30字","合理":true,"為什麼":"<=80字",'
+              '"可能事項":"一句：之後遇到這情況要怎麼看待、怎麼做（合理才寫）","下一步":"工具(參數)"}',
+            effort="中想", max_tokens=2000, deadline=240, image=im)
+        if not o:
+            self._append("突發狀況.md", f"{what}｜（沒解析出來）")
+            return "突發狀況沒想出結果（沒解析出來）；先用 檢討 記下這次的意外"
+        ok = o.get("合理")
+        if isinstance(ok, str):
+            ok = ok.strip().lower() in ("true", "是", "合理", "yes")
+        line = (f"{what}｜是什麼:{o.get('是什麼', '')}｜在哪一步:{o.get('在哪一步', '')}｜合理:{'是' if ok else '否'}"
+                f"｜為什麼:{o.get('為什麼', '')}｜可能事項:{o.get('可能事項', '')}｜下一步:{o.get('下一步', '')}")
+        self._append("突發狀況.md", line)
+        ret = (f"突發狀況想完：是什麼＝{o.get('是什麼', '')}｜在哪一步＝{o.get('在哪一步', '')}｜合理＝{'是' if ok else '否'}"
+               f"｜為什麼＝{o.get('為什麼', '')}｜下一步＝{o.get('下一步', '')}")
+        item = str(o.get("可能事項") or "").strip()
+        if ok and item:
+            hit = next((p for p in wf["可能事項"] if self._wf_similar(item + what, p["事項"] + p.get("情況", ""))), None)
+            for p in wf["可能事項"]:
+                if p is not hit:
+                    p["連續"] = 0
+            now = datetime.now().strftime("%H:%M")
+            if hit:
+                hit["次數"] += 1
+                hit["連續"] += 1
+                hit["最近"] = now
+            else:
+                hit = {"事項": item, "情況": what, "次數": 1, "連續": 1, "最近": now, "加入": now}
+                wf["可能事項"].append(hit)
+            if hit["連續"] >= self.WF_PROMOTE:
+                wf["可能事項"].remove(hit)
+                wf["工作流"].append({"事項": hit["事項"], "加入": now, "次數": hit["次數"]})
+                ret += NL + f"⚑ 這件事連續遇到 {hit['連續']} 次 → 已寫進【工作流】：{hit['事項']}"
+            else:
+                ret += NL + f"合理 → 加進【工作流的可能事項】：{hit['事項']}（遇到 {hit['次數']} 次、連續 {hit['連續']}；連續 {self.WF_PROMOTE} 次就寫進工作流）"
+            self._wf_save(wf)
+        elif not ok:
+            ret += NL + "不合理 → 沒有加進工作流；照 為什麼 想清楚，有錯就 檢討"
+        return ret
 
     # ---------------- 程序
     def proc_record(self, 名稱="", 用途="", 幾輪=""):
