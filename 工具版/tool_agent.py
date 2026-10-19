@@ -2034,6 +2034,7 @@ class Tools(ExtraTools):
     # ---- 流程
     step_log = []          # 程式做過的每一步：{"做","結果應該是","回傳","符合"}（主迴圈填）
     pending_done = None    # 送了一次、等回顧的小任務完成
+    last_done = None       # 最近一次記下的完成 {"種類","內容","時間"}
 
     def _recall3(self):
         last = self.step_log[-3:]
@@ -2049,9 +2050,16 @@ class Tools(ExtraTools):
         rv = re.sub(r"^\s*回顧\s*[:：]\s*", "", str(review or "")).strip()
         words = re.sub(r"[\d\s.,，、。:：;；|｜()（）\[\]\-+_/%]+", "", rv)
         p = self.pending_done
+        # 10/20 06:0x：他一輪送兩次 任務完成(拍照,回顧…)：第一次記下、第二次沒有等回顧的又被打回「還沒算」，
+        # 他看最後一個回傳以為沒算，連送 6 輪（記了 5 次）→ 剛記過的同一件再送，直接說已經記下了
+        ld = self.last_done
+        if ld and ld["種類"] == kind and time.time() - ld["時間"] <= 900 and (
+                not what or not ld["內容"] or what in ld["內容"] or ld["內容"] in what):
+            return f"{kind}「{ld['內容']}」{int((time.time() - ld['時間']) // 60)} 分鐘前已經記下了，不用再送；接著做下一件"
         if p and p["種類"] == kind and len(words) >= 6 and time.time() - p["時間"] <= 900:
             self.pending_done = None
             name = what or p["內容"]
+            self.last_done = {"種類": kind, "內容": name, "時間": time.time()}
             self._append(fname, f"{prefix}{name}｜回顧:{rv}｜完成前三步:{' → '.join(str(x['做']) for x in p['三步']) or '無'}")
             return f"{kind} 記下了：{name}（回顧：{rv}）"
         self.pending_done = {"種類": kind, "內容": what, "時間": time.time(), "三步": [dict(x) for x in self.step_log[-3:]]}
