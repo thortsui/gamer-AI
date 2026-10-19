@@ -2254,7 +2254,9 @@ TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請"
             # 10/19 02:42 誤判：長按 E 開了職業面板，右側說明「（等級 3）開始時配備電擊槍和可部署攝影機…」被當成任務字換了 → 面板／選單用字
             "護士", "護十", "秘書", "實習生", "心理學家", "醫護", "外觀", "裝備", "等級", "配備", "恢復", "次數", "攝影機", "伺服器", "設定", "協助", "帳號",
             # 10/20 04:16 誤判：大廳右側看板「下一次更新」被當成任務字換了
-            "更新")
+            "更新",
+            # 10/20 04:32 誤判：右側道具 HUD「火焰範圍 : 10」被當成任務字
+            "火焰", "範圍")
 
 
 def top_right_words(im):
@@ -2313,18 +2315,24 @@ class TaskWords:
         """回 (這輪讀到的字串, 這輪的換字事件或 None)"""
         # 10/19 07:3x：上方橫帶讀到伺服器／玩家名稱（「索利克斯胡巴咍托 2」）被當成換字 → 換字事件只認右緣任務框（x≥0.78），上方橫帶只顯示
         cur = [self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 2 and w[1] >= 0.78]
+        # 10/20 04:3x：遊戲自己連跳「完成簽到→跟隨病人到他的房間→從房間3中的病人身上採集樣本」，每個只讀到一輪、要連兩輪才算 → 全漏掉。
+        # 4 個中文字以上、正好在任務框那一格（x 0.88～0.94、y 0.17～0.25；10/19～20 真的任務字都在這裡，對話泡泡、道具 HUD 不在）的字讀到一次就算
+        sure = {self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 4 and 0.88 <= w[1] <= 0.94 and 0.17 <= w[2] <= 0.25}
         text = "、".join(w[0] for w in words) or "（沒讀到）"
         ev = None
-        if self.hist:
-            last = self.hist[-1]
-            confirmed = [w for w in cur if any(self.same(w, x) for x in last)]
+        if self.hist or sure:
+            last = self.hist[-1] if self.hist else []
+            confirmed = [w for w in cur if w in sure or any(self.same(w, x) for x in last)]
             # 14:2x：原本也跟「最近讀過但沒確認」的字比，14:17 讀過一次「拍照」→ 14:20 確認時被當舊字、換字事件漏掉；只跟目前認定的比
             new = [w for w in confirmed if not any(self.same(w, p) for p in self.current)]
             if new and (self.current or self.events):
                 ev = {"時間": datetime.now().strftime("%H:%M"), "舊": "、".join(self.current) or "（沒有）", "新": "、".join(new)}
                 self.events.append(ev)
-            if confirmed:
+            # 兩行的任務字只讀到其中一行時不縮小（10/19「從房間3中的病人／身上採集樣本」一行一行輪流讀到被當成換字）
+            if new:
                 self.current = confirmed
+            elif confirmed:
+                self.current = self.current + [w for w in confirmed if not any(self.same(w, p) for p in self.current)]
         self.hist.append(cur)
         self.hist = self.hist[-10:]
         self.prev_text, self.last_text = self.last_text, text
