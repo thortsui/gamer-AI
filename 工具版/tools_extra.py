@@ -41,13 +41,13 @@ class ExtraTools:
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
         o = parse_json_loose(T.repair_json(raw)) or {}
-        if not o and reason:                        # 10/19 05:2x：JSON 寫在推理、輸出空 → 從推理最後一個 { 取
-            i = reason.rfind("{")
-            while i >= 0 and not o:
-                o = parse_json_loose(T.repair_json(reason[i:])) or {}
-                i = reason.rfind("{", 0, i)
-                if o and len(o) < 2:
-                    o = {}
+        if not o and reason:                        # 10/19 05:2x：JSON 寫在推理、輸出空 → 從推理取；13:2x 挑欄位最多的那份
+            best = {}
+            for m in re.finditer(r"\{\s*\"", reason):
+                cand = parse_json_loose(T.repair_json(reason[m.start():])) or {}
+                if isinstance(cand, dict) and len(cand) >= max(2, len(best)):
+                    best = cand
+            o = best
         return o, raw
 
     def remember_round(self, rnd, seen, think, did, rets):

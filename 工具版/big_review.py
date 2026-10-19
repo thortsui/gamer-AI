@@ -41,6 +41,7 @@ def main():
     ap.add_argument("--effort", default="慢想")
     ap.add_argument("--max-tokens", type=int, default=6000)
     ap.add_argument("--endpoint", default="http://192.168.0.126:8888/v1")
+    ap.add_argument("--no-apply", action="store_true", help="不把新工具／補用途／記卡法／記筆記／記準則寫進記憶（上次已寫過時用）")
     ap.add_argument("--reuse", action="store_true", help="不叫大腦，用上次存的 大檢討_日期.json 的原文／推理重新解析與寫入（10/19 05:2x 解析失敗補救）")
     a = ap.parse_args()
     import tool_agent as T
@@ -125,12 +126,18 @@ def main():
         reason = LAST_REASONING.get("text", "")
     o = parse_json_loose(T.repair_json(raw)) or {}
     from_reason = False
-    if not o and reason:      # 10/19 05:2x：他把整份 JSON 寫在推理裡、輸出 0 字 → 從推理最後一個「{"今天做了什麼"」取出來
-        i = reason.rfind('{"今天做了什麼"')
-        if i >= 0:
-            o = parse_json_loose(T.repair_json(reason[i:])) or {}
-            from_reason = bool(o)
+    if not o and reason:      # 10/19 05:2x：他把整份 JSON 寫在推理裡、輸出 0 字 → 從推理取出來
+        # 13:2x：他把同一份 JSON 重複寫了 4 次、第 5 次寫一半被截斷 → 每一份都解析，挑欄位最多的（同樣多取後面的）
+        best = {}
+        for mm in re.finditer(r'\{\s*"今天做了什麼"', reason):
+            cand = parse_json_loose(T.repair_json(reason[mm.start():])) or {}
+            if len(cand) >= len(best):
+                best = cand
+        o, from_reason = best, bool(best)
     print(f"[大檢討] {dt:.0f}s 截斷={trunc} 推理 {len(reason)} 字 輸出 {len(raw)} 字 解析{'成功' if o else '失敗'}{'（從推理取出）' if from_reason else ''}")
+    if o and not (o.get("明天開場要做什麼") or o.get("要改的習慣")):   # 13:2x：殘缺的（缺開場與習慣）也不蓋掉上一份
+        print(f"[大檢討] 解析出來的缺 明天開場／要改的習慣（只有 {list(o.keys())}），當成失敗")
+        o = {}
     if not o:                 # 解析不出來：不覆蓋上一份 大檢討.md（system 會繼續帶上一份），失敗的另存
         with open(os.path.join(m, "大檢討_失敗.md"), "w", encoding="utf-8") as f:
             f.write(f"# 大檢討解析失敗 {datetime.now().strftime('%m/%d %H:%M')}" + NL * 2 + "## 原文" + NL + raw + NL * 2 + "## 推理" + NL + reason)
@@ -142,19 +149,24 @@ def main():
 
     # 把他列的東西真的寫進他的記憶／工具清單（跟他在遊戲裡叫工具一樣）
     applied = []
-    for t in o.get("新工具") or []:
+    if a.no_apply:
+        applied.append("（--no-apply：這次不寫入；同一份大檢討的內容 13:26 已寫進記憶）")
+        o_apply = {}
+    else:
+        o_apply = o
+    for t in o_apply.get("新工具") or []:
         if isinstance(t, dict):
             applied.append("新工具 → " + tools.tool_new(t.get("名稱", ""), t.get("用途", ""), t.get("做法", "")))
-    for t in o.get("補用途") or []:
+    for t in o_apply.get("補用途") or []:
         if isinstance(t, dict):
             applied.append("補用途 → " + tools.tool_add_use(t.get("工具", ""), t.get("情況", "")))
-    for t in o.get("記卡法") or []:
+    for t in o_apply.get("記卡法") or []:
         if isinstance(t, dict):
             applied.append("記卡法 → " + tools.mem_stuck(t.get("情況", ""), t.get("解法", "")))
-    for t in o.get("記筆記") or []:
+    for t in o_apply.get("記筆記") or []:
         if isinstance(t, str) and t.strip():
             applied.append("記筆記 → " + tools.mem_note(t))
-    for t in o.get("記準則") or []:          # 10/19 12:4x 使用者：「他也能按照他的發現去自己製作新的準則」
+    for t in o_apply.get("記準則") or []:          # 10/19 12:4x 使用者：「他也能按照他的發現去自己製作新的準則」
         if isinstance(t, dict):
             applied.append("記準則 → " + tools.mem_rule(t.get("對象", ""), t.get("準則", "")))
 
