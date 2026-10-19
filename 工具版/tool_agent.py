@@ -1089,6 +1089,34 @@ class Tools(ExtraTools):
         ratio = c / side
         return c, side, ratio, ratio < 0.5
 
+    def _pc_track(self, a, b):
+        """12:5x：追中央一小塊在轉頭後跑到哪（俯視第三人稱自己的角色很小，中央那塊大多是地磚，變化量法會判錯）。
+        回 (中央位移, 背景位移, 中央相似度, 跟不跟著)；背景沒動回 None。"""
+        import math
+        W, H = 240, 124
+        ga = a.convert("L").resize((W, H))
+        res = {}
+        for name, (cx, cy) in (("中", (0.50, 0.52)), ("左", (0.24, 0.40)), ("右", (0.76, 0.40))):
+            pw, ph = 24, 24
+            x0, y0 = int(cx * W - pw / 2), int(cy * H - ph / 2)
+            patch = ga.crop((x0, y0, x0 + pw, y0 + ph))
+            r = self._locate(patch, b, near=(cx, cy, 0.35))
+            res[name] = (math.hypot(r[0] - cx, r[1] - cy), r[2]) if r else (None, 0.0)
+        bg = [v[0] for k, v in res.items() if k != "中" and v[0] is not None and v[1] >= 0.4]
+        bgd = max(bg) if bg else 0.0
+        cd, _ = res["中"]
+        # 直接比前後兩張「正中央同一個位置」像不像（跟著你的東西會一直在那裡）
+        import numpy as np
+        pa = np.asarray(ga.crop((108, 52, 132, 76)), dtype=np.float32)
+        pb = np.asarray(b.convert("L").resize((W, H)).crop((108, 52, 132, 76)), dtype=np.float32)
+        pa, pb = pa - pa.mean(), pb - pb.mean()
+        stay = float((pa * pb).sum() / (np.sqrt((pa ** 2).sum() * (pb ** 2).sum()) + 1e-6))
+        if bgd < 0.03 or float(np.sqrt((pa ** 2).mean())) < 15:      # 背景沒動、或中央沒紋理（白牆）→ 量不出
+            return cd, bgd, stay, None
+        # 12:5x 實測：大廳第三人稱 原位相似 0.51～0.53、別處最像 0.57～0.61（地磚湊巧像）；第一人稱中央被轉走、原位很低
+        best = res["中"][1]
+        return cd, bgd, stay, (stay >= 0.4 and stay >= best - 0.15)
+
     def cal_persp_check(self):
         """確認人稱：①畫面中間有沒有東西 ②那個東西跟不跟著玩家移動（轉頭兩次＋走一下）③判斷第幾人稱並記下。"""
         if self.image_path or not self.live:
@@ -1102,7 +1130,7 @@ class Tools(ExtraTools):
         tex = float(np.std(center))
         contrast = abs(float(np.mean(center)) - float(np.mean(ring)))
         has_thing = tex >= 12 or contrast >= 20
-        px = 30 * self.dx_deg
+        px = 20 * self.dx_deg
         self._drag(px, 0)
         time.sleep(0.4)
         b = self.grab()
@@ -1114,28 +1142,34 @@ class Tools(ExtraTools):
         d = self.grab()
         self._key("s", 0.4)
         time.sleep(0.2)
-        t1, t2, wk = self._pc_pair(a, b), self._pc_pair(b, c), self._pc_pair(c, d)
+        t1, t2, wk = self._pc_track(a, b), self._pc_track(b, c), self._pc_pair(c, d)
 
         def fmt(name, r):
             cc, ss, ratio, fol = r
             if ratio is None:
                 return f"{name}：背景只變 {ss:.0f}（幾乎沒動），量不出"
-            return f"{name}：兩側背景變 {ss:.0f}、中央變 {cc:.0f}（比值 {ratio:.2f}）→ {'中央那塊跟著你、留在畫面中間' if fol else '中央跟背景一起動'}"
-        votes = [r[3] for r in (t1, t2, wk) if r[3] is not None]
-        if not votes:
-            verdict = None
-        elif sum(votes) >= 2 or (len(votes) == 1 and votes[0]):
-            verdict = "第三人稱" if has_thing or sum(votes) >= 2 else None
+            return f"{name}：兩側背景變 {ss:.0f}、中央變 {cc:.0f}（比值 {ratio:.2f}）"
+
+        def fmt_t(name, r):
+            cd, bgd, sim, fol = r
+            if fol is None:
+                return f"{name}：背景只移 {bgd * 100:.0f}% 畫面（幾乎沒動），量不出"
+            return (f"{name}：背景移了 {bgd * 100:.0f}% 畫面、正中央前後還像不像 {sim:.2f} → "
+                    + ("中央那塊留在畫面中間＝跟著你" if fol else "中央那塊跟著景物被轉走"))
+        # 12:4x：只用轉頭兩票判斷（第三人稱轉頭時角色站著不動、可靠）；走路時角色在播動畫，那票只列數字參考
+        votes = [r[3] for r in (t1, t2) if r[3] is not None]
+        if len(votes) == 2 and votes[0] == votes[1]:
+            verdict = "第三人稱" if votes[0] else "第一人稱"
         else:
-            verdict = "第一人稱" if sum(1 for v in votes if not v) >= max(1, len(votes) - 1) else None
+            verdict = None
         v2 = ""
         if self.verify2 and t1[3] is not None and t2[3] is not None:
             v2 = "；" + self._v2("確認人稱 轉頭", "跟著" if t1[3] else "不跟", "跟著" if t2[3] else "不跟", t1[3] == t2[3])
         lines = [f"① 畫面中間有沒有東西：{'有' if has_thing else '看不太出來'}（中央紋理 {tex:.0f}、跟兩側亮度差 {contrast:.0f}）",
-                 "② 會不會跟著你移動：" + "；".join([fmt("轉右 30 度", t1), fmt("轉回來", t2), fmt("走 0.4 秒", wk)]) + v2]
+                 "② 會不會跟著你移動：" + "；".join([fmt_t("轉右 20 度", t1), fmt_t("轉回來", t2), fmt("走 0.4 秒（只參考，不算票：第三人稱走路時角色在播動畫）", wk)]) + v2]
         if verdict:
             self.startup["人稱"] = verdict
-            self._append("開工數值.md", f"人稱:{verdict}（確認人稱 量的：轉 {t1[2]}／{t2[2]}、走 {wk[2]}）")
+            self._append("開工數值.md", f"人稱:{verdict}（確認人稱 量的：中央位移 {t1[0]}／{t2[0]}、背景 {t1[1]}／{t2[1]}）")
             lines.append(f"③ 判斷：**{verdict}**（{'中間有東西、而且轉頭和走路時都留在畫面中間＝你自己的角色' if verdict == '第三人稱' else '中間沒有跟著你的東西，整張畫面一起動'}）→ 已記成現在的人稱")
         else:
             lines.append("③ 判斷：量不出來（背景沒動或結果互相矛盾；可能開著選單、貼著牆）→ 沒改現在的人稱；離開選單／離牆再叫一次，或自己看畫面 回報人稱")
@@ -1143,16 +1177,15 @@ class Tools(ExtraTools):
         return NL.join(lines)
 
     def _center_note(self, d, a=None, b=None):
-        """10/19 11:0x：原本寫死「角色擋在畫面中央」——醫院裡是第一人稱、中央根本沒有角色，他整天讀成「被中央角色擋」。
-        11:4x：用回報的人稱判斷也會過期（大廳回報第三人稱、走進醫院變第一人稱）→ 直接用這次走路前後兩張畫面量：
-        中央那塊留在原位、背景在動＝自己的角色；中央跟背景一起動＝中央沒東西擋。"""
-        moved = f"；畫面變化 {d:.0f}＝你有走動、不是被擋" if d >= 5 else ""
-        r = self._pc_pair(a, b) if (a is not None and b is not None) else (None, None, None, None)
-        if r[3] is True:
-            return f"（這次走路：畫面中央那塊留在原位、背景在動（比值 {r[2]:.2f}）＝第三人稱，中央是**你自己的角色**，不是障礙）" + moved
-        if r[3] is False:
-            return f"（這次走路：中央跟背景一起動（比值 {r[2]:.2f}）＝中央沒有東西跟著你、也沒擋住；量不出多半是正前方太近或沒紋理）" + moved
-        return "（原因不確定；要知道自己第幾人稱就叫 確認人稱）" + moved
+        """10/19 11:0x：原本寫死「角色擋在畫面中央」——醫院裡是第一人稱、中央根本沒有角色。
+        12:4x：用走路前後畫面判斷也不可靠（第三人稱走路時角色在播動畫、貼著欄杆走畫面也會變）→ 不解讀，只給量到的數字。"""
+        r = self._pc_pair(a, b) if (a is not None and b is not None) else None
+        if r is None:
+            return "（原因不確定；不知道自己第幾人稱就叫 確認人稱）"
+        side = r[1]
+        if side < 6:
+            return f"（兩側背景只變 {side:.0f}＝背景幾乎沒動，可能被擋住了；畫面變化多半是角色動作）"
+        return f"（兩側背景變 {side:.0f}＝背景有在動；中央量不出的原因程式判斷不了，不知道自己第幾人稱就叫 確認人稱）"
 
     def cal_persp(self, 人稱=""):
         v = str(人稱).strip()
