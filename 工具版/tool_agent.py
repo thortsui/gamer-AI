@@ -1949,6 +1949,16 @@ class Tools(ExtraTools):
         if self.diff(before, after) < 2:
             self.scroll(-3)
             return "按 esc 畫面沒變，已捲 -3 拉遠；面板還在就用 點字 點它的叉叉或「關閉」"
+        # 10/20 07:1x：購買視窗按 esc 沒關到，反而打開 Roblox 平台選單（帳號／邀請好友／ESC 繼續），他花兩輪才關回
+        # → 按完看一下，是平台選單就再按一次 esc 關回，回傳講清楚
+        menu = ("帳號", "邀請好友", "在此伺服器中", "協助")
+        if sum(1 for w in self._words(after) if any(m in w for m in menu)) >= 2:
+            self.key_press("esc", 0.1)
+            time.sleep(0.3)
+            still = sum(1 for w in self._words(self.grab()) if any(m in w for m in menu)) >= 2
+            return ("關掉面板：按 esc 打開的是 Roblox 平台選單（帳號／邀請好友／設定），不是遊戲裡的視窗；"
+                    + ("已再按一次 esc，選單還在——點底部藍色「繼續」" if still else "已再按一次 esc 關回遊戲")
+                    + "。遊戲裡的視窗（購買道具等）要點它右上角的 X")
         return "關掉面板：" + r
 
     def fix_paywall(self):
