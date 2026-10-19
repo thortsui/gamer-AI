@@ -2280,7 +2280,8 @@ def top_right_words(im):
             cx, cy = (x0 + (min(xs) + max(xs)) / 4) / W, (y0 + (min(ys) + max(ys)) / 4) / H
             han = len(re.findall(r"[\u4e00-\u9fff]", txt))
             # 任務字是短句（在電腦上註冊／蓋印表格／檢查病人的情況）；超過 12 個中文字或帶逗號句號的是面板說明
-            if 3 <= han <= 12 and not re.search(r"[，。,]", txt) and not any(h in txt for h in TASK_HUD):
+            # 14:1x：任務字可以只有兩個字（「拍照」）——原本 ≥3 把它濾掉，任務換了面板沒標
+            if 2 <= han <= 12 and not re.search(r"[，。,]", txt) and not any(h in txt for h in TASK_HUD):
                 out.append([txt, round(cx, 2), round(cy, 2)])
         except Exception:  # noqa: BLE001
             continue
@@ -2306,14 +2307,14 @@ class TaskWords:
     def update(self, words):
         """回 (這輪讀到的字串, 這輪的換字事件或 None)"""
         # 10/19 07:3x：上方橫帶讀到伺服器／玩家名稱（「索利克斯胡巴咍托 2」）被當成換字 → 換字事件只認右緣任務框（x≥0.78），上方橫帶只顯示
-        cur = [self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 3 and w[1] >= 0.78]
+        cur = [self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 2 and w[1] >= 0.78]
         text = "、".join(w[0] for w in words) or "（沒讀到）"
         ev = None
         if self.hist:
             last = self.hist[-1]
             confirmed = [w for w in cur if any(self.same(w, x) for x in last)]
-            pool = [w for st in self.hist[-7:-1] for w in st] + list(self.current)
-            new = [w for w in confirmed if not any(self.same(w, p) for p in pool)]
+            # 14:2x：原本也跟「最近讀過但沒確認」的字比，14:17 讀過一次「拍照」→ 14:20 確認時被當舊字、換字事件漏掉；只跟目前認定的比
+            new = [w for w in confirmed if not any(self.same(w, p) for p in self.current)]
             if new and (self.current or self.events):
                 ev = {"時間": datetime.now().strftime("%H:%M"), "舊": "、".join(self.current) or "（沒有）", "新": "、".join(new)}
                 self.events.append(ev)
