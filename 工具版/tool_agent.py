@@ -105,6 +105,7 @@ def plan_format(n):
 
 PLAN3_FORMAT = plan_format(3)
 PLAN3_PRE_GROUPS = ("文件", "記憶", "流程", "學習")
+PLAN3_PRE_TOOLS = ("記應該人稱", "回報人稱")   # 10/19 10:4x：校準類裡只記錄、不動遊戲的，也可以放 先記（他兩次放先記被擋）
 
 
 def build_system(game, cat, plan3=False):
@@ -2499,7 +2500,7 @@ def main():
             groups = {t["名稱"]: t["類別"] for t in cat["工具"]}
             for item in pre[:2]:
                 name = parse_call(item, cat)[0]
-                if name and groups.get(name) not in PLAN3_PRE_GROUPS:
+                if name and groups.get(name) not in PLAN3_PRE_GROUPS and name not in PLAN3_PRE_TOOLS:
                     rets.append(f"✗ 先記 只放 記錄／檢討／文件／學習類；「{name}」是遊戲動作，要排進 下{kn}步（這次沒做）")
                     continue
                 do(item, "先記 ")
