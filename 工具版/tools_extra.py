@@ -79,8 +79,9 @@ class ExtraTools:
         """死亡檢討：剛死掉就叫，回顧死前最近 15 輪。"""
         o, raw = self._ask(self._identity(),
                            "你剛剛死了（理智歸零或倒下）。這是死前最近幾輪：" + NL + self._recent_text(15) + NL * 2
+        # 10/21 06:5x：max_tokens 1200 被慢想推理吃光、回「沒解析出來」→ 學習類一律 8000（跟主程式一樣）
                            + '只輸出 JSON：{"死前在做什麼":"<=40字","死因":"<=40字","錯在哪":"<=60字","下次從哪一步開始改":"用工具寫，例如 先 我的記憶(卡法) 再 走(0.5)","要記的規則":"一句"}',
-                           effort="慢想", max_tokens=1200, deadline=240)
+                           effort="慢想", max_tokens=8000, deadline=240)
         if not o:
             return "死亡檢討沒解析出來"
         line = "｜".join(f"{k}:{v}" for k, v in o.items() if isinstance(v, str))
@@ -95,7 +96,7 @@ class ExtraTools:
         o, raw = self._ask(self._identity(),
                            f"你剛做成了：{做成了什麼}。這是最近幾輪：" + NL + self._recent_text(12) + NL * 2
                            + '把它回推成下次可以直接照做的步驟。只輸出 JSON：{"做成的事":"","關鍵是哪一步":"","步驟":["工具(參數)","…"],"下次怎麼更快":""}',
-                           effort="中想", max_tokens=1000, deadline=180)
+                           effort="中想", max_tokens=8000, deadline=180)
         if not o:
             return "成功回推沒解析出來"
         steps = o.get("步驟") or []
@@ -114,7 +115,7 @@ class ExtraTools:
         raw_notes = "【筆記】" + rd("筆記.md") + NL + "【卡法】" + rd("卡法.md") + NL + "【因果】" + rd("因果.md") + NL + "【檢討】" + rd("檢討.md", 60)
         o, raw = self._ask(self._identity(),
                            "以下是你自己寫的筆記、卡法、因果、檢討（很多重複）。濃縮成最多 12 條確定的規則，每條 <=30 字、表格式、能照做。" + NL + raw_notes[:9000] + NL
-                           + '只輸出 JSON：{"規則":["…"]}', effort="慢想", max_tokens=1500, deadline=300)
+                           + '只輸出 JSON：{"規則":["…"]}', effort="慢想", max_tokens=8000, deadline=300)
         rules = [str(x) for x in (o.get("規則") or []) if str(x).strip()]
         if not rules:
             return "學習整理沒整理出東西"
@@ -130,7 +131,7 @@ class ExtraTools:
                            + (f"你想的問題：{問題}" + NL if 問題 else "")
                            + "最近幾輪：" + NL + self._recent_text(10) + NL
                            + '排出接下來的大動作序列與第一步的細步驟。只輸出 JSON：{"大動作序列":["…","…"],"第一步細步驟":["工具(參數)","…"],"為什麼這樣排":"<=60字"}',
-                           effort="慢想", max_tokens=1500, deadline=300)
+                           effort="慢想", max_tokens=8000, deadline=300)
         if not o:
             return "慢想沒解析出來"
         self.plan = {"序列": [str(x) for x in (o.get("大動作序列") or [])], "細步驟": [str(x) for x in (o.get("第一步細步驟") or [])],
@@ -426,7 +427,7 @@ class ExtraTools:
               "發生在工作流的哪一步、在工作流裡合不合理（合理＝照工作流做下去本來就可能遇到）。"
               '只輸出 JSON：{"是什麼":"<=40字","在哪一步":"<=30字","合理":true,"為什麼":"<=80字",'
               '"可能事項":"一句：之後遇到這情況要怎麼看待、怎麼做（合理才寫）","下一步":"工具(參數)"}',
-            effort="中想", max_tokens=2000, deadline=240, image=im)
+            effort="中想", max_tokens=8000, deadline=240, image=im)
         if not o:
             self._append("突發狀況.md", f"{what}｜（沒解析出來）")
             return "突發狀況沒想出結果（沒解析出來）；先用 檢討 記下這次的意外"
