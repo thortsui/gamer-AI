@@ -69,6 +69,8 @@ def catalog_lines(cat, 類別=None):
     for t in cat["工具"]:
         if 類別 and t["類別"] != 類別:
             continue
+        if t.get("隱藏"):             # 10/20 20:4x 使用者：相似度太高、可替換的合併 → 舊名字不列，叫了照樣能用
+            continue
         tag = "" if t["實作"] != "未實作" else "（未實作）"
         if t.get("自訂"):
             tag = "（你自己定義的）"
@@ -476,9 +478,13 @@ class Tools(ExtraTools):
         return f"【{key}】" + NL + (body or "（還是空的）")
 
     def doc_tool(self, 名稱=""):
-        t = next((t for t in self.cat["工具"] if t["名稱"] == str(名稱).strip()), None)
+        key = str(名稱).strip()
+        groups = {t["類別"] for t in self.cat["工具"]}
+        if not key or key in groups or key == "全部":          # 工具清單 併進來：給類別名就列那一類
+            return self.doc_list("" if key == "全部" else key)
+        t = next((t for t in self.cat["工具"] if t["名稱"] == key), None)
         if not t:
-            return "沒有這個工具。叫 工具清單 看有哪些。"
+            return "沒有這個工具。叫 工具說明(類別名) 看那一類有哪些：" + "、".join(sorted(groups))
         return json.dumps({k: t[k] for k in ("名稱", "用途", "用法", "例", "參數", "回傳") if k in t}, ensure_ascii=False)
 
     def doc_list(self, 類別=""):
@@ -2224,8 +2230,9 @@ class Tools(ExtraTools):
     def mem_note(self, 內容=""):
         return self._append("筆記.md", str(內容))
 
-    def mem_place(self, 名稱="", 樣子=""):
-        return self._append("地點.md", f"{名稱}｜{樣子}")
+    def mem_place(self, 名稱="", 樣子="", 種類=""):
+        # 記站位、標點 併進來：種類＝地點（預設）／站位／特徵物
+        return self._append("地點.md", (f"[{種類}]" if str(種類).strip() else "") + f"{名稱}｜{樣子}")
 
     def mem_cause(self, 做了="", 發生=""):
         return self._append("因果.md", f"做了:{做了}｜發生:{發生}")
@@ -2319,6 +2326,11 @@ class Tools(ExtraTools):
     def flow_big_set(self, 名稱="", 成功條件=""):
         if not str(名稱).strip():
             return "要給名稱"
+        if "→" in str(名稱):              # 排大任務 併進來：一次給好幾件，第一件是現在的、其他排隊
+            names = [x.strip() for x in str(名稱).split("→") if x.strip()]
+            r = self.flow_big_set(names[0], 成功條件)
+            self.big_queue = names[1:]
+            return r + "；之後排隊：" + " → ".join(self.big_queue)
         self.big = {"名稱": str(名稱).strip(), "成功條件": str(成功條件).strip(), "開始": datetime.now().strftime("%H:%M")}
         self._append("大任務.md", f"開始:{self.big['名稱']}｜成功條件:{self.big['成功條件']}")
         return f"目前的大任務＝「{self.big['名稱']}」（成功條件：{self.big['成功條件'] or '沒寫'}）"
@@ -2353,6 +2365,9 @@ class Tools(ExtraTools):
         self.cat = load_catalog(self.game)       # 下一輪清單就有
 
     def tool_new(self, 名稱="", 用途="", 做法=""):
+        m = re.fullmatch(r"\s*(?:最近)?\s*(\d+)\s*輪?\s*", str(做法))
+        if m:                               # 錄成程序 併進來：做法寫「最近3輪」＝把剛才幾輪真的做過的動作錄起來
+            return self.proc_record(名稱, 用途, m.group(1))
         name = str(名稱).strip()
         if not name or not str(做法).strip():
             return "要給 名稱、用途、做法（做法＝現有工具用 → 接起來）"

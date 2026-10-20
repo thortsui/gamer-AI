@@ -191,13 +191,15 @@ class ExtraTools:
             book = {}
         if not str(名稱).strip():
             return "記按鈕 要給名稱，例如 記按鈕(立即開始,0.62,0.80,進場)"
+        if str(x).strip() in ("刪", "刪除", "忘記") or str(效果).strip() in ("刪", "刪除", "忘記"):
+            return self.mem_forget_button(名稱)          # 忘記按鈕 併進來
         last = self.pending_click or {}
         fx = x if str(x).strip() else last.get("x", "")
         fy = y if str(y).strip() else last.get("y", "")
         book[str(名稱)] = {"x": fx, "y": fy, "效果": 效果, "時間": datetime.now().strftime("%m/%d %H:%M")}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(book, f, ensure_ascii=False, indent=1)
-        return f"按鈕簿記下「{名稱}」({fx},{fy}) 效果:{效果}。之後 我的記憶(按鈕簿) 看得到，直接 點(x,y)"
+        return f"按鈕簿記下「{名稱}」({fx},{fy}) 效果:{效果}。之後 查準則(按鈕簿) 看得到，直接 點(x,y)"
 
     def mem_forget_button(self, 名稱=""):
         p = os.path.join(self.mdir, "按鈕簿.json")
@@ -296,9 +298,13 @@ class ExtraTools:
         q = str(對象或情況).strip()
         if not q:
             return "查準則 要給 對象或情況，例：查準則(咖啡機)"
+        if q in ("玩法摘要", "成功做法", "卡住檢討", "死亡檢討", "操作手冊", "遇到的問題", "因果", "學到的", "地圖", "筆記",
+                 "大檢討", "卡法", "按鈕簿", "站位", "流程", "學習整理", "慢想", "互動物", "標點", "地點"):
+            return self.doc_memory(q)                    # 我的記憶 併進來：直接叫出那一類
         qb = self._bg(q)
         pool = [("準則", f"{r['對象']}｜{r['準則']}" + (f"（記了 {r['次數']} 次）" if r["次數"] > 1 else "")) for r in self._rules_load()]
-        pool += [(src, l) for src, f in (("筆記", "筆記.md"), ("卡法", "卡法.md"), ("互動物", "互動物.md")) for l in self._mem_lines(f)]
+        pool += [(src, l) for src, f in (("筆記", "筆記.md"), ("卡法", "卡法.md"), ("互動物", "互動物.md"),
+                                          ("地點", "地點.md"), ("成功做法", "成功做法.md"), ("因果", "因果.md")) for l in self._mem_lines(f)]
         pool += [("檢討", r) for r in list(self.reviews)] + [("舊檢討", l) for l in self._mem_lines("檢討.md", 300)]
         # 10/20：以前只要一半字組對上就算，一次回報幾百條 → 收緊：整句出現，或至少對上 2 組且 6 成（短的 8 成）；
         # 再把相近的合併成一條（×N＝同一件事記了 N 次）
@@ -471,6 +477,8 @@ class ExtraTools:
 
     # ---------------- 看
     def see_watch(self, 標籤=""):
+        if str(標籤).strip() in ("停", "停止", "不用", "關"):
+            return self.see_unwatch()                   # 停止追蹤 併進來
         labels = [x.strip() for x in re.split(r"[,，、]", str(標籤)) if x.strip()]
         if not labels:
             return "追蹤 要給英文標籤，例如 追蹤(cat,door)"
