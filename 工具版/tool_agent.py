@@ -1707,13 +1707,37 @@ class Tools(ExtraTools):
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
         pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and self.diff(before, after) >= 8) else None
-        if pinned and pinned[2] >= 0.95:
+        # 10/20 11:3x：對右上任務字「在電腦上註冊」(0.91,0.21) 連叫 12 輪：第一次影像比對抓到「釘在畫面上」，之後任務框是半透明、
+        # 背後的場景變了，相似度掉到 0.5～0.6 → 回「沒對準、再微調」，每次又往上轉 22 度，最後鏡頭對著天花板
+        # → 影像比不出來時，再用字比：目標附近的字轉完還在原位＝釘在畫面上；釘住就把鏡頭轉回原方向
+        pin_word = ""
+        if not (pinned and pinned[2] >= 0.95) and abs(yaw) >= 5:
+            import difflib
+            def words2(im):              # 整張讀＋右上任務框放大讀（半透明框在亮背景上整張讀常讀不到）
+                d = dict(self._words(im))
+                if fx >= 0.75 and fy <= 0.45:
+                    try:
+                        d.update({w: (x, y) for w, x, y in top_right_words(im)})
+                    except Exception:  # noqa: BLE001
+                        pass
+                return d
+            near = [(w, xy) for w, xy in words2(before).items() if abs(xy[0] - fx) < 0.05 and abs(xy[1] - fy) < 0.05]
+            if near:
+                wa = words2(after)
+                pin_word = next((w for w, xy in near for w2, (x2, y2) in wa.items()
+                                 if abs(x2 - xy[0]) < 0.03 and abs(y2 - xy[1]) < 0.03
+                                 and (w2 == w or difflib.SequenceMatcher(None, w, w2).ratio() >= 0.6)), "")
+        if (pinned and pinned[2] >= 0.95) or pin_word:
             try:
-                self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜目標釘在畫面上沒動（相似{pinned[2]:.2f}）")
+                self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜目標釘在畫面上沒動（{'相似' + format(pinned[2], '.2f') if pinned and pinned[2] >= 0.95 else '字「' + pin_word + '」'}）")
             except Exception:  # noqa: BLE001
                 pass
-            return ("；".join(out) + f"；轉完那一塊還在原位 ({pinned[0]:.2f},{pinned[1]:.2f})（相似度 {pinned[2]:.2f}）＝它是釘在畫面上的東西"
-                    "（面板、海報、HUD、提示框），不是場景，轉頭不會讓它移到中央；沒有補轉。要先 關掉 面板，或改對準場景裡的東西")
+            self._drag(-yaw * self.dx_deg, pitch * self.dy_deg)          # 轉回原方向，免得越轉越偏
+            self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc - pitch))
+            how = (f"那一塊還在原位 ({pinned[0]:.2f},{pinned[1]:.2f})（相似度 {pinned[2]:.2f}）" if pinned and pinned[2] >= 0.95
+                   else f"那裡的字「{pin_word}」轉完還在原位")
+            return ("；".join(out) + f"；轉完{how}＝它是釘在畫面上的東西（面板、海報、HUD、任務框、提示框），不是場景，"
+                    "轉頭不會讓它移到中央；**已把鏡頭轉回原本的方向**，沒有補轉。要對準場景裡的東西；不確定哪裡是 UI 就叫 確認是否是UI")
         loc1 = self._locate(patch, after, near=(0.5, 0.5, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
         if loc1 and loc1[2] >= GOOD:
