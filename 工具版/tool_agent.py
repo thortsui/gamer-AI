@@ -1209,6 +1209,124 @@ class Tools(ExtraTools):
             return f"（兩側背景只變 {side:.0f}＝背景幾乎沒動，可能被擋住了；畫面變化多半是角色動作）"
         return f"（兩側背景變 {side:.0f}＝背景有在動；中央量不出的原因程式判斷不了，不知道自己第幾人稱就叫 確認人稱）"
 
+    # ---- 10/20 11:0x 使用者：「工具：確認是否是UI｜用途：確認物品是否是UI｜方式：轉一下頭看有沒有動後再轉回來（雙重驗證）
+    #      ｜直接是程式不要思考，只要回報哪裡是UI」→ 不叫大腦：轉右 15 度、轉回來，兩次都沒動的區塊＝UI
+    @staticmethod
+    def _still_cells(a, b, cols=16, rows=9, thr=4.0):
+        """回 (沒動的格子, 有紋理的格子)；格子 = (欄, 列)。沒紋理的平牆／地板看不出動沒動，不算。"""
+        ga = a.convert("L").resize((cols * 20, rows * 20))
+        gb = b.convert("L").resize((cols * 20, rows * 20))
+        pa, pb = ga.tobytes(), gb.tobytes()
+        Wd = cols * 20
+        still, textured = set(), set()
+        for r in range(rows):
+            for c in range(cols):
+                tot, vals = 0, []
+                for y in range(r * 20, r * 20 + 20, 2):
+                    base = y * Wd
+                    for x in range(c * 20, c * 20 + 20, 2):
+                        tot += abs(pa[base + x] - pb[base + x])
+                        vals.append(pa[base + x])
+                mean = sum(vals) / len(vals)
+                if sum(abs(v - mean) for v in vals) / len(vals) < 6:
+                    continue
+                textured.add((c, r))
+                if tot / 100 < thr:
+                    still.add((c, r))
+        return still, textured
+
+    def cal_ui_check(self, 位置=""):
+        """確認是否是UI：轉右 15 度拍一張、轉回來再拍一張；兩次轉頭都沒動的區塊＝釘在畫面上的 UI。只回報位置，不判斷別的。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能確認UI"
+        cols, rows = 32, 18                       # 16×9 太粗：右上任務框跨兩列、每格都混到場景就抓不到
+        a = self.grab()
+        if a is None:
+            return "抓不到畫面"
+        wa = self._words(a)
+        px = 15 * self.dx_deg
+        self._drag(px, 0)
+        time.sleep(0.4)
+        b = self.grab()
+        wb = self._words(b)
+        self._drag(-px, 0)
+        time.sleep(0.4)
+        c = self.grab()
+        wc = self._words(c)
+        d1, d2 = self.diff(a, b), self.diff(b, c)
+        s1, t1 = self._still_cells(a, b, cols, rows)
+        s2, t2 = self._still_cells(b, c, cols, rows)
+        # 有轉到的證據：轉過去、轉回來都有 3 格以上明顯動了（面對平牆整張變化小，但牆角、線條還是會動）
+        if len(t1 - s1) < 3 or len(t2 - s2) < 3:
+            return (f"確認是否是UI：轉頭時看不出畫面有動（轉過去變 {d1:.0f}、有動的格子 {len(t1 - s1)}；轉回來變 {d2:.0f}、{len(t2 - s2)}）"
+                    "——可能開著選單、整面平牆或沒轉到，量不出哪裡是 UI；離牆／關掉選單再叫一次")
+        ui = s1 & s2                                   # 雙重驗證：轉過去、轉回來都沒動
+        # 相鄰的格子併成一塊
+        regions, seen = [], set()
+        for cell in sorted(ui):
+            if cell in seen:
+                continue
+            stack, comp = [cell], []
+            seen.add(cell)
+            while stack:
+                x, y = stack.pop()
+                comp.append((x, y))
+                for nb in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if nb in ui and nb not in seen:
+                        seen.add(nb)
+                        stack.append(nb)
+            xs, ys = [q[0] for q in comp], [q[1] for q in comp]
+            regions.append((min(xs) / cols, (max(xs) + 1) / cols, min(ys) / rows, (max(ys) + 1) / rows))
+        import difflib
+
+        def stay(w, xy, other):            # 另一張同一個位置（±0.02）有一樣或很像的字（OCR 會抖）
+            return any(abs(x2 - xy[0]) < 0.02 and abs(y2 - xy[1]) < 0.02 and (w2 == w or difflib.SequenceMatcher(None, w, w2).ratio() >= 0.6)
+                       for w2, (x2, y2) in other.items())
+        def cell_of(xy):
+            return (min(cols - 1, int(xy[0] * cols)), min(rows - 1, int(xy[1] * rows)))
+        # 以畫面格子為準（OCR 會漏讀，不能拿「另一張沒讀到」當成有動）：格子沒動或字兩次都在原位＝UI；格子轉頭時有動＝場景
+        ui_words = [(w, xy) for w, xy in wa.items() if cell_of(xy) in ui or (stay(w, xy, wb) and stay(w, xy, wc))]
+        moved_words = [(w, xy) for w, xy in wa.items() if (w, xy) not in ui_words
+                       and cell_of(xy) in (t1 - s1) and cell_of(xy) in (t2 - s2)]
+
+        def inside(xy, rg):
+            return rg[0] - 0.02 <= xy[0] <= rg[1] + 0.02 and rg[2] - 0.02 <= xy[1] <= rg[3] + 0.02
+        lines = [f"確認是否是UI（轉右 15 度再轉回來，兩次都沒動＝UI；轉過去畫面變 {d1:.0f}、轉回來變 {d2:.0f}）"]
+        # 畫面正中央那塊轉頭也沒動＝跟著鏡頭轉的東西，不是介面，另外列（只給讀數）
+        center = [r for r in regions if 0.35 <= (r[0] + r[1]) / 2 <= 0.65 and 0.30 <= (r[2] + r[3]) / 2 <= 0.85]
+        regions = [r for r in regions if r not in center]
+        ui_words = [(w, xy) for w, xy in ui_words if not any(inside(xy, r) for r in center)]
+        if center:
+            lines.append("畫面中央這塊轉頭時也沒動（跟著鏡頭一起轉的東西，不算 UI）：" + "；".join(
+                f"x {r[0]:.2f}～{r[1]:.2f}、y {r[2]:.2f}～{r[3]:.2f}" for r in center[:3]))
+        if regions:
+            lines.append("UI（釘在畫面上，轉頭不會動、走不過去、不用對正）：" + "；".join(
+                f"x {r[0]:.2f}～{r[1]:.2f}、y {r[2]:.2f}～{r[3]:.2f}"
+                + (("（字：" + "、".join(f"「{w}」" for w, xy in ui_words if inside(xy, r)) + "）") if any(inside(xy, r) for _, xy in ui_words) else "")
+                for r in regions[:10]))
+        else:
+            lines.append("UI：沒有找到兩次轉頭都沒動的區塊")
+        loose = [(w, xy) for w, xy in ui_words if not any(inside(xy, r) for r in regions)]
+        if loose:
+            lines.append("UI 上的字（兩次轉頭位置都沒變）：" + "、".join(f"「{w}」({xy[0]:.2f},{xy[1]:.2f})" for w, xy in loose[:10]))
+        if moved_words:
+            lines.append("不是 UI（轉頭時有跟著動＝場景裡的字）：" + "、".join(f"「{w}」({xy[0]:.2f},{xy[1]:.2f})" for w, xy in moved_words[:8]))
+        m = re.findall(r"[-+]?\d*\.?\d+", str(位置))
+        if len(m) >= 2:
+            x, y = float(m[0]), float(m[1])
+            cell = (min(cols - 1, int(x * cols)), min(rows - 1, int(y * rows)))
+            near_ui = [w for w, xy in ui_words if abs(xy[0] - x) < 0.05 and abs(xy[1] - y) < 0.04]
+            in_center = any(r[0] <= x <= r[1] and r[2] <= y <= r[3] for r in center)
+            if in_center:
+                lines.append(f"你問的 ({x:.2f},{y:.2f})：在畫面中央跟著鏡頭轉的那塊裡（不算 UI）")
+            elif cell in ui or near_ui:
+                lines.append(f"你問的 ({x:.2f},{y:.2f})：**是 UI**（兩次轉頭都沒動" + (f"；那裡的字「{near_ui[0]}」" if near_ui else "") + "）")
+            elif cell in t1 and cell in t2:
+                lines.append(f"你問的 ({x:.2f},{y:.2f})：**不是 UI**（轉頭時有動＝場景裡的東西）")
+            else:
+                lines.append(f"你問的 ({x:.2f},{y:.2f})：那一塊太平（沒紋理），看不出動沒動")
+        return NL.join(lines)
+
     def cal_persp(self, 人稱=""):
         v = str(人稱).strip()
         if not v:
@@ -2386,7 +2504,8 @@ class TaskWords:
 
     def panel(self, ev, big):
         # 10/20 使用者：面板直接標出右上角那塊是 HUD 任務框（他有時寫成牆上的字、機器）
-        line = ("【遊戲任務字】右上角那塊是 HUD 任務框：釘在畫面上的介面字，不是場景裡的牆、海報或機器——轉頭不會動、走不過去、不用對正。"
+        line = ("【遊戲任務字】右上角那塊是 HUD 任務框：釘在畫面上的介面字，不是場景裡的牆、海報或機器——轉頭不會動、走不過去、不用對正"
+                "（不確定哪裡是 UI 就叫 確認是否是UI）。"
                 f"（程式每輪裁右上角任務列放大讀，可能讀錯；只給讀數）現在：「{self.last_text}」｜上一輪：「{self.prev_text or '（沒讀）'}」"
                 + (f"｜目前認定的任務字：已經 {self.miss} 輪讀不到右上角任務框（可能不在局內——大廳沒有任務框——或被擋住）；上次讀到的是「{'、'.join(self.current) or '（沒有）'}」"
                    if self.miss >= 4 else f"｜目前認定的任務字：「{'、'.join(self.current) or '（還沒有）'}」"))
