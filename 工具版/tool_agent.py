@@ -2344,8 +2344,11 @@ class Tools(ExtraTools):
             return "設小任務 要給 名稱,怎麼做，例：設小任務(買菜,走到市場長按E拿菜)"
         note = ""
         if self.small and self.small["名稱"] != name:
-            note = f"（原本的小任務「{self.small['名稱']}」沒送 任務完成 就換掉了，做了 {self.small['輪']} 輪）"
+            note = (f"（原本的小任務「{self.small['名稱']}」還沒記完成就換掉了，做了 {self.small['輪']} 輪；"
+                    f"它真的做完的話，之後回顧送 任務完成({self.small['名稱']},回顧:…) 照樣算到它）")
             self._append("小任務.md", f"換掉:{self.small['名稱']}｜{self.small['輪']} 輪、✗{self.small['✗']}、檢討{self.small['檢討']}")
+            # 10/21 05:4x：他常先 設小任務(下一件) 再回顧送上一件的 任務完成 → 換掉的留著，之後送完成時算回它
+            self.small_prev = dict(self.small, 換掉=time.time())
         if self.small and self.small["名稱"] == name:
             self.small["怎麼做"] = how or self.small["怎麼做"]
             return f"現在的小任務還是「{name}」，怎麼做更新成：{self.small['怎麼做'] or '（沒寫）'}"
@@ -2355,13 +2358,26 @@ class Tools(ExtraTools):
                 "每一輪的目標就是它，做完送 任務完成")
 
     def _small_finish(self, name, review, three):
-        sm = self.small if (self.small and (not name or name in self.small["名稱"] or self.small["名稱"] in name)) else None
+        def _hit(x):
+            return bool(x) and (not name or name in x["名稱"] or x["名稱"] in name)
+        prev = getattr(self, "small_prev", None)
+        if _hit(self.small):
+            sm, from_prev = self.small, False
+        elif prev and time.time() - prev.get("換掉", 0) <= 1800 and _hit(prev):
+            sm, from_prev = prev, True
+        else:
+            sm, from_prev = None, False
         e = {"名稱": (sm or {}).get("名稱") or name, "怎麼做": (sm or {}).get("怎麼做", ""),
              "做法": " → ".join(str(x["做"]) for x in three)[:160], "回顧": review[:120],
              "輪": (sm or {}).get("輪", 0), "✗": (sm or {}).get("✗", 0), "檢討": (sm or {}).get("檢討", 0),
              "設過": bool(sm), "時間": datetime.now().strftime("%H:%M")}
         e["一次做對"] = bool(sm) and e["✗"] == 0 and e["檢討"] == 0
         self.small_done.append(e)
+        if sm and from_prev:
+            self.small_prev = None
+            self._append("小任務.md", f"完成:{e['名稱']}｜{e['輪']} 輪、✗{e['✗']}、檢討{e['檢討']}｜做法:{e['做法']}")
+            return (f"小任務「{e['名稱']}」完成：{e['輪']} 輪、✗ {e['✗']} 步、檢討 {e['檢討']} 條"
+                    f"（程式看{'是一次就做對' if e['一次做對'] else '不是一次就做對'}）。現在的小任務還是「{(self.small or {}).get('名稱', '沒設')}」")
         if sm:
             self.small = None
         self._append("小任務.md", f"完成:{e['名稱']}｜{e['輪']} 輪、✗{e['✗']}、檢討{e['檢討']}｜做法:{e['做法']}")
