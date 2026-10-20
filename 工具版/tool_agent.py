@@ -396,8 +396,9 @@ class Tools(ExtraTools):
             return ""
         import difflib
         # 06:5x「列印章→列印徽章」OCR 漏一個字被報成換字 → 長短不一的也用相似度比
-        def like(w, x):
-            return TaskWords.same(w, x) or difflib.SequenceMatcher(None, w, x).ratio() >= 0.6
+        def like(w, x):          # 19:03「盜印表嵍→蓋印表格」OCR 讀壞兩個字也報 → 一半以上的字一樣也算同一個
+            return (TaskWords.same(w, x) or difflib.SequenceMatcher(None, w, x).ratio() >= 0.6
+                    or len(set(w) & set(x)) >= max(2, min(len(w), len(x)) / 2))
         new = [w for w in b if not any(like(w, x) for x in a)]
         gone = [x for x in a if not any(like(w, x) for w in b)]      # 舊字還在、只是多了字（泡泡、雜訊）不算換
         if a and new and gone:
@@ -2495,7 +2496,9 @@ TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請"
             # 10/20 07:59 誤判：咖啡機的「咖啡 : 準備好了」字（y 0.36）疊在任務框下面被當成換字
             "咖啡", "準備好",
             # 10/20 09:09 誤判：大廳 HUD「最高轉移速度」OCR 讀成「轉移速广」
-            "轉移")
+            "轉移",
+            # 10/20 19:51 誤判：大廳「角色扮演」招牌（讀成「色扮演」）被當成任務字
+            "扮演")
 
 
 def top_right_words(im):
