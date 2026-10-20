@@ -542,9 +542,55 @@ class Tools(ExtraTools):
         self.extra_images = shots
         return "拍了 4 張（右轉 90／180／270／360 度），下一輪附給你；方向已轉回原點"
 
+    # ---- 10/20 12:1x：12:06～12:08 Roblox Studio（使用者自己的專案）跑到前景，程式照樣按 a、拖右鍵、esc→l→enter，
+    #      按鍵全送進 Studio → 送任何輸入前先確認前景是遊戲視窗。使用者 60 秒內有動滑鼠鍵盤＝有人在用電腦，不搶前景、不按；
+    #      60 秒都沒人動才把遊戲切回前景
+    FG_IDLE = 60
+
+    @staticmethod
+    def _user_idle():
+        import ctypes
+
+        class LII(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        li = LII()
+        li.cbSize = ctypes.sizeof(LII)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(li)):
+            return 0.0
+        return (ctypes.windll.kernel32.GetTickCount() - li.dwTime) / 1000.0
+
+    def fg_state(self):
+        """回 (前景是不是遊戲, 前景視窗標題)。"""
+        import win32gui
+        from play_agent import RobloxWindow
+        if self.win is None:
+            self.win = RobloxWindow()
+        if self.win.hwnd is None:
+            self.win.find()
+        if self.win.is_foreground():
+            return True, ""
+        try:
+            title = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+        except Exception:  # noqa: BLE001
+            title = "?"
+        return False, title
+
+    def _fg_ok(self):
+        if not self.live or self.image_path:
+            return
+        ok, title = self.fg_state()
+        if ok:
+            return
+        idle = self._user_idle()
+        if idle >= self.FG_IDLE and self.win.activate():
+            print(f"   ⚠ 遊戲不在前景（前景是「{title}」，{idle:.0f} 秒沒人動）→ 已切回遊戲")
+            return
+        raise RuntimeError(f"遊戲視窗不在前景（前景是「{title}」，{idle:.0f} 秒前有人動過滑鼠鍵盤），這一步沒按，免得按到別的程式；等一下再試")
+
     # ---- 移動
     def _key(self, k, d):
         import pydirectinput
+        self._fg_ok()
         pydirectinput.keyDown(k)
         time.sleep(d)
         pydirectinput.keyUp(k)
@@ -664,6 +710,7 @@ class Tools(ExtraTools):
         if not self.live:
             print(f"   [dry-run] 轉視角 dx {dx:.0f} dy {dy:.0f}")
             return
+        self._fg_ok()
         bbox = self.win.client_bbox() if self.win else None
         cx = (bbox["left"] + bbox["width"] // 2) if bbox else 960
         cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
@@ -1883,6 +1930,7 @@ class Tools(ExtraTools):
         import pydirectinput
         prev, diffs, pending, reason = start, [], set(), ""
         t0 = time.time()
+        self._fg_ok()
         pydirectinput.keyDown(k)
         try:
             while True:
@@ -2002,6 +2050,7 @@ class Tools(ExtraTools):
             bbox = self.win.client_bbox() if self.win else None
             if not bbox:
                 return "找不到 Roblox 視窗"
+            self._fg_ok()
             pydirectinput.moveTo(int(bbox["left"] + fx * bbox["width"]), int(bbox["top"] + fy * bbox["height"]))
             time.sleep(0.05)
             # 10/17 13:3x：Roblox 介面按鈕（ESC 繼續、辦理入住、出口）點了畫面變化 0 的居多（10/16～17 約七成）；
@@ -2050,6 +2099,7 @@ class Tools(ExtraTools):
         n = max(-5, min(5, n))
         if self.live:
             import ctypes
+            self._fg_ok()
             for _ in range(abs(n)):          # pydirectinput 沒有 scroll（04:0x 執行失敗 4 次）→ 用 Win32 滾輪事件
                 ctypes.windll.user32.mouse_event(0x0800, 0, 0, 120 if n > 0 else -120, 0)
                 time.sleep(0.05)
@@ -2717,6 +2767,15 @@ def main():
             break
         cat = tools.cat                                   # 他定義的新工具／補用途會讓清單變
         system = build_system(args.game, cat, plan_n)
+        if live:
+            fg_ok, fg_title = tools.fg_state()
+            if not fg_ok:
+                idle = tools._user_idle()
+                if idle < tools.FG_IDLE or not tools.win.activate():
+                    print(f"[{rnd}] 遊戲不在前景（前景是「{fg_title}」，{idle:.0f} 秒前有人動過），不按、等 10 秒")
+                    time.sleep(10)
+                    continue
+                print(f"   ⚠ 遊戲不在前景（前景是「{fg_title}」，{idle:.0f} 秒沒人動）→ 已切回遊戲")
         im = tools.grab()
         if im is None:
             print(f"[{rnd}] 抓不到畫面（Roblox 不在前景？），等 3 秒")
