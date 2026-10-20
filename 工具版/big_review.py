@@ -135,7 +135,16 @@ def main():
                 best = cand
         o, from_reason = best, bool(best)
     print(f"[大檢討] {dt:.0f}s 截斷={trunc} 推理 {len(reason)} 字 輸出 {len(raw)} 字 解析{'成功' if o else '失敗'}{'（從推理取出）' if from_reason else ''}")
-    if o and not (o.get("明天開場要做什麼") or o.get("要改的習慣")):   # 13:2x：殘缺的（缺開場與習慣）也不蓋掉上一份
+    # 10/20 08:2x：輸出寫到「記筆記」一半就斷（推理 5.6k＋輸出 2k 字超過 max_tokens），有開場沒習慣、沒記準則也照樣蓋掉
+    # → 開場跟習慣兩個都要有；輸出缺就再從推理裡找完整的一份
+    def whole(x):
+        return bool(x.get("明天開場要做什麼") and x.get("要改的習慣"))
+    if o and not whole(o) and reason:
+        for mm in re.finditer(r'\{\s*"今天做了什麼"', reason):
+            cand = parse_json_loose(T.repair_json(reason[mm.start():])) or {}
+            if whole(cand):
+                o, from_reason = cand, True
+    if o and not whole(o):   # 13:2x：殘缺的（缺開場或習慣）也不蓋掉上一份
         print(f"[大檢討] 解析出來的缺 明天開場／要改的習慣（只有 {list(o.keys())}），當成失敗")
         o = {}
     if not o:                 # 解析不出來：不覆蓋上一份 大檢討.md（system 會繼續帶上一份），失敗的另存
