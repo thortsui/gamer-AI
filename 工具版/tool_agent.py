@@ -389,15 +389,18 @@ class Tools(ExtraTools):
         """10/20 05:3x：長按 E 蓋印，右上任務字當場「蓋印表格→拍照」，回傳卻寫「畫面變化 4＝看不出有反應」，他檢討成「E 沒反應」
         → 按之前／之後各讀一次右上任務框，換字就寫在回傳（只給讀數）。"""
         try:
-            def words(im):
-                return [TaskWords.norm(w[0]) for w in top_right_words(im) if w[1] >= 0.78 and len(TaskWords.norm(w[0])) >= 2]
+            def words(im):          # 14:4x：病人的對話泡泡飄到右上被讀進來誤報 → 只看任務框那一格（x≥0.85、y 0.12～0.30）
+                return [TaskWords.norm(w[0]) for w in top_right_words(im) if w[1] >= 0.85 and 0.12 <= w[2] <= 0.30 and len(TaskWords.norm(w[0])) >= 2]
             a, b = words(before), words(self.grab())
         except Exception:  # noqa: BLE001
             return ""
         import difflib
         # 06:5x「列印章→列印徽章」OCR 漏一個字被報成換字 → 長短不一的也用相似度比
-        new = [w for w in b if not any(TaskWords.same(w, x) or difflib.SequenceMatcher(None, w, x).ratio() >= 0.6 for x in a)]
-        if a and new:
+        def like(w, x):
+            return TaskWords.same(w, x) or difflib.SequenceMatcher(None, w, x).ratio() >= 0.6
+        new = [w for w in b if not any(like(w, x) for x in a)]
+        gone = [x for x in a if not any(like(w, x) for w in b)]      # 舊字還在、只是多了字（泡泡、雜訊）不算換
+        if a and new and gone:
             return f"；⚑ 右上任務字變了：「{'、'.join(a)}」→「{'、'.join(b)}」（按之前／之後各讀一次任務框）"
         return ""
 
