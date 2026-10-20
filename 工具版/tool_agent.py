@@ -192,8 +192,13 @@ def build_system(game, cat, plan3=False):
               "調完再 確認人稱。**但是如果有對鏡頭做縮放就要重新測量**：開工測試＋驗開工（面板【開工數值】會標「捲過」直到重量）。面板【人稱】每輪比 應該 跟 現在。" + NL
             + "【少用中鍵縮放】（使用者 10/18 交代；切換人稱除外）捲（滑鼠中鍵）在遊戲畫面上會把鏡頭拉近拉遠，一縮放刻度、深度比例就變了、要重新量測；"
               "能不捲就不捲，要對準東西用 視角移動到(x,y) 或 轉。" + NL
-            + "【大任務】你只會帶著「目前的大任務」做事：先用 設大任務 定一個（名稱＋成功條件），"
-              "大任務完成之前，這個任務的每一輪紀錄和你寫的檢討都存在檔案裡（程式重開也接著留），面板只放最近 8 輪；做完送 大任務完成，程式才把這個任務期間的工具回傳、紀錄與檢討清空，接著做下一個（排大任務 排過的會自動接上，沒有就再 設大任務）。" + NL
+            + "【大任務與小任務】（使用者 10/21 交代）大任務只是一個段落，例：大任務叫「做飯」，小任務就是「買菜」「切菜」「炒菜」…。"
+              "**你每一輪的目標是現在的小任務，不是大任務。**用 設大任務(名稱,目標) 定段落、設小任務(名稱,怎麼做) 定現在要做的那一件；"
+              "小任務做完送 任務完成（先回顧三步），再設下一個小任務。"
+              "你只需要記得三件事：大任務的目標是什麼、前面的小任務完成了什麼、現在這個小任務要怎麼做——面板每輪就列這三件；"
+              "前面每一輪的詳細細節不用記（都存在檔案，真的要找用 查紀錄(關鍵字)）。"
+              "大任務完成要送兩次：第一次程式列出每個小任務的輪數、✗ 步數、檢討數，你先逐一確認每個小任務是不是一次就做對；"
+              "沒一次做對的寫為什麼、下次怎麼一次做對，確定再送 大任務完成(結果,確認:…)，程式才清空這個段落接下一個。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
@@ -2276,6 +2281,8 @@ class Tools(ExtraTools):
             name = what or p["內容"]
             self.last_done = {"種類": kind, "內容": name, "時間": time.time()}
             self._append(fname, f"{prefix}{name}｜回顧:{rv}｜完成前三步:{' → '.join(str(x['做']) for x in p['三步']) or '無'}")
+            if kind == "任務完成":
+                return f"{kind} 記下了：{name}（回顧：{rv}）" + NL + self._small_finish(name, rv, p["三步"])
             return f"{kind} 記下了：{name}（回顧：{rv}）"
         self.pending_done = {"種類": kind, "內容": what, "時間": time.time(), "三步": [dict(x) for x in self.step_log[-3:]]}
         head = ""
@@ -2308,6 +2315,8 @@ class Tools(ExtraTools):
         line = f"原因:{原因}｜預期:{預期}｜實際:{實際}｜錯在哪:{錯在哪}｜下次:{下次}"
         # 10/19 使用者「多多檢討多多找錯 避免重複犯錯」：跟這個大任務之前的檢討比，同樣的錯就告訴他第幾次、上次的下次寫什麼（只告訴，不擋）
         same = [r for r in self.reviews if similar_review(line, r)]
+        if self.small:
+            self.small["檢討"] += 1
         self.reviews.append(datetime.now().strftime("%H:%M") + " " + line)
         self._append("檢討.md", line + (f"｜（重複第 {len(same) + 1} 次）" if same else ""))
         ret = ("檢討記下了（不放面板，查準則 查得到）：" + line + NL
@@ -2322,6 +2331,58 @@ class Tools(ExtraTools):
     big = None            # {"名稱","成功條件","開始輪"}
     big_queue = []
     clear_flag = False    # 主迴圈看到就把這個任務期間的紀錄清掉
+    # 10/21 使用者：「他每次的目標都是小任務，而不是大任務，大任務只是一個段落（例如大任務叫做飯，小任務就會是買菜切菜…）；
+    # 他只需要記得前面的小任務完成了什麼跟這個任務要怎麼做，以及大任務的目標是什麼，不需要記得前面的詳細的細節」
+    # 「大任務檢討 他要先確認他小任務是否一次內做對」
+    small = None          # 現在的小任務 {"名稱","怎麼做","開始","輪","✗","檢討"}
+    small_done = []       # 這個大任務裡完成的小任務
+    pending_big = None    # 送了一次、等確認的大任務完成
+
+    def flow_small_set(self, 名稱="", 怎麼做=""):
+        name, how = str(名稱).strip(), str(怎麼做).strip()
+        if not name:
+            return "設小任務 要給 名稱,怎麼做，例：設小任務(買菜,走到市場長按E拿菜)"
+        note = ""
+        if self.small and self.small["名稱"] != name:
+            note = f"（原本的小任務「{self.small['名稱']}」沒送 任務完成 就換掉了，做了 {self.small['輪']} 輪）"
+            self._append("小任務.md", f"換掉:{self.small['名稱']}｜{self.small['輪']} 輪、✗{self.small['✗']}、檢討{self.small['檢討']}")
+        if self.small and self.small["名稱"] == name:
+            self.small["怎麼做"] = how or self.small["怎麼做"]
+            return f"現在的小任務還是「{name}」，怎麼做更新成：{self.small['怎麼做'] or '（沒寫）'}"
+        self.small = {"名稱": name, "怎麼做": how, "開始": datetime.now().strftime("%H:%M"), "輪": 0, "✗": 0, "檢討": 0}
+        self._append("小任務.md", f"開始:{name}｜怎麼做:{how}｜大任務:{(self.big or {}).get('名稱', '沒設')}")
+        return (note + f"現在的小任務＝「{name}」（怎麼做：{how or '沒寫，想好就 設小任務(' + name + ',怎麼做) 補上'}）；"
+                "每一輪的目標就是它，做完送 任務完成")
+
+    def _small_finish(self, name, review, three):
+        sm = self.small if (self.small and (not name or name in self.small["名稱"] or self.small["名稱"] in name)) else None
+        e = {"名稱": (sm or {}).get("名稱") or name, "怎麼做": (sm or {}).get("怎麼做", ""),
+             "做法": " → ".join(str(x["做"]) for x in three)[:160], "回顧": review[:120],
+             "輪": (sm or {}).get("輪", 0), "✗": (sm or {}).get("✗", 0), "檢討": (sm or {}).get("檢討", 0),
+             "設過": bool(sm), "時間": datetime.now().strftime("%H:%M")}
+        e["一次做對"] = bool(sm) and e["✗"] == 0 and e["檢討"] == 0
+        self.small_done.append(e)
+        if sm:
+            self.small = None
+        self._append("小任務.md", f"完成:{e['名稱']}｜{e['輪']} 輪、✗{e['✗']}、檢討{e['檢討']}｜做法:{e['做法']}")
+        if not sm:
+            return f"（這件沒先 設小任務，程式沒數輪數；下一件先 設小任務(名稱,怎麼做)）"
+        return (f"小任務「{e['名稱']}」完成：{e['輪']} 輪、✗ {e['✗']} 步、檢討 {e['檢討']} 條"
+                f"（程式看{'是一次就做對' if e['一次做對'] else '不是一次就做對'}）。接著 設小任務(下一件,怎麼做)")
+
+    def small_lines(self):
+        if not self.small_done:
+            return "（這個大任務還沒有完成的小任務）"
+        return NL.join(f"{i + 1}. {e['名稱']}｜完成了：{e.get('回顧', '')[:60] or '？'}｜怎麼做的：{(e['做法'] or e['怎麼做'] or '？')[:80]}"
+                       + (f"｜{e['輪']} 輪、✗{e['✗']}、檢討{e['檢討']}" if e.get("設過") else "｜（沒先設小任務）")
+                       for i, e in enumerate(self.small_done[-12:]))
+
+    def small_now_text(self):
+        sm = self.small
+        if not sm:
+            return "（還沒設。用 設小任務(名稱,怎麼做) 定現在要做的那一件，例：大任務 做飯 → 設小任務(買菜,走到市場長按E拿菜)）"
+        return (f"「{sm['名稱']}」｜怎麼做：{sm['怎麼做'] or '（沒寫）'}｜{sm['開始']} 起、第 {sm['輪']} 輪"
+                + (f"、到現在 ✗ {sm['✗']} 步、檢討 {sm['檢討']} 條" if sm["✗"] or sm["檢討"] else ""))
 
     def flow_big_set(self, 名稱="", 成功條件=""):
         if not str(名稱).strip():
@@ -2331,6 +2392,8 @@ class Tools(ExtraTools):
             r = self.flow_big_set(names[0], 成功條件)
             self.big_queue = names[1:]
             return r + "；之後排隊：" + " → ".join(self.big_queue)
+        if self.big and self.big["名稱"] != str(名稱).strip():
+            self.small, self.small_done, self.pending_big = None, [], None
         self.big = {"名稱": str(名稱).strip(), "成功條件": str(成功條件).strip(), "開始": datetime.now().strftime("%H:%M")}
         self._append("大任務.md", f"開始:{self.big['名稱']}｜成功條件:{self.big['成功條件']}")
         return f"目前的大任務＝「{self.big['名稱']}」（成功條件：{self.big['成功條件'] or '沒寫'}）"
@@ -2340,11 +2403,26 @@ class Tools(ExtraTools):
         self.big_queue += names
         return "排好了：" + " → ".join(self.big_queue)
 
-    def flow_big_done(self, 結果=""):
+    def flow_big_done(self, 結果="", 確認=""):
         name = self.big["名稱"] if self.big else "（沒設大任務）"
-        self._append("大任務.md", f"完成:{name}｜結果:{結果}")
+        ck = re.sub(r"^\s*確認\s*[:：]\s*", "", str(確認 or "")).strip()
+        m = re.search(r"確認\s*[:：]\s*(.*)$", str(結果))
+        if not ck and m:
+            ck, 結果 = m.group(1).strip(), str(結果)[:m.start()].rstrip("，, ")
+        words = re.sub(r"[\d\s.,，、。:：;；|｜()（）\[\]\-+_/%✓✗]+", "", ck)
+        p = self.pending_big
+        if not (p and time.time() - p <= 900 and len(words) >= 6):
+            self.pending_big = time.time()
+            return ((("確認要寫字（每個小任務一次做對沒有、沒做對的為什麼），這次不算；" if ck else "") if p else "")
+                    + f"還沒算 大任務完成。先逐一確認「{name}」裡每個小任務是不是一次就做對：" + NL + self.small_lines() + NL
+                    + "→ 一次做對的寫 ✓；不是一次做對的寫為什麼、下次怎麼一次做對。確定再送 大任務完成(" + (str(結果) or "結果")
+                    + ",確認:買菜✓；切菜✗切了三次才對，下次先看E框再按)")
+        self.pending_big = None
+        self._append("大任務.md", f"完成:{name}｜結果:{結果}｜小任務 {len(self.small_done)} 件、一次做對 "
+                     f"{sum(1 for e in self.small_done if e['一次做對'])}｜確認:{ck}")
         self.clear_flag = True
         self.reviews = []
+        self.small, self.small_done = None, []
         if self.big_queue:
             nxt = self.big_queue.pop(0)
             self.big = {"名稱": nxt, "成功條件": "", "開始": datetime.now().strftime("%H:%M")}
@@ -2762,6 +2840,7 @@ def main():
             tools.big, tools.big_queue = st0.get("大任務"), list(st0.get("排大任務") or [])
             history, task_round = list(st0.get("紀錄") or []), int(st0.get("輪數") or 0)
             tools.reviews = list(st0.get("檢討") or [])
+            tools.small, tools.small_done = st0.get("小任務"), list(st0.get("完成的小任務") or [])
             tw.current, tw.events = list(st0.get("任務字", {}).get("現在") or []), list(st0.get("任務字", {}).get("換") or [])
             if tools.big or history or tools.reviews:
                 tool_returns = (f"（程式重開，接續上次存的：大任務「{(tools.big or {}).get('名稱', '沒設')}」、"
@@ -2775,6 +2854,7 @@ def main():
             with open(state_path + ".tmp", "w", encoding="utf-8") as f:
                 json.dump({"存檔": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "大任務": tools.big, "排大任務": tools.big_queue,
                            "輪數": task_round, "紀錄": history, "檢討": tools.reviews,
+                           "小任務": tools.small, "完成的小任務": tools.small_done,
                            "任務字": {"現在": tw.current, "換": tw.events[-20:]}}, f, ensure_ascii=False)
             os.replace(state_path + ".tmp", state_path)
         except OSError as e:
@@ -2810,6 +2890,8 @@ def main():
             content.append({"type": "image_url", "image_url": {"url": img_uri(shot, 640)}})
         tools.extra_images = []
         task_round += 1
+        if tools.small:
+            tools.small["輪"] += 1
         watch_txt = ""
         if tools.watch_labels:                           # 追蹤(標籤)：每輪開頭眼睛找一次
             try:
@@ -2821,7 +2903,7 @@ def main():
             plan_txt = ("【慢想排的】（你自己 " + tools.plan["時間"] + " 排的）" + "→".join(tools.plan["序列"])
                         + "｜第一步：" + "→".join(tools.plan["細步驟"]) + NL)
         big = tools.big
-        big_txt = (f"「{big['名稱']}」｜成功條件：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
+        big_txt = (f"「{big['名稱']}」｜目標（成功條件）：{big['成功條件'] or '（沒寫）'}｜{big['開始']} 起、第 {task_round} 輪"
                    if big else "（還沒設。先用 設大任務(名稱,成功條件) 定一個，再做事）")
         if prev and prev.get("三步") is not None:
             prev_txt = ("原因：" + prev.get("原因", "？") + NL
@@ -2834,7 +2916,9 @@ def main():
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
         last_seen = (history[-1].get("看到", "") if history else "")
         panel = ("【開工數值】" + tools.startup_text() + NL
-                 + "【目前的大任務】" + big_txt + NL
+                 + "【大任務】（一個段落；目標）" + big_txt + NL
+                 + "【前面完成的小任務】" + NL + tools.small_lines() + NL
+                 + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
                  + tw.panel(task_ev, big) + NL
                  + tools.persp_text() + NL
                  + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
@@ -2842,7 +2926,7 @@ def main():
                  + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
                  + tools.rules_panel(last_seen) + NL * 2
-                 + f"【最近 8 輪】（這個大任務共 {len(history)} 輪都存在檔案裡，更早的用 查紀錄(關鍵字)）" + NL + history_text(history[-8:]) + NL * 2
+                 + f"（前面每一輪的細節不放面板：這個大任務共 {len(history)} 輪都存在檔案裡，真的要找用 查紀錄(關鍵字)）" + NL * 2
                  + (f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
                     "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))
         content.append({"type": "text", "text": panel})
@@ -2902,6 +2986,8 @@ def main():
                 if "檢討" not in names_called:
                     match_stat["不符沒檢討"] += 1
         missed_review = (prev is not None and match_all is False and "檢討" not in names_called)
+        if prev is not None and tools.small:              # 10/21：小任務一次做對沒有——數 ✗ 步
+            tools.small["✗"] += (sum(1 for x in match if x is False) if isinstance(match, list) else int(match_all is False))
         print(f"[{rnd}] {dt:.1f}s 看到「{seen}」" + (f"上一輪實際「{actual}」符合={match} " if prev else "") + f"想「{think}」")
         rets, did = list(plan_notes), []
 
