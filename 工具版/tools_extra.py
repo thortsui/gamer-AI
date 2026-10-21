@@ -60,6 +60,89 @@ class ExtraTools:
     def _identity(self):
         return f"你是 gamer AI，正在學 Roblox「{self.game}」。只寫紀錄裡真的有的事，表格式短語，每條都要能照著做。"
 
+    # ---------------- 描述畫面（2026-10-21 19:xx 使用者：「給他製作一個工具，按照目前的畫面給他一段形容的文字，
+    # 讓他來更好的辨識遊戲；所有遊戲都要通用，只辨識畫面、不需要訓練」）
+    # → 另開一次大腦，只當「畫面描述員」：不玩、不給建議、不帶遊戲名稱與任何遊戲知識；OCR 讀到的字一起給它對照。
+    DESC_EFFORT = "快思"
+    last_desc = None         # {"類型","總結","時間"}
+    desc_changed = ""        # 畫面類型變了（給 重新想任務 用）
+
+    def _ocr_list(self, im):
+        try:
+            import local_text
+            res = local_text._win_read(im) or []
+        except Exception:  # noqa: BLE001
+            return []
+        W, H = im.size
+        out = []
+        for r in res:
+            try:
+                box, txt = r[0], str(r[1]).strip()
+                if txt:
+                    xs, ys = [p[0] for p in box], [p[1] for p in box]
+                    out.append(f"「{txt}」({(min(xs) + max(xs)) / 2 / W:.2f},{(min(ys) + max(ys)) / 2 / H:.2f})")
+            except Exception:  # noqa: BLE001
+                continue
+        return out[:40]
+
+    def see_describe(self, 重點="", image=None):
+        if image is None and not self.live and not self.image_path:      # 19:xx 測試：dry-run 會抓到桌面（瀏覽器），不描述
+            return "離線／dry-run 不能描述畫面"
+        im = image if image is not None else self.grab()
+        if im is None:
+            return "抓不到畫面"
+        ocr = self._ocr_list(im)
+        system = ("你是畫面描述員。只描述這張遊戲截圖上看得到的東西：不玩、不給建議、不猜遊戲規則，任何遊戲都一樣。"
+                  "看不清楚就寫看不清楚，不要編。位置用畫面座標 (x,y)，0～1，左上是 (0,0)、正中央是 (0.5,0.5)。")
+        user = ("【程式讀到的字（OCR，可能讀錯；以圖為準）】" + NL + ("、".join(ocr) or "（沒讀到字）") + NL
+                + (f"【想特別看清楚的】{重點}" + NL if str(重點).strip() else "")
+                + "只輸出 JSON：" + NL
+                + '{"畫面類型":"遊戲中／大廳或主選單／載入或黑畫面／對話或彈出視窗／死亡或結束畫面／設定或系統選單／商店或背包介面／其他",'
+                  '"視角":"第一人稱／第三人稱／俯視／2D／看不出","視角根據":"",'
+                  '"自己的角色":"看得到的話：在畫面哪裡、什麼樣子；看不到就寫看不到",'
+                  '"擋住視線的":"畫面中間或正前方有沒有東西擋住、是什麼",'
+                  '"介面":[{"位置":"(x,y)","看到":"文字／圖示／數字／條","可能是":"血量／錢／任務／按鈕／道具欄／小地圖／聊天／提示／不確定"}],'
+                  '"道具欄":"看得到的話每格裡有什麼；沒有就寫沒有",'
+                  '"互動提示":[{"位置":"(x,y)","按鍵":"E／F／點擊…","旁邊的字":"","在哪個東西上":""}],'
+                  '"場景":[{"東西":"","位置":"(x,y)","遠近":"近／中／遠","樣子":"顏色、形狀"}],'
+                  '"總結":"一句話：這是什麼樣的地方、畫面上最顯眼的是什麼"}' + NL
+                + "介面最多 10 項、場景最多 8 項，由近到遠。")
+        t0 = time.time()
+        o = {}
+        for _ in range(2):                  # 19:xx 實測 1/3 次解析出別的東西（沒有 畫面類型）→ 再問一次
+            try:
+                o, raw = self._ask(system, user, effort=self.DESC_EFFORT, max_tokens=8000, deadline=180, image=im)
+            except Exception as e:  # noqa: BLE001
+                return f"描述畫面失敗：{e}"
+            if isinstance(o, dict) and o.get("畫面類型"):
+                break
+            o = {}
+        dt = time.time() - t0
+        if not o:
+            return f"描述畫面沒解析出來（{dt:.0f} 秒）；OCR 讀到：" + ("、".join(ocr[:20]) or "沒有字")
+
+        def lst(k, fmt):
+            v = o.get(k) or []
+            return "；".join(fmt(x) for x in v if isinstance(x, dict)) or "沒有"
+        kind = str(o.get("畫面類型") or "？")
+        prev = self.last_desc
+        if prev and prev.get("類型") and prev["類型"] != kind:
+            self.desc_changed = f"畫面類型從「{prev['類型']}」變成「{kind}」"
+        self.last_desc = {"類型": kind, "總結": str(o.get("總結") or ""), "時間": datetime.now().strftime("%H:%M")}
+        lines = [f"【畫面描述】（描述員只看這張圖、不懂遊戲規則；{dt:.0f} 秒）",
+                 f"類型：{kind}｜視角：{o.get('視角', '？')}（{o.get('視角根據', '')}）",
+                 f"自己的角色：{o.get('自己的角色', '？')}",
+                 f"擋住視線的：{o.get('擋住視線的', '？')}",
+                 "介面：" + lst("介面", lambda x: f"{x.get('位置', '')} {x.get('看到', '')}（{x.get('可能是', '')}）"),
+                 f"道具欄：{o.get('道具欄', '？')}",
+                 "互動提示：" + lst("互動提示", lambda x: f"{x.get('位置', '')} [{x.get('按鍵', '')}] {x.get('旁邊的字', '')}｜在 {x.get('在哪個東西上', '？')} 上"),
+                 "場景：" + lst("場景", lambda x: f"{x.get('東西', '')} {x.get('位置', '')} {x.get('遠近', '')}（{x.get('樣子', '')}）"),
+                 f"總結：{o.get('總結', '')}"]
+        if self.desc_changed:
+            lines.append("⚑ " + self.desc_changed)
+        self._append("畫面描述.md", " ｜ ".join(lines[1:])[:900])
+        return NL.join(lines)
+
     # ---------------- 學習
     def learn_big_review(self):
         """大檢討：把今天整天的紀錄給你自己回顧（會花 3～6 分鐘，遊戲這段沒人操作）。"""

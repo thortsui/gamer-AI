@@ -199,8 +199,10 @@ def build_system(game, cat, plan3=False):
               "前面每一輪的詳細細節不用記（都存在檔案，真的要找用 查紀錄(關鍵字)）。"
               "大任務完成要送兩次：第一次程式列出每個小任務的輪數、✗ 步數、檢討數，你先逐一確認每個小任務是不是一次就做對；"
               "沒一次做對的寫為什麼、下次怎麼一次做對，確定再送 大任務完成(結果,確認:…)，程式才清空這個段落接下一個。"
-              "**小任務更新**（使用者 10/21 交代）：同一件小任務每做 15 輪、右上角任務字換了、剛死掉、或很久沒設小任務時，"
-              "程式會停下來請你寫：遇到的問題、現在的做法有沒有用（看 ✗ 和準則照做的 ✓／✗）、要不要換做法或換小任務——提早檢討，不要等卡一百輪。" + NL
+              "**出現變動就重新想任務**（使用者 10/21 交代）：死掉、特殊事件、文字變化（任務字換了）、畫面從全黑／載入回來、畫面類型變了、"
+              "你叫了 突發狀況——只要出現變動，就要重新想一次「現在的任務應該是什麼」；程式會停下來先給你一段畫面描述，再請你寫。"
+              "同一件小任務每做 15 輪也會請你寫一次（小任務更新）：遇到的問題、做法有沒有用（看 ✗ 和準則照做的 ✓／✗）、要不要換——提早檢討，不要等卡一百輪。"
+              "看不懂畫面就叫 描述畫面。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
@@ -2407,17 +2409,51 @@ class Tools(ExtraTools):
                 + (f"｜你 {sm.get('更新時間', '')} 寫的遇到的問題：{sm['問題']}" if sm.get("問題") else "")
                 + f"｜下次小任務更新：第 {sm.get('上次更新', 0) + self.SMALL_EVERY} 輪")
 
-    def small_update_reason(self, task_ev, last_seen):
+    # 10/21 19:xx 使用者：「如果出現了變動就要重新思考一次任務要是什麼（例如發生了死亡、特殊事件、文字變化或者之類的）」
+    DEATH_RE = r"你死了|死掉|陣亡|再玩一次|復活|died|game ?over|wasted|defeat"
+    pending_events = []
+    last_bright = None
+
+    def change_events(self, task_ev, history, im):
+        """這一輪開頭看得出來的變動（任何遊戲都通用的訊號）。"""
+        ev = []
+        for e in ([task_ev] if isinstance(task_ev, dict) else list(task_ev or [])):
+            if isinstance(e, dict):
+                ev.append(f"文字變化：右上角任務字「{e.get('舊', '')}」→「{e.get('新', '')}」")
+        s1 = str(history[-1].get("看到", "")) if history else ""
+        s0 = str(history[-2].get("看到", "")) if len(history) > 1 else ""
+        if re.search(self.DEATH_RE, s1, re.I) and not re.search(self.DEATH_RE, s0, re.I):
+            ev.append("死亡：你上一輪看到死亡／結束畫面")
+        if history and any(str(x).startswith("突發狀況") for x in history[-1].get("用") or []):
+            ev.append("特殊事件：你上一輪叫了 突發狀況")
+        if im is not None:
+            try:
+                import numpy as np
+                b = float(np.asarray(im.convert("L").resize((64, 36)), dtype=float).mean())
+            except Exception:  # noqa: BLE001
+                b = None
+            if b is not None and self.last_bright is not None and self.last_bright < 20 <= b:
+                ev.append("換場景：畫面從全黑／載入回來（可能換地方、重新開局）")
+            self.last_bright = b
+        if self.desc_changed:
+            ev.append("畫面變了：" + self.desc_changed)
+            self.desc_changed = ""
+        return ev
+
+    def small_update_reason(self, events):
+        for e in events:
+            if e not in self.pending_events:
+                self.pending_events.append(e)
         sm = self.small
+        since = (sm["輪"] - sm.get("上次更新", 0)) if sm else None
+        if self.pending_events and (since is None or since >= 2):     # 連續兩輪都有變動（死→載入→新局）就合在一起問
+            r = "；".join(self.pending_events)
+            self.pending_events = []
+            return r
         if not sm:
             return f"已經 {self.no_small} 輪沒設小任務" if self.no_small >= 10 and self.no_small % 10 == 0 else ""
-        since = sm["輪"] - sm.get("上次更新", 0)
         if since >= self.SMALL_EVERY:
             return f"這件小任務又做了 {since} 輪（定期更新）"
-        if since >= 3 and task_ev:
-            return "右上角任務字換了"
-        if since >= 3 and re.search(r"你死了|再玩一次", str(last_seen)):
-            return "剛死掉"
         return ""
 
     def small_update(self, reason, image, history, task_words):
@@ -2431,7 +2467,12 @@ class Tools(ExtraTools):
         used = [by[k] for k in (sm or {}).get("查過的準則", []) if k in by]
         rules_txt = NL.join(f"- {self._rule_key(r)}{self._rule_reading(r)}" for r in used) or "（這件小任務沒查過準則）"
         big = self.big or {}
-        user = ("【為什麼現在更新】" + reason + NL
+        desc = ""
+        if image is not None and "定期更新" not in reason:           # 出現變動：先給畫面描述（任何遊戲都通用）
+            desc = self.see_describe(image=image)
+            self.desc_changed = ""
+        user = ("【為什麼現在要重新想】" + reason + NL
+                + ((desc + NL) if desc else "")
                 + f"【大任務】{big.get('名稱', '沒設')}｜目標：{big.get('成功條件', '') or '沒寫'}" + NL
                 + "【前面完成的小任務】" + NL + self.small_lines() + NL
                 + "【現在的小任務】" + self.small_now_text() + NL
@@ -2439,13 +2480,15 @@ class Tools(ExtraTools):
                 + f"【這件小任務最近 {n} 輪】" + NL + recent + NL
                 + "【這件小任務寫的檢討（最近 8 條）】" + NL + revs + NL
                 + "【這件小任務查過的準則，查出來後照做的結果】" + NL + rules_txt + NL * 2
-                + "看現在的畫面和上面的數字，提早檢討。只輸出 JSON：" + NL
-                + '{"遇到的問題":[{"問題":"","幾次":"","為什麼":""}],'
+                + "看現在的畫面（和畫面描述）與上面的數字：先重新想一次現在的任務應該是什麼，再提早檢討。只輸出 JSON：" + NL
+                + '{"發生了什麼變動":"","現在的任務應該是什麼":"看畫面上的任務字、剛發生的事重新想","根據":"畫面上的哪個字／哪個東西",'
+                  '"遇到的問題":[{"問題":"","幾次":"","為什麼":""}],'
                   '"現在的做法有沒有用":"用上面的 ✗ 和 ✓／✗ 數字回答",'
                   '"準則檢查":[{"準則":"對象｜準則（照上面原文）","照做結果":"","要不要更正":"不用／更正:新的做法"}],'
                   '"小任務":{"名稱":"還是同一件就寫一樣的名稱；做完了或該換就寫新的","怎麼做":"接下來怎麼做（做法沒用就寫不一樣的）"},'
                   '"接下來先做":"一句，用工具名"}')
-        system = (self._identity() + NL + "現在是小任務更新（使用者交代）：遊戲先停一下，寫出你遇到的問題、提早檢討，不要等卡一百輪才換做法。"
+        system = (self._identity() + NL + "現在是重新想任務／小任務更新（使用者交代）：遊戲先停一下。出現變動就重新想一次任務應該是什麼；"
+                  "再寫出你遇到的問題、提早檢討，不要等卡一百輪才換做法。"
                   "只寫紀錄和畫面裡真的有的事。")
         t0 = time.time()
         try:
@@ -2463,6 +2506,8 @@ class Tools(ExtraTools):
         probs = [p for p in (o.get("遇到的問題") or []) if isinstance(p, dict)][:3]
         ptxt = "；".join(f"{p.get('問題', '')}（{p.get('幾次', '')}，{p.get('為什麼', '')}）" for p in probs)[:240]
         useful = str(o.get("現在的做法有沒有用") or "")[:120]
+        task_now = str(o.get("現在的任務應該是什麼") or "")[:80]
+        basis = str(o.get("根據") or "")[:60]
         nxt = str(o.get("接下來先做") or "")[:80]
         out = []
         for c in (o.get("準則檢查") or [])[:5]:
@@ -2483,9 +2528,11 @@ class Tools(ExtraTools):
                 self.small["上次更新"] = self.small["輪"]
         cur = self.small or {}
         self._append("小任務.md", f"更新:{cur.get('名稱', '沒設')}｜第 {cur.get('輪', 0)} 輪、✗{cur.get('✗', 0)}、檢討{cur.get('檢討', 0)}"
-                     f"｜為什麼更新:{reason}｜問題:{ptxt}｜做法有沒有用:{useful}｜怎麼做:{cur.get('怎麼做', '')}｜接下來:{nxt}")
+                     f"｜為什麼更新:{reason}｜任務應該是:{task_now}（根據:{basis}）｜問題:{ptxt}｜做法有沒有用:{useful}"
+                     f"｜怎麼做:{cur.get('怎麼做', '')}｜接下來:{nxt}")
         print(f"   📝 小任務更新（{reason}）{dt:.0f}s｜問題:{ptxt[:80]}｜接下來:{nxt[:40]}")
-        return (f"（{reason}，你花 {dt:.0f} 秒寫的）遇到的問題：{ptxt or '沒寫'}｜做法有沒有用：{useful or '沒寫'}"
+        return (f"（{reason}，你花 {dt:.0f} 秒寫的）現在的任務應該是：{task_now or '沒寫'}（根據：{basis or '沒寫'}）"
+                f"｜遇到的問題：{ptxt or '沒寫'}｜做法有沒有用：{useful or '沒寫'}"
                 f"｜現在的小任務：「{cur.get('名稱', '沒設')}」怎麼做：{cur.get('怎麼做', '') or '沒寫'}｜接下來先做：{nxt or '沒寫'}"
                 + ((NL + NL.join(out)) if out else ""))
 
@@ -3000,8 +3047,8 @@ def main():
         else:
             tools.no_small += 1
         small_up = ""
-        up_reason = tools.small_update_reason(task_ev, history[-1].get("看到", "") if history else "")
-        if up_reason:                                     # 10/21 18:5x：定期小任務更新（寫遇到的問題、提早檢討）
+        up_reason = tools.small_update_reason(tools.change_events(task_ev, history, im))
+        if up_reason:                                     # 10/21：出現變動就重新想任務＋定期小任務更新
             small_up = tools.small_update(up_reason, im, history, task_words)
         watch_txt = ""
         if tools.watch_labels:                           # 追蹤(標籤)：每輪開頭眼睛找一次
