@@ -198,7 +198,9 @@ def build_system(game, cat, plan3=False):
               "你只需要記得三件事：大任務的目標是什麼、前面的小任務完成了什麼、現在這個小任務要怎麼做——面板每輪就列這三件；"
               "前面每一輪的詳細細節不用記（都存在檔案，真的要找用 查紀錄(關鍵字)）。"
               "大任務完成要送兩次：第一次程式列出每個小任務的輪數、✗ 步數、檢討數，你先逐一確認每個小任務是不是一次就做對；"
-              "沒一次做對的寫為什麼、下次怎麼一次做對，確定再送 大任務完成(結果,確認:…)，程式才清空這個段落接下一個。" + NL
+              "沒一次做對的寫為什麼、下次怎麼一次做對，確定再送 大任務完成(結果,確認:…)，程式才清空這個段落接下一個。"
+              "**小任務更新**（使用者 10/21 交代）：同一件小任務每做 15 輪、右上角任務字換了、剛死掉、或很久沒設小任務時，"
+              "程式會停下來請你寫：遇到的問題、現在的做法有沒有用（看 ✗ 和準則照做的 ✓／✗）、要不要換做法或換小任務——提早檢討，不要等卡一百輪。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
@@ -2334,7 +2336,9 @@ class Tools(ExtraTools):
     # 10/21 使用者：「他每次的目標都是小任務，而不是大任務，大任務只是一個段落（例如大任務叫做飯，小任務就會是買菜切菜…）；
     # 他只需要記得前面的小任務完成了什麼跟這個任務要怎麼做，以及大任務的目標是什麼，不需要記得前面的詳細的細節」
     # 「大任務檢討 他要先確認他小任務是否一次內做對」
-    small = None          # 現在的小任務 {"名稱","怎麼做","開始","輪","✗","檢討"}
+    small = None          # 現在的小任務 {"名稱","怎麼做","開始","輪","✗","檢討"}（＋"上次更新","問題","查過的準則"）
+    no_small = 0          # 沒設小任務的輪數
+    SMALL_EVERY = 15      # 10/21 18:5x 使用者「定期更新小任務，寫出他遇到的問題並提早檢討」
     small_done = []       # 這個大任務裡完成的小任務
     pending_big = None    # 送了一次、等確認的大任務完成
 
@@ -2352,7 +2356,8 @@ class Tools(ExtraTools):
         if self.small and self.small["名稱"] == name:
             self.small["怎麼做"] = how or self.small["怎麼做"]
             return f"現在的小任務還是「{name}」，怎麼做更新成：{self.small['怎麼做'] or '（沒寫）'}"
-        self.small = {"名稱": name, "怎麼做": how, "開始": datetime.now().strftime("%H:%M"), "輪": 0, "✗": 0, "檢討": 0}
+        self.small = {"名稱": name, "怎麼做": how, "開始": datetime.now().strftime("%H:%M"), "輪": 0, "✗": 0, "檢討": 0, "上次更新": 0}
+        self.no_small = 0
         self._append("小任務.md", f"開始:{name}｜怎麼做:{how}｜大任務:{(self.big or {}).get('名稱', '沒設')}")
         return (note + f"現在的小任務＝「{name}」（怎麼做：{how or '沒寫，想好就 設小任務(' + name + ',怎麼做) 補上'}）；"
                 "每一輪的目標就是它，做完送 任務完成")
@@ -2398,7 +2403,91 @@ class Tools(ExtraTools):
         if not sm:
             return "（還沒設。用 設小任務(名稱,怎麼做) 定現在要做的那一件，例：大任務 做飯 → 設小任務(買菜,走到市場長按E拿菜)）"
         return (f"「{sm['名稱']}」｜怎麼做：{sm['怎麼做'] or '（沒寫）'}｜{sm['開始']} 起、第 {sm['輪']} 輪"
-                + (f"、到現在 ✗ {sm['✗']} 步、檢討 {sm['檢討']} 條" if sm["✗"] or sm["檢討"] else ""))
+                + (f"、到現在 ✗ {sm['✗']} 步、檢討 {sm['檢討']} 條" if sm["✗"] or sm["檢討"] else "")
+                + (f"｜你 {sm.get('更新時間', '')} 寫的遇到的問題：{sm['問題']}" if sm.get("問題") else "")
+                + f"｜下次小任務更新：第 {sm.get('上次更新', 0) + self.SMALL_EVERY} 輪")
+
+    def small_update_reason(self, task_ev, last_seen):
+        sm = self.small
+        if not sm:
+            return f"已經 {self.no_small} 輪沒設小任務" if self.no_small >= 10 and self.no_small % 10 == 0 else ""
+        since = sm["輪"] - sm.get("上次更新", 0)
+        if since >= self.SMALL_EVERY:
+            return f"這件小任務又做了 {since} 輪（定期更新）"
+        if since >= 3 and task_ev:
+            return "右上角任務字換了"
+        if since >= 3 and re.search(r"你死了|再玩一次", str(last_seen)):
+            return "剛死掉"
+        return ""
+
+    def small_update(self, reason, image, history, task_words):
+        """10/21 18:5x 使用者：「定期更新小任務，它寫出來他遇到的問題並也提早檢討」→ 程式請他停下來寫。"""
+        sm = self.small
+        n = min(self.SMALL_EVERY, (sm["輪"] - sm.get("上次更新", 0)) if sm else self.no_small) or 5
+        recent = NL.join(f"{h.get('時間', '')[:5]} 看到:{str(h.get('看到', ''))[:50]}｜用:{'、'.join(h.get('用') or [])[:90]}｜實際:{str(h.get('實際', ''))[:40]}｜符合:{h.get('符合')}"
+                         for h in history[-n:]) or "（沒有）"
+        revs = NL.join(self.reviews[-min(8, (sm or {}).get("檢討", 0)):]) if sm and sm.get("檢討") else "（這件還沒寫檢討）"
+        by = {self._rule_key(r): r for r in self._rules_load()}
+        used = [by[k] for k in (sm or {}).get("查過的準則", []) if k in by]
+        rules_txt = NL.join(f"- {self._rule_key(r)}{self._rule_reading(r)}" for r in used) or "（這件小任務沒查過準則）"
+        big = self.big or {}
+        user = ("【為什麼現在更新】" + reason + NL
+                + f"【大任務】{big.get('名稱', '沒設')}｜目標：{big.get('成功條件', '') or '沒寫'}" + NL
+                + "【前面完成的小任務】" + NL + self.small_lines() + NL
+                + "【現在的小任務】" + self.small_now_text() + NL
+                + "【右上角任務字（程式讀的，可能讀錯）】" + ("、".join(task_words) if task_words else "（沒讀到）") + NL
+                + f"【這件小任務最近 {n} 輪】" + NL + recent + NL
+                + "【這件小任務寫的檢討（最近 8 條）】" + NL + revs + NL
+                + "【這件小任務查過的準則，查出來後照做的結果】" + NL + rules_txt + NL * 2
+                + "看現在的畫面和上面的數字，提早檢討。只輸出 JSON：" + NL
+                + '{"遇到的問題":[{"問題":"","幾次":"","為什麼":""}],'
+                  '"現在的做法有沒有用":"用上面的 ✗ 和 ✓／✗ 數字回答",'
+                  '"準則檢查":[{"準則":"對象｜準則（照上面原文）","照做結果":"","要不要更正":"不用／更正:新的做法"}],'
+                  '"小任務":{"名稱":"還是同一件就寫一樣的名稱；做完了或該換就寫新的","怎麼做":"接下來怎麼做（做法沒用就寫不一樣的）"},'
+                  '"接下來先做":"一句，用工具名"}')
+        system = (self._identity() + NL + "現在是小任務更新（使用者交代）：遊戲先停一下，寫出你遇到的問題、提早檢討，不要等卡一百輪才換做法。"
+                  "只寫紀錄和畫面裡真的有的事。")
+        t0 = time.time()
+        try:
+            o, raw = self._ask(system, user, effort="中想", max_tokens=8000, deadline=240, image=image)
+        except Exception as e:  # noqa: BLE001
+            o, raw = {}, str(e)
+        dt = time.time() - t0
+        if sm:
+            sm["上次更新"] = sm["輪"]
+        else:
+            self.no_small += 1                    # 沒解析出來也不要下一輪又叫
+        if not o:
+            self._append("小任務.md", f"更新失敗:{reason}｜{dt:.0f} 秒沒解析出來")
+            return f"小任務更新（{reason}）沒解析出來，下次再寫"
+        probs = [p for p in (o.get("遇到的問題") or []) if isinstance(p, dict)][:3]
+        ptxt = "；".join(f"{p.get('問題', '')}（{p.get('幾次', '')}，{p.get('為什麼', '')}）" for p in probs)[:240]
+        useful = str(o.get("現在的做法有沒有用") or "")[:120]
+        nxt = str(o.get("接下來先做") or "")[:80]
+        out = []
+        for c in (o.get("準則檢查") or [])[:5]:
+            if isinstance(c, dict) and str(c.get("要不要更正", "")).strip().startswith("更正"):
+                obj = str(c.get("準則", "")).split("｜")[0].strip()
+                if obj:
+                    out.append(self.mem_rule(obj, str(c["要不要更正"]).strip()))
+        st = o.get("小任務") if isinstance(o.get("小任務"), dict) else {}
+        name, how = str(st.get("名稱") or "").strip(), str(st.get("怎麼做") or "").strip()
+        if name and (not self.small or name != self.small["名稱"]):
+            out.append(self.flow_small_set(name, how))
+        elif self.small and how:
+            self.small["怎麼做"] = how
+        if self.small:
+            self.small["問題"] = ptxt
+            self.small["更新時間"] = datetime.now().strftime("%H:%M")
+            if not (name and name != (sm or {}).get("名稱")):
+                self.small["上次更新"] = self.small["輪"]
+        cur = self.small or {}
+        self._append("小任務.md", f"更新:{cur.get('名稱', '沒設')}｜第 {cur.get('輪', 0)} 輪、✗{cur.get('✗', 0)}、檢討{cur.get('檢討', 0)}"
+                     f"｜為什麼更新:{reason}｜問題:{ptxt}｜做法有沒有用:{useful}｜怎麼做:{cur.get('怎麼做', '')}｜接下來:{nxt}")
+        print(f"   📝 小任務更新（{reason}）{dt:.0f}s｜問題:{ptxt[:80]}｜接下來:{nxt[:40]}")
+        return (f"（{reason}，你花 {dt:.0f} 秒寫的）遇到的問題：{ptxt or '沒寫'}｜做法有沒有用：{useful or '沒寫'}"
+                f"｜現在的小任務：「{cur.get('名稱', '沒設')}」怎麼做：{cur.get('怎麼做', '') or '沒寫'}｜接下來先做：{nxt or '沒寫'}"
+                + ((NL + NL.join(out)) if out else ""))
 
     def flow_big_set(self, 名稱="", 成功條件=""):
         if not str(名稱).strip():
@@ -2908,6 +2997,12 @@ def main():
         task_round += 1
         if tools.small:
             tools.small["輪"] += 1
+        else:
+            tools.no_small += 1
+        small_up = ""
+        up_reason = tools.small_update_reason(task_ev, history[-1].get("看到", "") if history else "")
+        if up_reason:                                     # 10/21 18:5x：定期小任務更新（寫遇到的問題、提早檢討）
+            small_up = tools.small_update(up_reason, im, history, task_words)
         watch_txt = ""
         if tools.watch_labels:                           # 追蹤(標籤)：每輪開頭眼睛找一次
             try:
@@ -3002,10 +3097,12 @@ def main():
                 if "檢討" not in names_called:
                     match_stat["不符沒檢討"] += 1
         missed_review = (prev is not None and match_all is False and "檢討" not in names_called)
+        if prev is not None:                              # 10/21 18:5x：查出來的準則記回 照做✓／✗
+            tools.rules_outcome(match_all)
         if prev is not None and tools.small:              # 10/21：小任務一次做對沒有——數 ✗ 步
             tools.small["✗"] += (sum(1 for x in match if x is False) if isinstance(match, list) else int(match_all is False))
         print(f"[{rnd}] {dt:.1f}s 看到「{seen}」" + (f"上一輪實際「{actual}」符合={match} " if prev else "") + f"想「{think}」")
-        rets, did = list(plan_notes), []
+        rets, did = ([f"● 小任務更新 → {small_up}"] if small_up else []) + list(plan_notes), []
 
         def do(item, tag=""):
             name, params = parse_call(item, cat)

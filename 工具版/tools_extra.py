@@ -267,6 +267,43 @@ class ExtraTools:
         x = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(x))
         return {x[i:i + 2] for i in range(len(x) - 1)}
 
+    # 10/21 18:5x 使用者：記憶只會「加次數」，沒有「照著做了還是失敗」的反證，錯得越多次的準則排越前面
+    # → 查準則 叫出來的準則，接下來 3 輪的 符合 記回那條（照做✓／照做✗）；查準則 照成功率排序、每條附讀數。只給讀數，不刪不改。
+    RULE_WATCH = 3
+    rules_watch = {}          # "對象｜準則" → 還要記幾輪
+
+    @staticmethod
+    def _rule_key(r):
+        return f"{r['對象']}｜{r['準則']}"
+
+    def _rule_bad(self, r):
+        return r.get("照做✗", 0) + 0.5 * max(0, r.get("次數", 1) - 1)     # 同一條又記一次＝同樣情況又遇到
+
+    def _rule_reading(self, r):
+        ok, ng, again = r.get("照做✓", 0), r.get("照做✗", 0), max(0, r.get("次數", 1) - 1)
+        parts = []
+        if again:
+            parts.append(f"記了 {r.get('次數', 1)} 次＝同樣情況又遇到 {again} 次")
+        parts.append(f"查出來後 {self.RULE_WATCH} 輪內 ✓{ok} ✗{ng}" if ok or ng else "還沒有照做結果")
+        if ng >= 3 and ng > 2 * ok:
+            parts.append("⚠ 照它做多半是 ✗")
+        return "（" + "｜".join(parts) + "）"
+
+    def rules_outcome(self, ok):
+        """主迴圈每輪拿到 符合 之後叫：記回最近查出來的準則。"""
+        if ok is None or not self.rules_watch:
+            return
+        rules = self._rules_load()
+        by = {self._rule_key(r): r for r in rules}
+        for k in list(self.rules_watch):
+            r = by.get(k)
+            if r is not None:
+                r["照做✓" if ok else "照做✗"] = r.get("照做✓" if ok else "照做✗", 0) + 1
+            self.rules_watch[k] -= 1
+            if self.rules_watch[k] <= 0 or r is None:
+                del self.rules_watch[k]
+        self._rules_save(rules)
+
     def mem_rule(self, 對象="", 準則=""):
         obj, rule = str(對象).strip(), str(準則).strip()
         if len(re.sub(r"\W", "", obj)) < 1 or len(re.sub(r"\W", "", rule)) < 3:
@@ -284,7 +321,10 @@ class ExtraTools:
                 r["次數"] += 1
                 r["準則"], r["時間"] = rule, now
                 self._rules_save(rules)
-                return f"這條跟以前的準則一樣（第 {r['次數']} 次），更新成：{obj}｜{rule}"
+                ret = f"這條跟以前的準則一樣，更新成：{obj}｜{rule}" + self._rule_reading(r)
+                if r.get("照做✗", 0) >= 3 and r.get("照做✗", 0) > 2 * r.get("照做✓", 0):
+                    ret += NL + f"→ 照這條做的結果多半是 ✗，它可能不對；要改就 記準則({obj},更正:新的做法)"
+                return ret
         rules.append({"對象": obj, "準則": rule, "時間": now, "次數": 1})
         self._rules_save(rules)
         return f"準則記下了：{obj}｜{rule}（共 {len(rules)} 條；要對 {obj} 動手前用 查準則({obj}) 叫出來）"
@@ -303,7 +343,10 @@ class ExtraTools:
                  "大檢討", "卡法", "按鈕簿", "站位", "流程", "學習整理", "慢想", "互動物", "標點", "地點"):
             return self.doc_memory(q)                    # 我的記憶 併進來：直接叫出那一類
         qb = self._bg(q)
-        pool = [("準則", f"{r['對象']}｜{r['準則']}" + (f"（記了 {r['次數']} 次）" if r["次數"] > 1 else "")) for r in self._rules_load()]
+        rmap = {}
+        for r in self._rules_load():
+            rmap[self._rule_key(r) + self._rule_reading(r)] = r
+        pool = [("準則", t) for t in rmap]
         pool += [(src, l) for src, f in (("筆記", "筆記.md"), ("卡法", "卡法.md"), ("互動物", "互動物.md"),
                                           ("地點", "地點.md"), ("成功做法", "成功做法.md"), ("因果", "因果.md")) for l in self._mem_lines(f)]
         pool += [("檢討", r) for r in list(self.reviews)] + [("舊檢討", l) for l in self._mem_lines("檢討.md", 300)]
@@ -320,7 +363,12 @@ class ExtraTools:
             tb = self._bg(key)
             m = len(qb & tb)
             if hit or (m >= 2 and m / max(1, len(qb)) >= need):
-                scored.append([(10 if hit else 0) + m / max(1, len(qb)) * 5 + {"準則": 3, "檢討": 1}.get(src, 0), src, txt, tb, 1])
+                sc = (10 if hit else 0) + m / max(1, len(qb)) * 5 + {"準則": 3, "檢討": 1}.get(src, 0)
+                if src == "準則":            # 照做成功率：✓ 多往前、✗（含又遇到）多往後
+                    r = rmap[txt]
+                    ok, bad = r.get("照做✓", 0), self._rule_bad(r)
+                    sc += 4 * (ok - bad) / (ok + bad + 2)
+                scored.append([sc, src, txt, tb, 1])
         scored.sort(key=lambda x: -x[0])
         kept = []
         for x in scored:
@@ -332,8 +380,17 @@ class ExtraTools:
         if not kept:
             return f"沒有跟「{q}」有關的準則或紀錄。做了之後學到什麼就 記準則({q},…)"
         n_rule = sum(1 for x in kept if x[1] == "準則")
-        return (f"跟「{q}」有關的：準則 {n_rule} 條、其他 {len(kept) - n_rule} 種（相近的已合併，×N＝同一件事記了 N 次；列前 8）：" + NL
-                + NL.join(f"- [{src}{f' ×{n}' if n > 1 else ''}] {txt[:160]}" for _, src, txt, _, n in kept[:8]))
+        for x in kept[:8]:                      # 這幾條接下來 3 輪的 符合 記回去
+            if x[1] == "準則":
+                self.rules_watch[self._rule_key(rmap[x[2]])] = self.RULE_WATCH
+                if self.small is not None:
+                    seen = self.small.setdefault("查過的準則", [])
+                    if self._rule_key(rmap[x[2]]) not in seen:
+                        seen.append(self._rule_key(rmap[x[2]]))
+                        del seen[:-10]
+        return (f"跟「{q}」有關的：準則 {n_rule} 條、其他 {len(kept) - n_rule} 種（相近的已合併，×N＝同一件事記了 N 次；"
+                f"準則照「查出來後照做的 ✓／✗」排，接下來 {self.RULE_WATCH} 輪的結果會記回這幾條；列前 8）：" + NL
+                + NL.join(f"- [{src}{f' ×{n}' if n > 1 else ''}] {txt[:200]}" for _, src, txt, _, n in kept[:8]))
 
     def mem_history_find(self, 關鍵字=""):
         q = str(關鍵字).strip()
