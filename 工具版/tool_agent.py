@@ -202,7 +202,8 @@ def build_system(game, cat, plan3=False):
               "**出現變動就重新想任務**（使用者 10/21 交代）：死掉、特殊事件、文字變化（任務字換了）、畫面從全黑／載入回來、畫面類型變了、"
               "你叫了 突發狀況——只要出現變動，就要重新想一次「現在的任務應該是什麼」；程式會停下來先給你一段畫面描述，再請你寫。"
               "同一件小任務每做 15 輪也會請你寫一次（小任務更新）：遇到的問題、做法有沒有用（看 ✗ 和準則照做的 ✓／✗）、要不要換——提早檢討，不要等卡一百輪。"
-              "看不懂畫面就叫 描述畫面。" + NL
+              "看不懂畫面就叫 描述畫面（約 15 秒，每個東西會給編號和座標）；要走去其中一個就 走過去(編號)，程式會盯著它邊轉邊走；要每輪盯著就 追蹤(編號)。"
+              "認得的東西就 記長相(名稱,編號) 把它截下來存成照片；之後 找長相(名稱)／走過去(名稱) 直接拿照片找，不到 1 秒，不用再描述畫面。" + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
@@ -3051,11 +3052,13 @@ def main():
         if up_reason:                                     # 10/21：出現變動就重新想任務＋定期小任務更新
             small_up = tools.small_update(up_reason, im, history, task_words)
         watch_txt = ""
+        if tools.patch_watch:                            # 20:xx 追蹤 描述畫面給的點（圖塊比對）
+            watch_txt += "【追蹤】" + tools.patch_watch_text(im) + NL
         if tools.watch_labels:                           # 追蹤(標籤)：每輪開頭眼睛找一次
             try:
-                watch_txt = "【追蹤】" + tools.see_find(",".join(tools.watch_labels)) + NL
+                watch_txt += "【追蹤】" + tools.see_find(",".join(tools.watch_labels)) + NL
             except Exception as e:  # noqa: BLE001
-                watch_txt = f"【追蹤】眼睛出錯：{e}" + NL
+                watch_txt += f"【追蹤】眼睛出錯：{e}" + NL
         plan_txt = ""
         if tools.plan:
             plan_txt = ("【慢想排的】（你自己 " + tools.plan["時間"] + " 排的）" + "→".join(tools.plan["序列"])

@@ -85,63 +85,402 @@ class ExtraTools:
                 continue
         return out[:40]
 
+    # 20:xx 使用者：「描述畫面要更快，不要進入思考，只用最簡單的方式給出答案，一次最多 20 秒」
+    # → 不思考（快思）、逐行短格式（JSON 太長要 45 秒；逐行約 13 秒）、整個工具（含 OCR）限 20 秒，時間到就用已經收到的行
+    DESC_LIMIT = 20.0
+    desc_items = []          # 描述畫面給的點：[{"編號","名稱","x","y","種類"}]（走過去／追蹤 用）
+    DESC_KEYS = ("類型", "視角", "自己", "擋住", "互動提示", "場景", "介面", "道具欄")
+
     def see_describe(self, 重點="", image=None):
+        if image is None:
+            image = getattr(self, "_test_image", None)          # 離線實驗用
         if image is None and not self.live and not self.image_path:      # 19:xx 測試：dry-run 會抓到桌面（瀏覽器），不描述
             return "離線／dry-run 不能描述畫面"
+        t0 = time.time()
         im = image if image is not None else self.grab()
         if im is None:
             return "抓不到畫面"
-        ocr = self._ocr_list(im)
+        ocr = self._ocr_list(im)[:25]
+        t_ocr = time.time() - t0
+        from play_agent import stream_json, LAST_REASONING
+        import tool_agent as T
         system = ("你是畫面描述員。只描述這張遊戲截圖上看得到的東西：不玩、不給建議、不猜遊戲規則，任何遊戲都一樣。"
-                  "看不清楚就寫看不清楚，不要編。位置用畫面座標 (x,y)，0～1，左上是 (0,0)、正中央是 (0.5,0.5)。")
-        user = ("【程式讀到的字（OCR，可能讀錯；以圖為準）】" + NL + ("、".join(ocr) or "（沒讀到字）") + NL
+                  "看不清楚就寫看不清楚。直接回答，不要思考。位置一律寫 (x,y)，0～1，左上 (0,0)、正中央 (0.5,0.5)。")
+        user = ("【程式讀到的字（OCR，可能讀錯；以圖為準）】" + ("、".join(ocr) or "沒讀到字") + NL
                 + (f"【想特別看清楚的】{重點}" + NL if str(重點).strip() else "")
-                + "只輸出 JSON：" + NL
-                + '{"畫面類型":"遊戲中／大廳或主選單／載入或黑畫面／對話或彈出視窗／死亡或結束畫面／設定或系統選單／商店或背包介面／其他",'
-                  '"視角":"第一人稱／第三人稱／俯視／2D／看不出","視角根據":"",'
-                  '"自己的角色":"看得到的話：在畫面哪裡、什麼樣子；看不到就寫看不到",'
-                  '"擋住視線的":"畫面中間或正前方有沒有東西擋住、是什麼",'
-                  '"介面":[{"位置":"(x,y)","看到":"文字／圖示／數字／條","可能是":"血量／錢／任務／按鈕／道具欄／小地圖／聊天／提示／不確定"}],'
-                  '"道具欄":"看得到的話每格裡有什麼；沒有就寫沒有",'
-                  '"互動提示":[{"位置":"(x,y)","按鍵":"E／F／點擊…","旁邊的字":"","在哪個東西上":""}],'
-                  '"場景":[{"東西":"","位置":"(x,y)","遠近":"近／中／遠","樣子":"顏色、形狀"}],'
-                  '"總結":"一句話：這是什麼樣的地方、畫面上最顯眼的是什麼"}' + NL
-                + "介面最多 10 項、場景最多 8 項，由近到遠。")
-        t0 = time.time()
-        o = {}
-        for _ in range(2):                  # 19:xx 實測 1/3 次解析出別的東西（沒有 畫面類型）→ 再問一次
-            try:
-                o, raw = self._ask(system, user, effort=self.DESC_EFFORT, max_tokens=8000, deadline=180, image=im)
-            except Exception as e:  # noqa: BLE001
-                return f"描述畫面失敗：{e}"
-            if isinstance(o, dict) and o.get("畫面類型"):
-                break
-            o = {}
+                + "照下面格式逐行回答，越短越好，每項只寫幾個字：" + NL
+                + "類型：遊戲中／大廳／載入或黑畫面／彈出視窗／死亡畫面／選單／其他" + NL
+                + "視角：第一人稱／第三人稱／俯視／2D" + NL
+                + "自己：自己的角色在哪（看不到寫看不到）" + NL
+                + "擋住：中間有沒有東西擋住" + NL
+                + "互動提示：(x,y) [按鍵] 字｜在什麼上；最多 2 項，沒有寫沒有" + NL
+                + "場景：東西 (x,y) 近／中／遠；最多 4 項，由近到遠" + NL
+                + "介面：內容（可能是什麼）；最多 4 項，不寫座標" + NL
+                + "道具欄：每格有什麼，沒有寫沒有")
+        left = max(4.0, self.DESC_LIMIT - (time.time() - t0) - 0.3)
+        try:
+            raw, trunc, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), system,
+                                           [{"type": "image_url", "image_url": {"url": T.img_uri(im)}}, {"type": "text", "text": user}],
+                                           300, time.time() + left, 0.3, effort="快思")
+        except Exception as e:  # noqa: BLE001
+            return f"描述畫面失敗：{e}"
+        LAST_REASONING["text"] = ""
         dt = time.time() - t0
-        if not o:
-            return f"描述畫面沒解析出來（{dt:.0f} 秒）；OCR 讀到：" + ("、".join(ocr[:20]) or "沒有字")
-
-        def lst(k, fmt):
-            v = o.get(k) or []
-            return "；".join(fmt(x) for x in v if isinstance(x, dict)) or "沒有"
-        kind = str(o.get("畫面類型") or "？")
+        d = {}
+        for line in raw.splitlines():
+            m = re.match(r"\s*[-*•]?\s*\**(" + "|".join(self.DESC_KEYS) + r")\**\s*[:：]\s*(.*)", line)
+            if m and m.group(1) not in d:
+                d[m.group(1)] = m.group(2).strip()
+        if not d:
+            return f"描述畫面沒有回答（{dt:.0f} 秒）；OCR 讀到：" + ("、".join(ocr[:15]) or "沒有字")
+        items, n = [], 0
+        for k in ("互動提示", "場景"):
+            parts = []
+            for part in re.split(r"[；;／]", d.get(k, "")):
+                m = re.search(r"\(?\s*([01](?:\.\d+)?|\.\d+)\s*[,，]\s*([01](?:\.\d+)?|\.\d+)\s*\)?", part)
+                if m and part.strip():
+                    n += 1
+                    name = re.sub(r"\(.*?\)|\[.*?\]|[01]?\.\d+\s*[,，]\s*[01]?\.\d+", "", part)
+                    if "｜" in name:                         # 互動提示：用「在什麼東西上」當名字，前面的字附上
+                        pre, on = name.split("｜", 1)
+                        name = re.sub(r"^在|上$", "", on.strip()) + "（" + pre.strip() + "）"
+                    name = re.sub(r"\s+", " ", name).strip(" ，,、")[:30]
+                    items.append({"編號": n, "名稱": name, "x": float(m.group(1)), "y": float(m.group(2)), "種類": k})
+                    parts.append(f"[{n}]" + part.strip())
+                elif part.strip():
+                    parts.append(part.strip())
+            if parts:
+                d[k] = "；".join(parts)
+        self.desc_items = items
+        kind = d.get("類型", "？")
         prev = self.last_desc
-        if prev and prev.get("類型") and prev["類型"] != kind:
+        if prev and prev.get("類型") and kind != "？" and prev["類型"] != kind:
             self.desc_changed = f"畫面類型從「{prev['類型']}」變成「{kind}」"
-        self.last_desc = {"類型": kind, "總結": str(o.get("總結") or ""), "時間": datetime.now().strftime("%H:%M")}
-        lines = [f"【畫面描述】（描述員只看這張圖、不懂遊戲規則；{dt:.0f} 秒）",
-                 f"類型：{kind}｜視角：{o.get('視角', '？')}（{o.get('視角根據', '')}）",
-                 f"自己的角色：{o.get('自己的角色', '？')}",
-                 f"擋住視線的：{o.get('擋住視線的', '？')}",
-                 "介面：" + lst("介面", lambda x: f"{x.get('位置', '')} {x.get('看到', '')}（{x.get('可能是', '')}）"),
-                 f"道具欄：{o.get('道具欄', '？')}",
-                 "互動提示：" + lst("互動提示", lambda x: f"{x.get('位置', '')} [{x.get('按鍵', '')}] {x.get('旁邊的字', '')}｜在 {x.get('在哪個東西上', '？')} 上"),
-                 "場景：" + lst("場景", lambda x: f"{x.get('東西', '')} {x.get('位置', '')} {x.get('遠近', '')}（{x.get('樣子', '')}）"),
-                 f"總結：{o.get('總結', '')}"]
+        self.last_desc = {"類型": kind, "總結": d.get("總結", ""), "時間": datetime.now().strftime("%H:%M")}
+        lines = [f"【畫面描述】（描述員只看這張圖、不懂遊戲規則；{dt:.0f} 秒{'，時間到只收到前面幾行' if trunc else ''}）"]
+        self.desc_timing = (round(t_ocr, 1), round(dt, 1), len(raw))
+        lines += [f"{k}：{d[k]}" for k in self.DESC_KEYS if k in d]
+        if items:
+            lines.append("→ 要走去其中一個：走過去(編號)；要每輪盯著：追蹤(編號)")
         if self.desc_changed:
             lines.append("⚑ " + self.desc_changed)
-        self._append("畫面描述.md", " ｜ ".join(lines[1:])[:900])
+        self._append("畫面描述.md", " ｜ ".join(lines[1:])[:700])
         return NL.join(lines)
+
+    # ---------------- 追蹤描述畫面給的點（20:xx 使用者：「追蹤是要去使用他前面畫面描述去追蹤那個點」）
+    # 不用訓練、任何遊戲通用：在那個點切一小塊圖當目標，之後每張畫面用影像比對找它（cv2 matchTemplate）
+    patch_watch = []         # [{"名稱","tpl","h0","x","y"}]
+    TRK_W = 480
+
+    def _trk_gray(self, im):
+        import numpy as np
+        h = max(1, int(self.TRK_W * im.height / im.width))
+        return np.asarray(im.convert("L").resize((self.TRK_W, h)), dtype=np.uint8)
+
+    @staticmethod
+    def _trk_crop(g, x, y, pw, ph):
+        H, W = g.shape
+        x0 = int(max(0, min(W - pw, x * W - pw / 2)))
+        y0 = int(max(0, min(H - ph, y * H - ph / 2)))
+        return g[y0:y0 + ph, x0:x0 + pw].copy()
+
+    @staticmethod
+    def _trk_find(g, tpl, near=None, r=0.3, scales=(1.0,)):
+        """→ (x, y, 相似度, 倍數)；near＝(x,y) 只在附近 r 範圍找。"""
+        import cv2
+        H, W = g.shape
+        best = None
+        for sc in scales:
+            t = tpl if sc == 1.0 else cv2.resize(tpl, (max(6, int(tpl.shape[1] * sc)), max(6, int(tpl.shape[0] * sc))))
+            th, tw = t.shape
+            if th >= H or tw >= W:
+                continue
+            x0 = y0 = 0
+            area = g
+            if near is not None:
+                x0 = int(max(0, (near[0] - r) * W - tw / 2))
+                y0 = int(max(0, (near[1] - r) * H - th / 2))
+                x1 = int(min(W, (near[0] + r) * W + tw / 2))
+                y1 = int(min(H, (near[1] + r) * H + th / 2))
+                area = g[y0:y1, x0:x1]
+                if area.shape[0] <= th or area.shape[1] <= tw:
+                    continue
+            res = cv2.matchTemplate(area, t, cv2.TM_CCOEFF_NORMED)
+            _, mx, _, loc = cv2.minMaxLoc(res)
+            if best is None or mx > best[2]:
+                best = ((x0 + loc[0] + tw / 2) / W, (y0 + loc[1] + th / 2) / H, float(mx), sc)
+        return best
+
+    def _resolve_target(self, 目標="", y=""):
+        import tool_agent as T
+        q = str(目標).strip()
+        fx, fy = T.num(q, -1), T.num(y, -1)
+        if 0 <= fx <= 1 and 0 <= fy <= 1 and not re.fullmatch(r"\[?\d+\]?", q):
+            return fx, fy, f"({fx:.2f},{fy:.2f})"
+        m = re.search(r"\(?\s*([01]?\.\d+|[01])\s*[,，]\s*([01]?\.\d+|[01])\s*\)?", q)
+        if m and not re.fullmatch(r"\[?\d+\]?", q):
+            return float(m.group(1)), float(m.group(2)), f"({float(m.group(1)):.2f},{float(m.group(2)):.2f})"
+        mn = re.fullmatch(r"\[?(\d+)\]?", q)
+        it = None
+        if mn:
+            it = next((i for i in self.desc_items if i["編號"] == int(mn.group(1))), None)
+        elif q:
+            it = next((i for i in self.desc_items if q in i["名稱"] or i["名稱"].split("（")[0].split(" ")[0] in q), None)
+        if it:
+            return it["x"], it["y"], f"[{it['編號']}]{it['名稱']}"
+        if q and not mn:                                 # 20:xx 記過長相的東西：直接拿照片在現在的畫面找
+            name = self._look_name(q)
+            if name:
+                im = self.grab()
+                f = self._look_find(name, im) if im is not None else None
+                if f:
+                    self.look_how = f"{name} 在 ({f['x']:.2f},{f['y']:.2f})，{f['法']}"
+                    return f["x"], f["y"], name
+                return f"畫面上用照片找不到「{name}」（記了 {len(self._look_files(name))} 張）；轉頭看看，或先 描述畫面"
+        if not self.desc_items:
+            return "還沒有描述畫面給的點、也沒有記過它的長相：先叫 描述畫面，再用 編號／名稱；或直接給座標，例：走過去(0.72,0.55)"
+        return "描述畫面的點裡沒有「" + q + "」；有：" + "、".join(f"[{i['編號']}]{i['名稱']}" for i in self.desc_items)
+
+    # ---------------- 長相照片（20:xx 使用者：「他需要可以對東西進行截圖後，直接訓練他自己去對這個東西更認識——
+    # 例如他要找電腦，就用腦中之前截到的電腦照片直接去尋找，這樣會更快」）
+    # 不是訓練模型：每個東西存幾張截圖，找的時候拿每張照片、好幾種大小在畫面上比對（cv2，一次不到 1 秒），任何遊戲都通用。
+    # 20:xx 實驗：只用影像比對在別的畫面找，25 次對 0 次（椅子到處都「找到」）；
+    # 把照片＋現在的畫面給大腦、不思考、只回 (x,y)：12 次對 11 次，一次 0.4～1.5 秒；照片不附名字比較準（名字取錯會被帶偏）
+    # → 先影像比對（≥0.85＝幾乎同一個角度，直接用），不夠像再問大腦
+    LOOK_NORM = 1024          # 截照片前先把畫面縮成這個寬（跟給大腦的圖一樣）
+    LOOK_FAST = 0.85
+
+    def _look_dir(self):
+        return os.path.join(self.mdir, "長相")
+
+    def _look_files(self, name):
+        d = os.path.join(self._look_dir(), name)
+        try:
+            return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".png"))
+        except OSError:
+            return []
+
+    def _look_names(self):
+        try:
+            return sorted(n for n in os.listdir(self._look_dir()) if self._look_files(n))
+        except OSError:
+            return []
+
+    def _look_name(self, q):
+        names = self._look_names()
+        return next((n for n in names if n == q), None) or next((n for n in names if q in n or n in q), None)
+
+    def _look_ask(self, files, im):
+        """照片＋現在的畫面給大腦（不思考、只回一行）→ ((x,y) 或 None, 秒)"""
+        from play_agent import stream_json, LAST_REASONING
+        from PIL import Image
+        import tool_agent as T
+        content = []
+        for i, fp in enumerate(files):
+            try:
+                content += [{"type": "text", "text": f"【照片 {i + 1}】"}, {"type": "image_url", "image_url": {"url": T.img_uri(Image.open(fp).convert("RGB"), 256)}}]
+            except OSError:
+                continue
+        if not content:
+            return None, 0.0
+        content += [{"type": "text", "text": "【現在的畫面】"}, {"type": "image_url", "image_url": {"url": T.img_uri(im)}},
+                    {"type": "text", "text": "現在的畫面上有沒有照片裡的那個東西（看長相、顏色、形狀找；同一個東西，角度、遠近可能不同）？"
+                                             "有就只回一行：有 (x,y)，x,y 是它中心在畫面上的位置 0～1；沒有就只回：沒有"}]
+        t0 = time.time()
+        try:
+            raw, _, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint),
+                                       "你是找東西的眼睛。前面是要找的東西的照片，最後一張是現在的遊戲畫面。不要思考，直接回答。",
+                                       content, 40, time.time() + 10, 0.2, effort="快思")
+        except Exception:  # noqa: BLE001
+            return None, time.time() - t0
+        LAST_REASONING["text"] = ""
+        m = re.search(r"有\s*[(（]?\s*([01]?\.\d+|[01])\s*[,，]\s*([01]?\.\d+|[01])", raw)
+        return ((float(m.group(1)), float(m.group(2))) if m else None), time.time() - t0
+
+    def _look_find(self, name, im):
+        """→ {"x","y","分","法","秒"} 或 None"""
+        import numpy as np
+        from PIL import Image
+        t0 = time.time()
+        files = self._look_files(name)[-12:]
+        g = self._trk_gray(im)
+        k = self.TRK_W / self.LOOK_NORM
+        best = None
+        for fp in files:
+            try:
+                p = Image.open(fp).convert("L")
+                tpl = np.asarray(p.resize((max(6, int(p.width * k)), max(6, int(p.height * k)))), dtype=np.uint8)
+            except OSError:
+                continue
+            f = self._trk_find(g, tpl, scales=(0.8, 1.0, 1.25))
+            if f and (best is None or f[2] > best[2]):
+                best = f
+        if best and best[2] >= self.LOOK_FAST:
+            return {"x": best[0], "y": best[1], "分": best[2], "法": f"照片比對 相似度 {best[2]:.2f}", "秒": time.time() - t0}
+        xy, _ = self._look_ask(files[-2:], im)
+        if xy:
+            return {"x": xy[0], "y": xy[1], "分": 1.0, "法": "大腦對照片認出來", "秒": time.time() - t0}
+        return None
+
+    def mem_look(self, 名稱="", 目標=""):
+        name = re.sub(r"[\\/:*?\"<>|\s]+", "", str(名稱))[:20]
+        if not name:
+            return "記長相 要給 名稱,目標，例：記長相(電腦,3)＝把 描述畫面 的 [3] 截下來記成「電腦」；目標也可以給座標 0.72,0.55"
+        if not self.live and not self.image_path and not getattr(self, "_test_image", None):
+            return "離線／dry-run 不能截圖"
+        tgt = str(目標).strip() or name
+        r = self._resolve_target(tgt)
+        if isinstance(r, str):
+            return r
+        x, y, src = r
+        im = getattr(self, "_test_image", None) or self.grab()
+        if im is None:
+            return "抓不到畫面"
+        big = im.convert("RGB").resize((self.LOOK_NORM, max(1, int(self.LOOK_NORM * im.height / im.width))))
+        W, H = big.size
+        pw, ph = int(0.16 * W), int(0.22 * H)
+        x0, y0 = int(max(0, min(W - pw, x * W - pw / 2))), int(max(0, min(H - ph, y * H - ph / 2)))
+        d = os.path.join(self._look_dir(), name)
+        os.makedirs(d, exist_ok=True)
+        fp = os.path.join(d, datetime.now().strftime("%m%d_%H%M%S") + ".png")
+        big.crop((x0, y0, x0 + pw, y0 + ph)).save(fp)
+        n = len(self._look_files(name))
+        return (f"記下「{name}」的長相（第 {n} 張，從 {src} ({x:.2f},{y:.2f}) 截的）。之後 找長相({name})、走過去({name})、追蹤({name}) "
+                "都會直接拿照片在畫面上找（約 1 秒），不用再描述畫面；不同角度、遠近多記幾張會更準")
+
+    def see_look(self, 名稱=""):
+        q = str(名稱).strip()
+        names = [self._look_name(q)] if q else self._look_names()[:6]
+        names = [n for n in names if n]
+        if not names:
+            return (f"沒有記過「{q}」的長相；" if q else "還沒記過任何長相；") + "先 描述畫面，再 記長相(名稱,編號)"
+        if not self.live and not self.image_path and not getattr(self, "_test_image", None):
+            return "離線／dry-run 不能找"
+        im = getattr(self, "_test_image", None) or self.grab()
+        if im is None:
+            return "抓不到畫面"
+        t0 = time.time()
+        found, miss = [], []
+        for n in names:
+            f = self._look_find(n, im)
+            if f:
+                found.append(f"{n}：在 ({f['x']:.2f},{f['y']:.2f})（{f['法']}）")
+            else:
+                miss.append(n)
+        return (f"用照片找（{time.time() - t0:.1f} 秒）：" + ("；".join(found) if found else "都沒找到")
+                + (("｜畫面上沒有：" + "、".join(miss)) if miss else "") + ("｜→ 走過去(名稱)" if found else ""))
+
+    def see_watch(self, 標籤=""):
+        q = str(標籤).strip()
+        if q in ("停", "停止", "不用", "關"):
+            return self.see_unwatch()                   # 停止追蹤 併進來
+        r = self._resolve_target(q) if (self.desc_items or re.search(r"\d?\.\d", q) or self._look_name(q)) else "英文標籤"
+        if not isinstance(r, str):                      # 描述畫面的編號／名稱／座標 → 用圖塊追蹤
+            im = self.grab()
+            if im is None:
+                return "抓不到畫面"
+            x, y, name = r
+            g = self._trk_gray(im)
+            tpl = self._trk_crop(g, x, y, int(0.09 * g.shape[1]), int(0.12 * g.shape[0]))
+            self.patch_watch = ([w for w in self.patch_watch if w["名稱"] != name] + [{"名稱": name, "tpl": tpl, "h0": tpl.shape[0], "x": x, "y": y}])[-4:]
+            return (f"開始每輪追蹤「{name}」（從 ({x:.2f},{y:.2f}) 切一塊圖當它的長相）；面板【追蹤】每輪告訴你它在哪、變大還變小；"
+                    "要走過去就 走過去(" + name.split("]")[0].strip("[") + ")")
+        labels = [x.strip() for x in re.split(r"[,，、]", q) if x.strip()]
+        if not labels:
+            return "追蹤 要給 描述畫面的編號、座標，或英文標籤，例：追蹤(2)、追蹤(0.72,0.55)、追蹤(door)"
+        self.watch_labels = labels[:4]
+        return "開始每輪追蹤：" + "、".join(self.watch_labels) + "（面板【追蹤】每輪告訴你它在哪、多大）"
+
+    def see_unwatch(self):
+        self.watch_labels = []
+        self.patch_watch = []
+        return "停止追蹤"
+
+    def patch_watch_text(self, im):
+        if not self.patch_watch or im is None:
+            return ""
+        g = self._trk_gray(im)
+        out = []
+        for w in self.patch_watch:
+            f = self._trk_find(g, w["tpl"], scales=(0.8, 1.0, 1.25, 1.5))
+            if not f or f[2] < 0.55:
+                out.append(f"{w['名稱']}：畫面上找不到（最像的相似度 {f[2] if f else 0:.2f}；可能轉開了、被擋住或已經走到面前）")
+                continue
+            x, y, sc, k = f
+            size = w["tpl"].shape[0] * k / w["h0"]
+            out.append(f"{w['名稱']}：在 ({x:.2f},{y:.2f})（{'左邊' if x < 0.45 else '右邊' if x > 0.55 else '正前方'}），"
+                       f"大小是剛開始的 {size:.1f} 倍，相似度 {sc:.2f}")
+            if sc >= 0.75 and k != 1.0:                 # 長相跟著變大變小更新
+                w["tpl"] = self._trk_crop(g, x, y, int(w["tpl"].shape[1] * k), int(w["tpl"].shape[0] * k))
+            w["x"], w["y"] = x, y
+        return "；".join(out)
+
+    def move_track(self, 目標="", y=""):
+        """走過去：盯著描述畫面給的點（或座標），程式自己 轉正→走一小步→再找它，到面前／出現新字／被擋／找不到 就停。"""
+        r = self._resolve_target(目標, y)
+        if isinstance(r, str):
+            return r
+        x, y, name = r
+        if self.image_path or not self.live:
+            return f"[dry-run] 會盯著「{name}」({x:.2f},{y:.2f}) 邊轉邊走過去"
+        im = self.grab()
+        if im is None:
+            return "抓不到畫面"
+        g = self._trk_gray(im)
+        GH, GW = g.shape
+        tpl = self._trk_crop(g, x, y, int(0.09 * GW), int(0.12 * GH))
+        h0 = tpl.shape[0]
+        is_new = self._new_word_checker(im)
+        log, reason, lost = [], "", 0
+        for i in range(8):
+            yaw, _ = self._angles_to(x, 0.5, im.width, im.height)
+            if abs(yaw) >= 3:
+                self._drag(yaw * self.dx_deg, 0)
+                im = self._settled()
+                g = self._trk_gray(im)
+                f = self._trk_find(g, tpl, near=(0.5, y), r=0.2)
+                if f and f[2] >= 0.5:
+                    x, y = f[0], f[1]
+                else:
+                    x = 0.5                               # 轉到中間被自己的角色擋住常找不到：當作已轉正，走一步再找
+            before = im
+            self._key("w", 0.4)
+            time.sleep(0.25)
+            im = self.grab()
+            if im is None:
+                reason = "抓不到畫面"
+                break
+            g = self._trk_gray(im)
+            if self.diff(before, im) < 2:
+                reason = "走了畫面沒變＝前面被擋住"
+                break
+            f = self._trk_find(g, tpl, near=(x, y), r=0.25, scales=(1.0, 1.1, 1.2, 1.35))
+            if not f or f[2] < 0.5:
+                lost += 1
+                log.append(f"第{i + 1}步 找不到它（相似度 {f[2] if f else 0:.2f}）")
+                if lost >= 2:
+                    reason = "連兩步找不到它（可能被擋住、已經走到面前或走過頭）"
+                    break
+                continue
+            lost = 0
+            x, y, sc, k = f
+            nw, nh = min(int(0.4 * GW), int(tpl.shape[1] * k)), min(int(0.45 * GH), int(tpl.shape[0] * k))
+            tpl = self._trk_crop(g, x, y, nw, nh)
+            size = tpl.shape[0] / h0
+            log.append(f"第{i + 1}步 在 ({x:.2f},{y:.2f}) 大小 {size:.1f} 倍（相似度 {sc:.2f}）")
+            words = self._words(im)
+            new = [w for w in words if is_new(w)]
+            if new:
+                reason = "跳出原本沒有的字：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:4])
+                break
+            if size >= 2.5 or tpl.shape[0] >= 0.4 * GH:
+                reason = f"它已經變大 {size:.1f} 倍＝到面前了"
+                break
+        else:
+            reason = "走滿 8 步"
+        self._append("刻度樣本.md", f"走過去 {name}｜{len(log)} 步｜停：{reason[:50]}")
+        return (f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}。現在的畫面下一輪給你"
+                + ("；到了就試 長按(e,1.5) 或 讀字" if "面前" in reason or "字" in reason else ""))
 
     # ---------------- 學習
     def learn_big_review(self):
@@ -617,19 +956,6 @@ class ExtraTools:
         return self.tool_new(名稱, 用途 or f"最近 {n} 輪做過的串", "→".join(acts))
 
     # ---------------- 看
-    def see_watch(self, 標籤=""):
-        if str(標籤).strip() in ("停", "停止", "不用", "關"):
-            return self.see_unwatch()                   # 停止追蹤 併進來
-        labels = [x.strip() for x in re.split(r"[,，、]", str(標籤)) if x.strip()]
-        if not labels:
-            return "追蹤 要給英文標籤，例如 追蹤(cat,door)"
-        self.watch_labels = labels[:4]
-        return "開始每輪追蹤：" + "、".join(self.watch_labels) + "（面板【追蹤】每輪告訴你它在哪、多大）"
-
-    def see_unwatch(self):
-        self.watch_labels = []
-        return "停止追蹤"
-
     def see_zoom(self, x="", y=""):
         import tool_agent as T
         fx, fy = T.num(x, -1), T.num(y, -1)
