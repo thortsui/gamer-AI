@@ -252,8 +252,13 @@ class ExtraTools:
     # 20:xx 實驗：只用影像比對在別的畫面找，25 次對 0 次（椅子到處都「找到」）；
     # 把照片＋現在的畫面給大腦、不思考、只回 (x,y)：12 次對 11 次，一次 0.4～1.5 秒；照片不附名字比較準（名字取錯會被帶偏）
     # → 先影像比對（≥0.85＝幾乎同一個角度，直接用），不夠像再問大腦
+    # 10/22 01:xx 實驗（三個遊戲 7 樣東西、考題跟參考圖不重複、各約 200～400 題，見 測試紀錄.md 10/22）：
+    #   參考圖 2～4 張 95～97%、7 張 95%、1 張 89%（同一角度只有 1 張 85%）；1 張時加名字 → 95%；
+    #   固定提示詞 > 他自己寫的提示詞（91% vs 96%）；他思考後框（中想）略好於不思考框，跟人標的框差不多
+    # → 拿最近 4 張；只有 1 張時加名字；記長相 用思考後的框
     LOOK_NORM = 1024          # 截照片前先把畫面縮成這個寬（跟給大腦的圖一樣）
     LOOK_FAST = 0.85
+    LOOK_REFS = 4
 
     def _look_dir(self):
         return os.path.join(self.mdir, "長相")
@@ -278,8 +283,8 @@ class ExtraTools:
         names = self._look_names()
         return next((n for n in names if n == q), None) or next((n for n in names if q in n or n in q), None)
 
-    def _look_ask(self, files, im):
-        """照片＋現在的畫面給大腦（不思考、只回一行）→ ((x,y) 或 None, 秒)"""
+    def _look_ask(self, files, im, name=""):
+        """照片＋現在的畫面給大腦（不思考、只回一行）→ ((x,y) 或 None, 秒)；只有 1 張照片時加名字（實驗 89%→95%）"""
         from play_agent import stream_json, LAST_REASONING
         from PIL import Image
         import tool_agent as T
@@ -293,7 +298,7 @@ class ExtraTools:
         if not content:
             return None, 0.0
         content += [{"type": "text", "text": "【現在的畫面】"}, {"type": "image_url", "image_url": {"url": T.img_uri(im)}},
-                    {"type": "text", "text": "現在的畫面上有沒有紅框裡的那個東西（同一個東西，角度、遠近可能不同；現在的畫面沒有紅框）？"
+                    {"type": "text", "text": (f"要找的是「{name}」。" if name and len(files) == 1 else "") + "現在的畫面上有沒有紅框裡的那個東西（同一個東西，角度、遠近可能不同；現在的畫面沒有紅框）？"
                                              "有就只回一行：有 (x,y)，x,y 是它中心在現在畫面上的位置 0～1；沒有就只回：沒有"}]
         t0 = time.time()
         try:
@@ -326,26 +331,32 @@ class ExtraTools:
                 best = f
         if best and best[2] >= self.LOOK_FAST:
             return {"x": best[0], "y": best[1], "分": best[2], "法": f"照片比對 相似度 {best[2]:.2f}", "秒": time.time() - t0}
-        xy, _ = self._look_ask(self._look_files(name)[-2:], im)
+        xy, _ = self._look_ask(self._look_files(name)[-self.LOOK_REFS:], im, name)
         if xy:
             return {"x": xy[0], "y": xy[1], "分": 1.0, "法": "大腦對照片認出來", "秒": time.time() - t0}
         return None
 
     def _look_box(self, big, x, y, hint):
-        """叫眼睛把 (x,y) 那裡的東西整個框起來（不思考）→ (x1,y1,x2,y2) 或 None"""
+        """叫眼睛把 (x,y) 那裡的東西整個框起來 → (x1,y1,x2,y2, 怎麼框的) 或 None
+        10/22 實驗：思考後框（中想，約 15～20 秒）找的準確率略高於不思考框（約 5 秒）→ 先想著框，失敗再不思考框"""
         from play_agent import stream_json, LAST_REASONING
         import tool_agent as T
-        try:
-            raw, _, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), "你是畫面標記員。不要思考，直接回答。",
-                                       [{"type": "image_url", "image_url": {"url": T.img_uri(big)}},
-                                        {"type": "text", "text": f"畫面上 ({x:.2f},{y:.2f}) 那裡的{hint}，把整個東西框起來。只回一行：x1,y1,x2,y2（0～1，左上到右下）"}],
-                                       40, time.time() + 10, 0.2, effort="快思")
-        except Exception:  # noqa: BLE001
-            return None
-        LAST_REASONING["text"] = ""
-        v = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", raw)[:4]]
-        if len(v) == 4 and v[0] < v[2] and v[1] < v[3] and v[0] <= x <= v[2] and v[1] <= y <= v[3]:
-            return tuple(v)
+        q = f"畫面上 ({x:.2f},{y:.2f}) 那裡的{hint}，把整個東西框起來。"
+        for effort, sysmsg, mt, lim, tail in (
+                ("中想", "你是畫面標記員。先想清楚畫面上哪個是它、它的邊界在哪，再回答。", 4000, 60, "想完之後，最後一行只寫 x1,y1,x2,y2（0～1，左上到右下）"),
+                ("快思", "你是畫面標記員。不要思考，直接回答。", 40, 10, "只回一行：x1,y1,x2,y2（0～1，左上到右下）")):
+            try:
+                raw, _, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), sysmsg,
+                                           [{"type": "image_url", "image_url": {"url": T.img_uri(big)}}, {"type": "text", "text": q + tail}],
+                                           mt, time.time() + lim, 0.2, effort=effort)
+            except Exception:  # noqa: BLE001
+                continue
+            finally:
+                LAST_REASONING["text"] = ""
+            last = ([ln for ln in str(raw).strip().splitlines() if ln.strip()] or [""])[-1]
+            v = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", last)[:4]]
+            if len(v) == 4 and v[0] < v[2] and v[1] < v[3] and v[0] <= x <= v[2] and v[1] <= y <= v[3]:
+                return tuple(v) + ("想過再框" if effort == "中想" else "不思考框",)
         return None
 
     def mem_look(self, 名稱="", 目標=""):
@@ -376,7 +387,8 @@ class ExtraTools:
                 box = (max(0.0, x - 0.08), max(0.0, y - 0.11), min(1.0, x + 0.08), min(1.0, y + 0.11))
                 src += "（眼睛沒框好，用點附近一塊）"
             else:
-                src += "（眼睛框的）"
+                src += f"（眼睛{box[4]}的）"
+                box = box[:4]
         x1, y1, x2, y2 = int(box[0] * W), int(box[1] * H), int(box[2] * W), int(box[3] * H)
         d = os.path.join(self._look_dir(), name)
         os.makedirs(d, exist_ok=True)
@@ -387,7 +399,8 @@ class ExtraTools:
         marked.save(os.path.join(d, ts + "_框.png"))
         n = len(self._look_files(name))
         return (f"記下「{name}」的長相（第 {n} 張：整張畫面＋紅框 ({box[0]:.2f},{box[1]:.2f})～({box[2]:.2f},{box[3]:.2f})，{src}）。"
-                f"之後 找長相({name})、走過去({name})、追蹤({name}) 都會拿這張框好的圖去找（約 1 秒）；不同角度、遠近多記幾張會更準")
+                f"之後 找長相({name})、走過去({name})、追蹤({name}) 都會拿最近 {self.LOOK_REFS} 張框好的圖去找（約 1～5 秒）"
+                + ("；只記 1 張比較不準（實驗 89%），再從別的角度記 1～3 張最準（95～97%）" if n == 1 else "；記 2～4 張不同角度最準"))
 
     def see_look(self, 名稱=""):
         q = str(名稱).strip()
