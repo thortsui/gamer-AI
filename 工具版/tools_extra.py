@@ -151,7 +151,7 @@ class ExtraTools:
                     parts.append(part.strip())
             if parts:
                 d[k] = "；".join(parts)
-        self.desc_items = items
+        self.desc_items, self.desc_at = items, time.time()
         kind = d.get("類型", "？")
         prev = self.last_desc
         if prev and prev.get("類型") and kind != "？" and prev["類型"] != kind:
@@ -221,11 +221,16 @@ class ExtraTools:
         if m and not re.fullmatch(r"\[?\d+\]?", q):
             return float(m.group(1)), float(m.group(2)), f"({float(m.group(1)):.2f},{float(m.group(2)):.2f})"
         mn = re.fullmatch(r"\[?(\d+)\]?", q)
+        # 2x:xx 測試：上次描述的編號在畫面換了之後還被拿來用（座標是舊的）→ 描述 60 秒內才算數；名字先用照片在現在的畫面找
+        age = time.time() - getattr(self, "desc_at", 0)
+        fresh = self.desc_items if age <= 60 else []
         it = None
         if mn:
-            it = next((i for i in self.desc_items if i["編號"] == int(mn.group(1))), None)
-        elif q:
-            it = next((i for i in self.desc_items if q in i["名稱"] or i["名稱"].split("（")[0].split(" ")[0] in q), None)
+            if self.desc_items and not fresh:
+                return f"描述畫面是 {age:.0f} 秒前的，畫面可能已經變了；先重新 描述畫面 再用編號"
+            it = next((i for i in fresh if i["編號"] == int(mn.group(1))), None)
+        elif q and not self._look_name(q):
+            it = next((i for i in fresh if q in i["名稱"] or i["名稱"].split("（")[0].split(" ")[0] in q), None)
         if it:
             return it["x"], it["y"], f"[{it['編號']}]{it['名稱']}"
         if q and not mn:                                 # 20:xx 記過長相的東西：直接拿照片在現在的畫面找
@@ -253,10 +258,13 @@ class ExtraTools:
     def _look_dir(self):
         return os.path.join(self.mdir, "長相")
 
-    def _look_files(self, name):
+    # 2x:xx 使用者：「不用近景圖，讓他先把看到的東西框下來，再拿那張有框、標記好的圖去看」
+    # 實驗（同 6 張圖、相機＋紫色表格）：近景圖 8/12（沒有的圖誤報 3 次）；整張圖＋紅框 11/12（沒有的 6/6 都對）
+    # → 每張記兩個檔：*_框.png＝整張畫面＋紅框（給大腦認）、*_近.png＝框裡那塊（給影像比對快速找）
+    def _look_files(self, name, kind="框"):
         d = os.path.join(self._look_dir(), name)
         try:
-            return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".png"))
+            return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(f"_{kind}.png"))
         except OSError:
             return []
 
@@ -278,18 +286,19 @@ class ExtraTools:
         content = []
         for i, fp in enumerate(files):
             try:
-                content += [{"type": "text", "text": f"【照片 {i + 1}】"}, {"type": "image_url", "image_url": {"url": T.img_uri(Image.open(fp).convert("RGB"), 256)}}]
+                content += [{"type": "text", "text": f"【以前的畫面 {i + 1}，紅框框起來的是要找的東西】"},
+                            {"type": "image_url", "image_url": {"url": T.img_uri(Image.open(fp).convert("RGB"))}}]
             except OSError:
                 continue
         if not content:
             return None, 0.0
         content += [{"type": "text", "text": "【現在的畫面】"}, {"type": "image_url", "image_url": {"url": T.img_uri(im)}},
-                    {"type": "text", "text": "現在的畫面上有沒有照片裡的那個東西（看長相、顏色、形狀找；同一個東西，角度、遠近可能不同）？"
-                                             "有就只回一行：有 (x,y)，x,y 是它中心在畫面上的位置 0～1；沒有就只回：沒有"}]
+                    {"type": "text", "text": "現在的畫面上有沒有紅框裡的那個東西（同一個東西，角度、遠近可能不同；現在的畫面沒有紅框）？"
+                                             "有就只回一行：有 (x,y)，x,y 是它中心在現在畫面上的位置 0～1；沒有就只回：沒有"}]
         t0 = time.time()
         try:
             raw, _, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint),
-                                       "你是找東西的眼睛。前面是要找的東西的照片，最後一張是現在的遊戲畫面。不要思考，直接回答。",
+                                       "你是找東西的眼睛。前面是以前的畫面（紅框是要找的東西），最後一張是現在的遊戲畫面。不要思考，直接回答。",
                                        content, 40, time.time() + 10, 0.2, effort="快思")
         except Exception:  # noqa: BLE001
             return None, time.time() - t0
@@ -302,7 +311,7 @@ class ExtraTools:
         import numpy as np
         from PIL import Image
         t0 = time.time()
-        files = self._look_files(name)[-12:]
+        files = self._look_files(name, "近")[-12:]
         g = self._trk_gray(im)
         k = self.TRK_W / self.LOOK_NORM
         best = None
@@ -317,36 +326,68 @@ class ExtraTools:
                 best = f
         if best and best[2] >= self.LOOK_FAST:
             return {"x": best[0], "y": best[1], "分": best[2], "法": f"照片比對 相似度 {best[2]:.2f}", "秒": time.time() - t0}
-        xy, _ = self._look_ask(files[-2:], im)
+        xy, _ = self._look_ask(self._look_files(name)[-2:], im)
         if xy:
             return {"x": xy[0], "y": xy[1], "分": 1.0, "法": "大腦對照片認出來", "秒": time.time() - t0}
         return None
 
+    def _look_box(self, big, x, y, hint):
+        """叫眼睛把 (x,y) 那裡的東西整個框起來（不思考）→ (x1,y1,x2,y2) 或 None"""
+        from play_agent import stream_json, LAST_REASONING
+        import tool_agent as T
+        try:
+            raw, _, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), "你是畫面標記員。不要思考，直接回答。",
+                                       [{"type": "image_url", "image_url": {"url": T.img_uri(big)}},
+                                        {"type": "text", "text": f"畫面上 ({x:.2f},{y:.2f}) 那裡的{hint}，把整個東西框起來。只回一行：x1,y1,x2,y2（0～1，左上到右下）"}],
+                                       40, time.time() + 10, 0.2, effort="快思")
+        except Exception:  # noqa: BLE001
+            return None
+        LAST_REASONING["text"] = ""
+        v = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", raw)[:4]]
+        if len(v) == 4 and v[0] < v[2] and v[1] < v[3] and v[0] <= x <= v[2] and v[1] <= y <= v[3]:
+            return tuple(v)
+        return None
+
     def mem_look(self, 名稱="", 目標=""):
+        from PIL import ImageDraw
         name = re.sub(r"[\\/:*?\"<>|\s]+", "", str(名稱))[:20]
         if not name:
-            return "記長相 要給 名稱,目標，例：記長相(電腦,3)＝把 描述畫面 的 [3] 截下來記成「電腦」；目標也可以給座標 0.72,0.55"
+            return ("記長相 要給 名稱,目標，例：記長相(電腦,3)＝把 描述畫面 的 [3] 框起來記成「電腦」；"
+                    "目標也可以給座標 0.72,0.55，或自己框 x1,y1,x2,y2（例：記長相(電腦,0.40,0.20,0.60,0.55)）")
         if not self.live and not self.image_path and not getattr(self, "_test_image", None):
             return "離線／dry-run 不能截圖"
         tgt = str(目標).strip() or name
-        r = self._resolve_target(tgt)
-        if isinstance(r, str):
-            return r
-        x, y, src = r
+        nums = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", tgt)]
         im = getattr(self, "_test_image", None) or self.grab()
         if im is None:
             return "抓不到畫面"
         big = im.convert("RGB").resize((self.LOOK_NORM, max(1, int(self.LOOK_NORM * im.height / im.width))))
         W, H = big.size
-        pw, ph = int(0.16 * W), int(0.22 * H)
-        x0, y0 = int(max(0, min(W - pw, x * W - pw / 2))), int(max(0, min(H - ph, y * H - ph / 2)))
+        if len(nums) >= 4 and nums[0] < nums[2] and nums[1] < nums[3]:      # 他自己框的
+            box, src = tuple(nums[:4]), "你自己框的"
+        else:
+            r = self._resolve_target(tgt)
+            if isinstance(r, str):
+                return r
+            x, y, src = r
+            hint = re.sub(r"^\[\d+\]|（.*", "", src).strip() or name
+            box = self._look_box(big, x, y, hint)
+            if not box:                                  # 眼睛沒框好：用點附近一塊
+                box = (max(0.0, x - 0.08), max(0.0, y - 0.11), min(1.0, x + 0.08), min(1.0, y + 0.11))
+                src += "（眼睛沒框好，用點附近一塊）"
+            else:
+                src += "（眼睛框的）"
+        x1, y1, x2, y2 = int(box[0] * W), int(box[1] * H), int(box[2] * W), int(box[3] * H)
         d = os.path.join(self._look_dir(), name)
         os.makedirs(d, exist_ok=True)
-        fp = os.path.join(d, datetime.now().strftime("%m%d_%H%M%S") + ".png")
-        big.crop((x0, y0, x0 + pw, y0 + ph)).save(fp)
+        ts = datetime.now().strftime("%m%d_%H%M%S")
+        big.crop((x1, y1, x2, y2)).save(os.path.join(d, ts + "_近.png"))
+        marked = big.copy()
+        ImageDraw.Draw(marked).rectangle((x1, y1, x2, y2), outline=(255, 0, 0), width=4)
+        marked.save(os.path.join(d, ts + "_框.png"))
         n = len(self._look_files(name))
-        return (f"記下「{name}」的長相（第 {n} 張，從 {src} ({x:.2f},{y:.2f}) 截的）。之後 找長相({name})、走過去({name})、追蹤({name}) "
-                "都會直接拿照片在畫面上找（約 1 秒），不用再描述畫面；不同角度、遠近多記幾張會更準")
+        return (f"記下「{name}」的長相（第 {n} 張：整張畫面＋紅框 ({box[0]:.2f},{box[1]:.2f})～({box[2]:.2f},{box[3]:.2f})，{src}）。"
+                f"之後 找長相({name})、走過去({name})、追蹤({name}) 都會拿這張框好的圖去找（約 1 秒）；不同角度、遠近多記幾張會更準")
 
     def see_look(self, 名稱=""):
         q = str(名稱).strip()
