@@ -2477,7 +2477,7 @@ class Tools(ExtraTools):
                 + f"【大任務】{big.get('名稱', '沒設')}｜目標：{big.get('成功條件', '') or '沒寫'}" + NL
                 + "【前面完成的小任務】" + NL + self.small_lines() + NL
                 + "【現在的小任務】" + self.small_now_text() + NL
-                + "【右上角任務字（程式讀的，可能讀錯）】" + ("、".join(task_words) if task_words else "（沒讀到）") + NL
+                + "【右上角任務字（程式讀的，可能讀錯）】" + ("、".join(str(w[0]) if isinstance(w, (list, tuple)) else str(w) for w in task_words) if task_words else "（沒讀到）") + NL
                 + f"【這件小任務最近 {n} 輪】" + NL + recent + NL
                 + "【這件小任務寫的檢討（最近 8 條）】" + NL + revs + NL
                 + "【這件小任務查過的準則，查出來後照做的結果】" + NL + rules_txt + NL * 2
