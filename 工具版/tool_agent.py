@@ -110,7 +110,19 @@ PLAN3_PRE_GROUPS = ("文件", "記憶", "流程", "學習")
 PLAN3_PRE_TOOLS = ("記應該人稱", "回報人稱")   # 10/19 10:4x：校準類裡只記錄、不動遊戲的，也可以放 先記（他兩次放先記被擋）
 
 
+NO_SMALL_UPDATE = False   # --no-small-update（10/23）
+
+
 def build_system(game, cat, plan3=False):
+    s = _build_system(game, cat, plan3)
+    if NO_SMALL_UPDATE:     # 程式不停下來請他寫，說明也拿掉，改成自己想
+        s = re.sub(r"\*\*出現變動就重新想任務\*\*.*?提早檢討，不要等卡一百輪。",
+                   "出現變動（死掉、任務字換了、畫面從全黑／載入回來、你叫了 突發狀況）時，自己重新想一次「現在的任務應該是什麼」，該換就 設小任務。",
+                   s, flags=re.S)
+    return s
+
+
+def _build_system(game, cat, plan3=False):
     gdir = os.path.join(ROOT, "專案", game)
     identity = read_text(os.path.join(ROOT, "核心", "共用", "00_身分與現在的任務.md"))
     identity = re.sub(r"^---.*?---\s*", "", identity, flags=re.S).strip().replace("{game}", game)
@@ -2427,7 +2439,7 @@ class Tools(ExtraTools):
         return (f"「{sm['名稱']}」｜怎麼做：{sm['怎麼做'] or '（沒寫）'}｜{sm['開始']} 起、第 {sm['輪']} 輪"
                 + (f"、到現在 ✗ {sm['✗']} 步、檢討 {sm['檢討']} 條" if sm["✗"] or sm["檢討"] else "")
                 + (f"｜你 {sm.get('更新時間', '')} 寫的遇到的問題：{sm['問題']}" if sm.get("問題") else "")
-                + f"｜下次小任務更新：第 {sm.get('上次更新', 0) + self.SMALL_EVERY} 輪")
+                + ("" if NO_SMALL_UPDATE else f"｜下次小任務更新：第 {sm.get('上次更新', 0) + self.SMALL_EVERY} 輪"))
 
     # 10/21 19:xx 使用者：「如果出現了變動就要重新思考一次任務要是什麼（例如發生了死亡、特殊事件、文字變化或者之類的）」
     DEATH_RE = r"你死了|死掉|陣亡|再玩一次|復活|died|game ?over|wasted|defeat"
@@ -2973,8 +2985,12 @@ def main():
     ap.add_argument("--lock-effort", action="store_true", help="思考強度 工具不能改（全程用 --effort）")
     ap.add_argument("--verify2", action="store_true", help="量測二次驗證：每個量測做兩次、回報兩個值與一不一致")
     ap.add_argument("--plan3", action="store_true", help="三步規劃：每輪排下三步，程式一口氣做完才截下一張圖")
+    ap.add_argument("--no-small-update", action="store_true",
+                    help="10/23 使用者「切換任務的更新先暫時關掉」：不做 出現變動就重新想任務／定期小任務更新（10/22 停 43 次共 105 分鐘沒人操作）")
     ap.add_argument("--steps", type=int, default=0, help="每輪排幾步（10/18 12:5x 使用者「改成 預測兩步驟」→ 2）；0＝看 --plan3")
     args = ap.parse_args()
+    global NO_SMALL_UPDATE
+    NO_SMALL_UPDATE = args.no_small_update
     plan_n = max(0, min(5, args.steps)) or (3 if args.plan3 else 0)
     kn = CN_NUM.get(plan_n, str(plan_n))
     live = bool(args.live) and not args.image
@@ -3067,7 +3083,7 @@ def main():
         else:
             tools.no_small += 1
         small_up = ""
-        up_reason = tools.small_update_reason(tools.change_events(task_ev, history, im))
+        up_reason = "" if args.no_small_update else tools.small_update_reason(tools.change_events(task_ev, history, im))
         if up_reason:                                     # 10/21：出現變動就重新想任務＋定期小任務更新
             small_up = tools.small_update(up_reason, im, history, task_words)
         watch_txt = ""
