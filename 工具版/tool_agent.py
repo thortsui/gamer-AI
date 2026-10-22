@@ -111,6 +111,7 @@ PLAN3_PRE_TOOLS = ("記應該人稱", "回報人稱")   # 10/19 10:4x：校準�
 
 
 NO_SMALL_UPDATE = False   # --no-small-update（10/23）
+ASK_CLAUDE = True         # 10/23 實驗分枝 exp-ask-claude：問Claude
 
 
 def build_system(game, cat, plan3=False):
@@ -216,7 +217,8 @@ def _build_system(game, cat, plan3=False):
               "同一件小任務每做 15 輪也會請你寫一次（小任務更新）：遇到的問題、做法有沒有用（看 ✗ 和準則照做的 ✓／✗）、要不要換——提早檢討，不要等卡一百輪。"
               "看不懂畫面就叫 描述畫面（約 15 秒，每個東西會給編號和座標）；要走去其中一個就 走過去(編號)，程式會盯著它邊轉邊走；要每輪盯著就 追蹤(編號)。"
               "認得的東西就 記長相(名稱,編號) 把它截下來存成照片；之後 找長相(名稱)／走過去(名稱) 直接拿照片找，不到 1 秒，不用再描述畫面。"
-              "認出一樣東西是什麼（能不能互動、怎麼用）就 登記物品，下次畫面上又看到它，面板【登記的物品】會直接把你登記的內容帶出來。" + NL
+              "認出一樣東西是什麼（能不能互動、怎麼用）就 登記物品，下次畫面上又看到它，面板【登記的物品】會直接把你登記的內容帶出來。"
+              + ("不知道的事可以 問Claude(問題)：Claude 是幫你架這個程式、在旁邊看你玩的人，知道這個遊戲；回答幾分鐘內出現在面板【Claude 的回答】，不用停下來等。" if ASK_CLAUDE else "") + NL
             + "【遇到不知道、工具清單沒有的問題】先想：這件事該用哪個工具？"
               "既有工具做得到、只是用途沒寫這情況 → 補用途(工具,情況)，之後清單就會寫上；"
               "沒有任何工具做得到 → 新工具(名稱,用途,做法)，做法用現有工具一個接一個寫（例如「後退(0.4)→視角右(90)→讀字」），"
@@ -3073,6 +3075,8 @@ def main():
         task_words = top_right_words(im) if live else []      # 10/19：裁右上任務列放大讀，進面板＋stats
         _, task_ev = tw.update(task_words)
         content = [{"type": "image_url", "image_url": {"url": img_uri(im)}}]
+        ask_txt, ask_imgs = tools.claude_panel()          # 10/23 實驗：問Claude 的回答（附圖的前兩輪附上）
+        tools.extra_images = list(ask_imgs) + list(tools.extra_images)
         for tag, shot in tools.extra_images:
             content.append({"type": "text", "text": f"（看四周：{tag}）"})
             content.append({"type": "image_url", "image_url": {"url": img_uri(shot, 640)}})
@@ -3111,7 +3115,7 @@ def main():
                         + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
         last_seen = (history[-1].get("看到", "") if history else "")
-        panel = ("【開工數值】" + tools.startup_text() + NL
+        panel = ((ask_txt + NL * 2) if ask_txt else "") + ("【開工數值】" + tools.startup_text() + NL
                  + "【大任務】（一個段落；目標）" + big_txt + NL
                  + "【前面完成的小任務】" + NL + tools.small_lines() + NL
                  + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL

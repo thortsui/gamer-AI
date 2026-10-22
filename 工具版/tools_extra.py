@@ -1106,6 +1106,99 @@ class ExtraTools:
             self.extra_images.append((f"走了七成（{first} 秒）後的畫面", im))
         return f"拆兩段：先走 {first} 秒（{r}）；剩下 {round(d - first, 2)} 秒看下一輪的圖再決定要不要 走({round(d - first, 2)})"
 
+    # ---------------- 問 Claude（10/23 實驗分枝 exp-ask-claude，之後要退回）
+    # 使用者：「開放詢問工具 他能去對你進行詢問 他來問你的，你能告訴他；你需要記錄他問過的所有問題」
+    # 他問 → 問Claude.jsonl（附當下畫面）；Claude 在 session 裡看到後用 回答問題.py 寫進 問Claude_回答.jsonl → 面板【Claude 的回答】
+    ASK_MAX_WAIT = 3          # 同時最多幾題等回答
+    ASK_SHOW = 5              # 回答在面板留幾輪
+    ASK_IMG_ROUNDS = 2        # 回答附的圖前幾輪附給他看
+    ask_round = 0
+
+    def _ask_load(self, fname):
+        out = []
+        try:
+            for ln in open(os.path.join(self.mdir, fname), encoding="utf-8"):
+                try:
+                    out.append(json.loads(ln))
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+        return out
+
+    def ask_claude(self, 問題=""):
+        q = str(問題).strip()
+        qs = self._ask_load("問Claude.jsonl")
+        ans = {a["id"]: a for a in self._ask_load("問Claude_回答.jsonl")}
+        if not q:
+            if not qs and not ans:
+                return "還沒問過。問Claude(問題)：不知道的事直接問，例：問Claude(大廳哪裡可以開始配對進局？)"
+            lines = []
+            for a in sorted(ans.values(), key=lambda a: a["id"])[-8:]:
+                lines.append((f"第 {a['id']} 題 問：{a['問題']}" if a.get("問題") else "Claude 主動告訴你") + f"｜Claude 答：{a.get('回答', '')}")
+            wait = [x for x in qs if x["id"] not in ans]
+            return NL.join(lines) + ((NL + "等回答：" + "；".join(f"第 {x['id']} 題 {x['問題']}" for x in wait)) if wait else "")
+        wait = [x for x in qs if x["id"] not in ans]
+        if len(wait) >= self.ASK_MAX_WAIT:
+            return (f"你還有 {len(wait)} 題 Claude 還沒回答（" + "；".join(f"第 {x['id']} 題 {x['問題'][:30]}" for x in wait)
+                    + "），先等回答再問；這段時間繼續做別的")
+        qid = max([x["id"] for x in qs] + list(ans) + [0]) + 1
+        shot = ""
+        im = self.grab() if (self.live or self.image_path) else None
+        if im is not None:
+            d = os.path.join(self.mdir, "問Claude畫面")
+            os.makedirs(d, exist_ok=True)
+            shot = os.path.join(d, f"{qid}.jpg")
+            im.convert("RGB").save(shot, "JPEG", quality=80)
+        rec = {"id": qid, "時間": datetime.now().strftime("%m/%d %H:%M:%S"), "問題": q[:400], "畫面": shot,
+               "小任務": (self.small or {}).get("名稱", "") if hasattr(self, "small") else ""}
+        with open(os.path.join(self.mdir, "問Claude.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + NL)
+        print(f"   ❓ 問Claude 第 {qid} 題：{q[:120]}")
+        return (f"已問 Claude（第 {qid} 題，附上現在的畫面）。回答會出現在面板【Claude 的回答】，通常幾分鐘內；"
+                "不用停下來等，先繼續做別的")
+
+    def claude_panel(self):
+        """每輪開頭叫一次 → (面板文字, [(說明, 圖)])"""
+        from PIL import Image
+        self.ask_round += 1
+        qs = self._ask_load("問Claude.jsonl")
+        ans = self._ask_load("問Claude_回答.jsonl")
+        if not qs and not ans:
+            return "", []
+        seen_p = os.path.join(self.mdir, "問Claude_送達.json")
+        try:
+            seen = {int(k): v for k, v in json.load(open(seen_p, encoding="utf-8")).items()}
+        except (OSError, ValueError):
+            seen = {}
+        lines, imgs, changed = [], [], False
+        for a in ans:
+            k = a["id"]
+            if k not in seen:
+                seen[k] = {"輪": self.ask_round, "時間": datetime.now().strftime("%m/%d %H:%M:%S")}
+                changed = True
+            age = self.ask_round - seen[k]["輪"]
+            if age >= self.ASK_SHOW:
+                continue
+            who = "Claude 主動告訴你" if not a.get("問題") else f"你問（第 {k} 題）：{a['問題']}"
+            lines.append(f"- {who}｜Claude 答：{a.get('回答', '')}" + ("｜（附圖）" if a.get("圖") else ""))
+            if a.get("圖") and age < self.ASK_IMG_ROUNDS:
+                try:
+                    imgs.append((f"Claude 回答附的圖（第 {k} 題）：{a.get('圖說', '紅框是答案說的位置')}", Image.open(a["圖"]).convert("RGB")))
+                except OSError:
+                    pass
+        if changed:
+            with open(seen_p, "w", encoding="utf-8") as f:
+                json.dump(seen, f, ensure_ascii=False)
+        answered = {a["id"] for a in ans}
+        wait = [x for x in qs if x["id"] not in answered]
+        if not lines and not wait:
+            return "", imgs
+        txt = "【Claude 的回答】" + (NL + NL.join(lines) if lines else "")
+        if wait:
+            txt += NL + "（等回答：" + "；".join(f"第 {x['id']} 題" for x in wait) + "）"
+        return txt + NL + "（問過的都存著，問Claude() 不帶問題就列出來）", imgs
+
     # ---------------- 未實作（舊版靠水平儀／座標地圖／瀏覽器的）
     def not_impl(self, *a, **k):
         return "這個工具舊版有、這版還沒做（未實作）：它靠水平儀／座標地圖／瀏覽器。先用 看四周、找東西、估距、記地點 代替"
