@@ -138,8 +138,9 @@ def main():
     print(f"[大檢討] {dt:.0f}s 截斷={trunc} 推理 {len(reason)} 字 輸出 {len(raw)} 字 解析{'成功' if o else '失敗'}{'（從推理取出）' if from_reason else ''}")
     # 10/20 08:2x：輸出寫到「記筆記」一半就斷（推理 5.6k＋輸出 2k 字超過 max_tokens），有開場沒習慣、沒記準則也照樣蓋掉
     # → 開場跟習慣兩個都要有；輸出缺就再從推理裡找完整的一份
+    # 10/22 15:5x：沒截斷、寫到最後的 記準則 了，只是漏寫「要改的習慣」也算完整（以前一律當失敗、整份 539 秒白跑）
     def whole(x):
-        return bool(x.get("明天開場要做什麼") and x.get("要改的習慣"))
+        return bool(x.get("明天開場要做什麼") and (x.get("要改的習慣") or "記準則" in x))
     if o and not whole(o) and reason:
         for mm in re.finditer(r'\{\s*"今天做了什麼"', reason):
             cand = parse_json_loose(T.repair_json(reason[mm.start():])) or {}
