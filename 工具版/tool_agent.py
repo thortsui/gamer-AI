@@ -1242,8 +1242,10 @@ class Tools(ExtraTools):
 
         def fmt_t(name, r):
             cd, bgd, sim, fol = r
-            if fol is None:
-                return f"{name}：背景只移 {bgd * 100:.0f}% 畫面（幾乎沒動），量不出"
+            if fol is None:              # 10/22 12:2x：背景有動但中央沒紋理也走這裡，原本一律寫「幾乎沒動」誤導
+                if bgd < 0.03:
+                    return f"{name}：背景只移 {bgd * 100:.0f}% 畫面（幾乎沒動），量不出"
+                return f"{name}：背景移了 {bgd * 100:.0f}% 畫面，但正中央一片平、沒有花紋可以比（可能是牆、單色的東西），量不出"
             return (f"{name}：背景移了 {bgd * 100:.0f}% 畫面、正中央前後還像不像 {sim:.2f} → "
                     + ("中央那塊留在畫面中間＝跟著你" if fol else "中央那塊跟著景物被轉走"))
         # 12:4x：只用轉頭兩票判斷（第三人稱轉頭時角色站著不動、可靠）；走路時角色在播動畫，那票只列數字參考
