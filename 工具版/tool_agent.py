@@ -1670,23 +1670,39 @@ class Tools(ExtraTools):
         再往下掃一次驗證（二次驗證：第二次量應該接近 0 度）。"""
         if self.image_path or not self.live:
             return "[dry-run] 會往下掃到底再往上拉 89 度回水平"
+        # 10/22 13:5x：第三人稱角色／別的玩家一直在動，「畫面不再變＝到底」永遠成立不了 → 掃了 dy 1620（全程才 ~567），
+        # 量出抬頭 199 度、修不好，他看天花板卡了 30 輪。改成：直接往下拖 185 度（鏡頭本來就會卡在最底）→ 往上拉 89 度；
+        # 量原本歪幾度／驗證的掃描上限 185 度，掃到上限＝畫面一直在變、量不出（不再報不可能的度數）
         half = int(round(89 * self.dy_deg))
-        down1 = self._sweep_pitch(+1, 30, 60)
-        was = down1 / self.dy_deg - 89            # 原本仰角 p 掃到底（−89）要 (p+89)×dy → p＝down1/dy − 89（正＝抬頭）
+        cap = int(185 * self.dy_deg)
+        steps = max(4, cap // 60 + 1)
+        down1 = self._sweep_pitch(+1, steps, 60)
+        if down1 < cap:                              # 掃描停了＝真的到底；沒停就直接補拖到底
+            self._drag(0, cap - down1)
+        else:
+            self._drag(0, cap)
+        time.sleep(0.25)
+        was = (down1 / self.dy_deg - 89) if down1 < cap - 60 else None   # 原本仰角（正＝抬頭）；掃到上限＝量不出
         self._drag(0, -half)
         time.sleep(0.25)
-        down2 = self._sweep_pitch(+1, 30, 60)       # 驗證：從修好的位置再掃到底，應該剛好約 89 度
-        now = down2 / self.dy_deg - 89
+        down2 = self._sweep_pitch(+1, steps, 60)    # 驗證：從修好的位置再掃到底，應該約 89 度
+        now = (down2 / self.dy_deg - 89) if down2 < cap - 60 else None
+        self._drag(0, cap)                           # 再拖到底、拉回水平（不管驗證量不量得出）
+        time.sleep(0.25)
         self._drag(0, -half)
         time.sleep(0.25)
         self.pitch_acc = 0.0
-        ok = abs(now) <= 17                          # 掃描一步 60 像素≈16 度，誤差在一步內算水平
+        ok = now is not None and abs(now) <= 17      # 掃描一步 60 像素≈16 度，誤差在一步內算水平
 
         def lv(v):
+            if v is None:
+                return "量不出（畫面一直在變：角色／別人在動）"
             return "約水平" if abs(v) < 8 else f"{'抬頭' if v > 0 else '低頭'}約 {abs(v):.0f} 度"
-        self._append("刻度樣本.md", f"修水平：原本 {lv(was)}｜修完再量 {lv(now)}｜{'水平' if ok else '沒修好'}")
-        return (f"修水平：往下掃到底量到原本{lv(was)}（掃了 dy {down1}）→ 往上拉 dy {half}（89 度）；"
-                f"再掃一次驗證：修完是{lv(now)}（掃了 dy {down2}）→ " + ("**已回水平**" if ok else "**沒修好**（每度 dy 可能不對，量刻度 重量）")
+        self._append("刻度樣本.md", f"修水平：原本 {lv(was)}｜修完再量 {lv(now)}｜{'水平' if ok else '驗不出' if now is None else '沒修好'}")
+        tail = ("**已回水平**" if ok else
+                "已經拖到最底再往上拉 89 度＝照刻度應該是水平，但畫面一直在變、驗不出來；看畫面地平線在不在中間" if now is None else
+                "**沒修好**（每度 dy 可能不對，量刻度 重量）")
+        return (f"修水平：原本{lv(was)} → 拖到最底（dy {cap}）再往上拉 dy {half}（89 度）；再量一次：{lv(now)} → " + tail
                 + "；" + self._v2("水平", lv(was), lv(now), ok) + "（第一次＝修之前、第二次＝修之後應約水平）"
                 + "。水平儀已歸零")
 
