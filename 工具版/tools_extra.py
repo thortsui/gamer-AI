@@ -826,6 +826,7 @@ class ExtraTools:
         pool += [(src, l) for src, f in (("筆記", "筆記.md"), ("卡法", "卡法.md"), ("互動物", "互動物.md"),
                                           ("地點", "地點.md"), ("成功做法", "成功做法.md"), ("因果", "因果.md")) for l in self._mem_lines(f)]
         pool += [("檢討", r) for r in list(self.reviews)] + [("舊檢討", l) for l in self._mem_lines("檢討.md", 300)]
+        pool += [("登記的物品", self._item_line(it)) for it in self._items_load()]
         # 10/20：以前只要一半字組對上就算，一次回報幾百條 → 收緊：整句出現，或至少對上 2 組且 6 成（短的 8 成）；
         # 再把相近的合併成一條（×N＝同一件事記了 N 次）
         need = 0.8 if len(qb) <= 3 else 0.6
@@ -883,6 +884,77 @@ class ExtraTools:
         return f"「{q}」出現在 {len(hits)} 輪（列最近 6 輪）：" + NL + NL.join(
             f"- {h.get('時間', '')[:5]} 看到:{str(h.get('看到', ''))[:50]}｜用:{'、'.join(h.get('用') or [])[:80]}｜實際:{str(h.get('實際', ''))[:50]}｜符合:{h.get('符合')}"
             for h in hits[-6:])
+
+    # ---------------- 登記物品（10/22 09:0x 使用者：「這個做成工具 讓他自己可以使用：登記物品 讓他下次記得」）
+    # 認出一樣東西是什麼就登記（是什麼／能不能互動／怎麼用／別名）；之後畫面上又出現它（看到 寫到名字或別名、或描述畫面認出來），
+    # 面板【登記的物品】直接帶出登記的內容——不用先 查準則。只給他自己登記的內容，程式不判斷對錯。
+    ITEM_SHOW = 4
+
+    def _items_load(self):
+        try:
+            return json.load(open(os.path.join(self.mdir, "物品登記.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+
+    def _items_save(self, items):
+        with open(os.path.join(self.mdir, "物品登記.json"), "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=1)
+
+    @staticmethod
+    def _item_line(it):
+        return (f"{it['名稱']}＝{it.get('是什麼') or '（沒寫）'}｜能不能互動：{it.get('能不能互動') or '不知道'}"
+                + (f"｜怎麼用：{it['怎麼用']}" if it.get("怎麼用") else "")
+                + (f"｜別名：{'／'.join(it['別名'])}" if it.get("別名") else "")
+                + f"（{it.get('時間', '')} 登記" + (f"，登記 {it['次數']} 次" if it.get("次數", 1) > 1 else "") + "）")
+
+    def mem_item(self, 名稱="", 是什麼="", 能不能互動="", 怎麼用="", 別名="", 目標=""):
+        name = re.sub(r"[\/:*?\"<>|]+", "", str(名稱)).strip()[:20]
+        what = str(是什麼).strip()
+        if not name or (len(re.sub(r"\W", "", what)) < 2 and not str(能不能互動).strip()):
+            return ("登記物品 要給 名稱,是什麼（再加 能不能互動,怎麼用,別名,目標 更好），"
+                    "例：登記物品(藍色發光踏板,大廳的進場踏板,能,站上去等倒數就進局,藍墊子)")
+        fix = what.startswith("更正")
+        what = re.sub(r"^更正\s*[:：]?\s*", "", what)
+        can = str(能不能互動).strip()
+        can = "能" if re.match(r"^(能|可|可以|是|會|yes)", can, re.I) else "不能" if re.match(r"^(不|否|沒|no)", can, re.I) else (can[:20] or "")
+        alias = [a.strip() for a in re.split(r"[／/、,，;；]", str(別名)) if a.strip() and a.strip() != name][:6]
+        items = self._items_load()
+        now = datetime.now().strftime("%m/%d %H:%M")
+        it = next((x for x in items if x["名稱"] == name), None)
+        if it is None:
+            it = {"名稱": name, "次數": 0}
+            items.append(it)
+        old = self._item_line(it) if it.get("時間") else ""
+        it["次數"] = it.get("次數", 0) + 1
+        it["時間"] = now
+        if what:
+            it["是什麼"] = what[:80]
+        if can:
+            it["能不能互動"] = can
+        if str(怎麼用).strip():
+            it["怎麼用"] = str(怎麼用).strip()[:80]
+        if alias:
+            it["別名"] = sorted(set(it.get("別名", [])) | set(alias))[:8]
+        self._items_save(items)
+        ret = (("已更正" if fix else "已更新") + f"（原本：{old}）→ " if old else "登記了：") + self._item_line(it)
+        ret += f"。之後你的 看到 寫到「{name}」" + (f"或別名" if it.get("別名") else "") + "、或描述畫面認出它，面板【登記的物品】會直接提醒你"
+        if str(目標).strip():                            # 順便記長相
+            ret += NL + self.mem_look(name, 目標)
+        return ret
+
+    def items_panel(self, seen=""):
+        items = self._items_load()
+        if not items:
+            return ""
+        txt = str(seen)
+        if self.desc_items and time.time() - getattr(self, "desc_at", 0) < 120:
+            txt += "｜" + "｜".join(i["名稱"] for i in self.desc_items)
+        here = [it for it in items if any(k and k in txt for k in [it["名稱"]] + it.get("別名", []))]
+        here.sort(key=lambda it: -it.get("次數", 1))
+        head = f"【登記的物品】共 {len(items)} 樣"
+        if not here:
+            return head + "（畫面上沒看到登記過的；認出新東西是什麼就 登記物品）"
+        return head + "｜畫面上有你登記過的：" + NL + NL.join("- " + self._item_line(it) for it in here[:self.ITEM_SHOW])
 
     def rules_panel(self, seen=""):
         """面板只給指標：幾條準則＋畫面上看到你記過的東西（內容要 查準則 才叫出來）。"""
