@@ -1199,6 +1199,18 @@ class ExtraTools:
             txt += NL + "（等回答：" + "；".join(f"第 {x['id']} 題" for x in wait) + "）"
         return txt + NL + "（問過的都存著，問Claude() 不帶問題就列出來）", imgs
 
+    # ---------------- 使用者派發的任務（10/23 使用者：「給他派發任務」——從手機網站派，這裡只顯示，不替他做）
+    def dispatch_panel(self):
+        try:
+            tasks = json.load(open(os.path.join(self.mdir, "派發任務.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        act = [t for t in tasks if t.get("狀態") == "進行中"]
+        if not act:
+            return ""
+        return ("【使用者派發的任務】（使用者從手機交代的，照順序做；做完使用者會在手機上標完成）" + NL
+                + NL.join(f"{i + 1}. {t['任務']}（{t['時間']} 派）" for i, t in enumerate(act)))
+
     # ---------------- 未實作（舊版靠水平儀／座標地圖／瀏覽器的）
     def not_impl(self, *a, **k):
         return "這個工具舊版有、這版還沒做（未實作）：它靠水平儀／座標地圖／瀏覽器。先用 看四周、找東西、估距、記地點 代替"

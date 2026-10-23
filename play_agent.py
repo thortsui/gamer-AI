@@ -380,6 +380,7 @@ class RobloxWindow:
 # 2026-09-29 使用者：「他的思考是會自己列出文字？」——模型內部推理（reasoning_content）以前只跑不存；
 # 現在每次呼叫完放在這裡，flow_agent 的 log_panel／思考流程 拿去存，儀表板也看得到。
 LAST_REASONING = {"text": ""}
+LIVE_STREAM = {}   # 10/23 直播網站：正在串流的推理／輸出（同一個 list，邊收邊長）
 THINK_MODES = {
     # 模式: (要不要思考, effort, temperature, top_p)
     反射: (False, None,    0.70, 0.80),   # 官方給非思考模式的取樣建議
@@ -481,6 +482,8 @@ def _stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
         e._gamer_body = body
         print(f"   ✖ 模型回 HTTP {e.code}：{body[:200]}")
         raise
+    LIVE_STREAM.clear()
+    LIVE_STREAM.update({"reason": reason, "text": text, "t0": t0, "effort": effort})
     try:
         while True:
             remaining = deadline_at - time.time()

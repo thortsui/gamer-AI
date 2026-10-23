@@ -111,6 +111,7 @@ PLAN3_PRE_TOOLS = ("記應該人稱", "回報人稱")   # 10/19 10:4x：校準�
 
 
 NO_SMALL_UPDATE = False   # --no-small-update（10/23）
+LIVE = {"輪": 0, "階段": "啟動", "開始": 0.0, "做": []}   # 10/23 直播網站：這一輪在做什麼
 ASK_CLAUDE = True         # 10/23 實驗分枝 exp-ask-claude：問Claude
 
 
@@ -610,9 +611,41 @@ class Tools(ExtraTools):
             title = "?"
         return False, title
 
+    # 10/23 使用者：「她只能在最左邊的畫面使用(鎖死)」→ 送任何輸入前確認 Roblox 整個在最左邊的螢幕；
+    #      跑到別的螢幕：沒人用電腦（60 秒）就搬回最左螢幕並最大化，有人在用就不按
+    @staticmethod
+    def _left_monitor():
+        import mss
+        with mss.mss() as sct:
+            mons = sct.monitors[1:]
+        return min(mons, key=lambda m: (m["left"], m["top"]))
+
+    def _screen_ok(self):
+        bbox = self.win.client_bbox() if self.win else None
+        if not bbox:
+            return
+        m = self._left_monitor()
+        inside = (bbox["left"] >= m["left"] and bbox["top"] >= m["top"]
+                  and bbox["left"] + bbox["width"] <= m["left"] + m["width"] and bbox["top"] + bbox["height"] <= m["top"] + m["height"])
+        if inside:
+            return
+        if self._user_idle() >= self.FG_IDLE:
+            try:
+                import win32gui
+                win32gui.ShowWindow(self.win.hwnd, 9)                       # 先還原
+                win32gui.MoveWindow(self.win.hwnd, m["left"] + 40, m["top"] + 40, 1280, 760, True)
+                win32gui.ShowWindow(self.win.hwnd, 3)                       # 在最左螢幕最大化
+                time.sleep(1.0)
+                print(f"   ⚠ Roblox 不在最左邊的螢幕 → 已搬回最左螢幕（{m['width']}×{m['height']}）")
+                return
+            except Exception as e:  # noqa: BLE001
+                print(f"   ⚠ 搬 Roblox 回最左螢幕失敗：{e}")
+        raise RuntimeError("Roblox 視窗不在最左邊的螢幕（使用者規定只能在最左邊的畫面），這一步沒按；等一下再試")
+
     def _fg_ok(self):
         if not self.live or self.image_path:
             return
+        self._screen_ok()
         ok, title = self.fg_state()
         if ok:
             return
@@ -3000,6 +3033,29 @@ def main():
 
     cat = load_catalog(args.game)
     tools = Tools(args.game, cat, live=live, image_path=args.image or None)
+    if live:                                              # 10/23 直播網站：每 1.5 秒把正在想／正在做寫進 即時.json
+        import threading
+        from play_agent import LIVE_STREAM
+
+        def _live_writer():
+            path = os.path.join(tools.mdir, "即時.json")
+            while True:
+                try:
+                    st = dict(LIVE_STREAM)
+                    snap = {"更新": datetime.now().strftime("%H:%M:%S"), "輪": LIVE["輪"], "階段": LIVE["階段"],
+                            "已經秒": round(time.time() - LIVE["開始"], 1) if LIVE["開始"] else 0,
+                            "思考強度": st.get("effort", ""),
+                            "推理": "".join(st.get("reason") or [])[-6000:] if LIVE["階段"] == "想" else "",
+                            "輸出": "".join(st.get("text") or [])[-3000:] if LIVE["階段"] == "想" else "",
+                            "做": [{k: v for k, v in x.items()} for x in LIVE["做"]]}
+                    tmp = path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(snap, f, ensure_ascii=False, default=str)
+                    os.replace(tmp, path)
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(1.5)
+        threading.Thread(target=_live_writer, daemon=True).start()
     tools.verify2, tools.effort_locked = bool(args.verify2), bool(args.lock_effort)
     tools.effort_fixed = args.effort
     model = detect_model(args.endpoint)
@@ -3115,7 +3171,8 @@ def main():
                         + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
         last_seen = (history[-1].get("看到", "") if history else "")
-        panel = ((ask_txt + NL * 2) if ask_txt else "") + ("【開工數值】" + tools.startup_text() + NL
+        disp_txt = tools.dispatch_panel()
+        panel = ((disp_txt + NL * 2) if disp_txt else "") + ((ask_txt + NL * 2) if ask_txt else "") + ("【開工數值】" + tools.startup_text() + NL
                  + "【大任務】（一個段落；目標）" + big_txt + NL
                  + "【前面完成的小任務】" + NL + tools.small_lines() + NL
                  + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
@@ -3132,6 +3189,7 @@ def main():
                     "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))
         content.append({"type": "text", "text": panel})
         t0 = time.time()
+        LIVE.update({"輪": rnd, "階段": "想", "開始": t0, "做": []})
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
                                           time.time() + args.deadline, 0.2, effort=(tools.effort_override or args.effort))
         dt = time.time() - t0
@@ -3199,7 +3257,10 @@ def main():
             if not name:
                 rets.append(f"✗ {tag}看不懂「{params}」（工具名要照清單）")
                 return f"看不懂「{params}」"
+            LIVE["階段"] = "做"
+            LIVE["做"].append({"工具": f"{tag}{name}", "參數": params, "預計": LIVE.pop("_預計", ""), "回傳": ""})
             r = tools.run(name, params)
+            LIVE["做"][-1]["回傳"] = str(r)[:300]
             did.append(name + (f"({json.dumps(params, ensure_ascii=False)})" if params else ""))
             rets.append(f"● {name}{'(' + ','.join(str(v) for v in params.values()) + ')' if params else ''} → {r}")
             print(f"   ▶ {tag}{name} {params} → {r[:120].replace(NL, ' ')}")
@@ -3214,6 +3275,7 @@ def main():
                     continue
                 do(item, "先記 ")
             for i, st in enumerate(steps):           # N 步一口氣做完，中間不回大腦
+                LIVE["_預計"] = str(st.get("結果應該是") or "")
                 st["回傳"] = do(st["做"], f"第{i + 1}步 ")
                 tools.step_log.append({"做": st["做"] if isinstance(st["做"], str) else json.dumps(st["做"], ensure_ascii=False),
                                        "結果應該是": st["結果應該是"], "回傳": str(st["回傳"]), "符合": None})
