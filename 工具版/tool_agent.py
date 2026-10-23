@@ -1044,27 +1044,45 @@ class Tools(ExtraTools):
             res["上下"] = res["上下"] and ok2
         notes.append(f"垂直：抬 30 度（dy {30 * self.dy_deg:.0f}）畫面變化 {moved:.0f}，再低 30 度回來跟起點差 {back:.0f}"
                      + ("，回到原點" if res["上下"] else ("，抬頭時畫面沒變＝已頂到上限或刻度太小，先 仰(-20) 回到水平再驗" if moved < 8 else "，沒回到原點：每度 dy 可能不對，重 量刻度")))
-        # ③ 深度來回
-        def walkback():
+        # ③ 深度來回（10/23：先轉到前方有空間的方向；從最短 0.15 秒走起，走出去畫面沒變夠才加長；驗完轉回原本方向）
+        turned, how = self._face_open()
+        if how:
+            notes.append("深度：" + how)
+
+        def walkback1(t, tag):
             b = self.grab()
-            self._key("w", 1.0)
+            self._key("w", t)
             time.sleep(0.3)
             mid = self.grab()
-            self._key("s", 1.0)
+            self._key("s", t)
             time.sleep(0.3)
             a = self.grab()
-            return self.diff(b, mid), self.diff(b, a)
+            mv, bk = self.diff(b, mid), self.diff(b, a)
+            self._depth_log(種類=tag, 秒=t, 走出去變化=round(mv, 1), 退回來差=round(bk, 1), 過=(mv >= 8 and bk < mv * 0.8))
+            return mv, bk
+
+        used = {"t": self.DEPTH_TS[-1]}
+
+        def walkback():
+            mv = bk = 0.0
+            for t in self.DEPTH_TS:
+                mv, bk = walkback1(t, "驗開工 深度")
+                used["t"] = t
+                if mv >= 8:
+                    break
+            return mv, bk
         moved, back = walkback()
         # 12:1x 實測：退 1 秒跟起點差 63（第三人稱退走角色會轉身、鏡頭跟著擺），回不到原點是常態 →
         # 改判「有走出去、退回來有比走出去那一點更接近起點」就算深度可用
         res["深度"] = moved >= 8 and back < moved * 0.8
         if self.verify2:
-            m2, b2 = walkback()
+            m2, b2 = walkback1(used["t"], "驗開工 深度 第二次")
             ok2 = m2 >= 8 and b2 < m2 * 0.8
             notes.append(self._v2("驗開工 深度", "✓" if res["深度"] else "✗", "✓" if ok2 else "✗", res["深度"] == ok2)
                          + f"（第二次走出去變化 {m2:.0f}、退回來差 {b2:.0f}）")
             res["深度"] = res["深度"] and ok2
-        notes.append(f"深度：走 1 秒畫面變化 {moved:.0f}，退 1 秒回來跟起點差 {back:.0f}"
+        self._turn_back(turned or 0)
+        notes.append(f"深度：走 {used['t']} 秒畫面變化 {moved:.0f}，退 {used['t']} 秒回來跟起點差 {back:.0f}"
                      + ("，有走出去也退得回來，深度可用" if res["深度"] else ("，走了畫面沒變＝前方被擋，換有空間的地方再驗" if moved < 8 else "，退回來反而離起點更遠（退路被擋），換個地方再驗")))
         self.startup["驗證"] = res
         self._append("開工數值.md", "驗開工：" + "、".join(f"{k}{'✓' if ok else '✗'}" for k, ok in res.items()))
@@ -1083,13 +1101,13 @@ class Tools(ExtraTools):
         W, H = 320, 180
         pb = gb.crop((80, 45, 240, 135)).tobytes()
         best, best_k, v1 = None, 1.0, None
-        for k10 in range(10, 21):
-            k = k10 / 10.0
+        for k10 in range(50, 101):                 # 10/23：短距離量深度放大只有 1.1 上下 → 0.02 一格（原本 0.1）
+            k = k10 / 50.0
             w, h = 160 / k, 90 / k
             box = (int(160 - w / 2), int(90 - h / 2), int(160 + w / 2), int(90 + h / 2))
             pa = ga.crop(box).resize((160, 90), Image.BILINEAR).tobytes()
             v = sum(abs(x - y) for x, y in zip(pa, pb)) / len(pb)
-            if k10 == 10:
+            if k10 == 50:
                 v1 = v
             if best is None or v < best:
                 best, best_k = v, k
@@ -1099,34 +1117,110 @@ class Tools(ExtraTools):
             return None
         return best_k
 
-    def _depth_once(self):
+    # 10/23 使用者：「工具有問題 深度量測的 要讓他避開牆壁 只移動短距離比較好」
+    #   原本 量比例 往前走 1 秒×2（不退回）、驗開工 深度 走 1 秒退 1 秒×2 → 撞牆量不出、還會走到別處（大廳踩上配對踏板）
+    #   → 先往前探 0.3 秒看兩側背景有沒有跟著動（沒動＝前面是牆／被擋），被擋就轉 90 度再探，最多四個方向；
+    #     量的時候只走 0.4 秒、量完退回原地，最後轉回原本的方向
+    #   11:0x 使用者：「盡量移動最少距離 拿作為實驗數據」→ 從最短 0.15 秒開始，量不出才加長（0.25→0.4）；
+    #   每一次探／量都記進 記憶/工具版/深度量測.jsonl（走幾秒、哪個方向、兩側背景變化、畫面變化、放大、成不成）
+    DEPTH_TS = (0.15, 0.25, 0.4)
+    DEPTH_T = 0.4                 # 驗開工 深度、說明文字用（實際量比例 由短到長）
+    PROBE_T = 0.15
+
+    def _depth_log(self, **kw):
+        try:
+            with open(os.path.join(self.mdir, "深度量測.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"時間": datetime.now().strftime("%m/%d %H:%M:%S"), **kw}, ensure_ascii=False) + NL)
+        except OSError:
+            pass
+
+    def _blocked_ahead(self):
+        b = self.grab()
+        self._key("w", self.PROBE_T)
+        time.sleep(0.25)
+        a = self.grab()
+        self._key("s", self.PROBE_T)
+        time.sleep(0.25)
+        r = self._pc_pair(b, a) if (a is not None and b is not None) else None
+        blocked = r is None or r[1] < 6
+        self._depth_log(種類="探前方", 秒=self.PROBE_T, 兩側背景變=(round(r[1], 1) if r else None),
+                        中央變=(round(r[0], 1) if r else None), 畫面變化=round(self.diff(b, a), 1), 被擋=blocked)
+        return blocked, (round(r[1], 1) if r else None)
+
+    def _face_open(self):
+        """→ (轉了幾度 或 None＝四面都擋, 說明)"""
+        turned, tried = 0, []
+        for _ in range(4):
+            blocked, side = self._blocked_ahead()
+            tried.append(f"{turned} 度{'被擋' if blocked else '有空間'}（兩側背景變 {side}）")
+            if not blocked:
+                return turned, ("" if turned == 0 else "前面是牆／被擋，" + "、".join(tried) + f" → 改朝 {turned} 度那邊量")
+            self._drag(90 * self.dx_deg, 0)
+            time.sleep(0.4)
+            turned += 90
+        self._drag(-turned * self.dx_deg, 0)
+        time.sleep(0.4)
+        return None, "四個方向往前都被擋（" + "、".join(tried) + "）"
+
+    def _turn_back(self, turned):
+        if turned:
+            self._drag(-turned * self.dx_deg, 0)
+            time.sleep(0.4)
+
+    def _depth_try(self, t, tag):
         before = self.grab()
-        self._key("w", 1.0)
+        self._key("w", t)
         time.sleep(0.3)
         after = self.grab()
-        return self.diff(before, after), self.zoom_factor(before, after)
+        self._key("s", t)
+        time.sleep(0.3)
+        k = self.zoom_factor(before, after)
+        d = self.diff(before, after)
+        k1 = round(k ** (1 / t), 2) if k else None
+        ok = k is not None and k > 1.01 and d >= 4
+        self._depth_log(種類=tag, 秒=t, 畫面變化=round(d, 1), 放大=k, 換算1秒=k1, 量到=ok)
+        return d, (k1 if ok else None), t
+
+    def _depth_once(self, t=None):
+        """從最短的距離開始量（量不出才加長），每次量完退回原地 → (畫面變化, 換算成走 1 秒的放大倍數, 用了幾秒)"""
+        d, k1, used = 0.0, None, None
+        for tt in ([t] if t else self.DEPTH_TS):
+            d, k1, used = self._depth_try(tt, "量比例" if not t else "量比例 第二次")
+            if k1:
+                break
+        return d, k1, used
 
     def cal_depth(self):
         if self.image_path or not self.live:
             return "離線／dry-run 不能量比例"
-        d, k = self._depth_once()
+        turned, how = self._face_open()
+        if turned is None:
+            return how + "，這次沒量；先離開牆角（退／橫移）到有空間的地方再量比例"
+        try:
+            r = self._cal_depth_measure()
+        finally:
+            self._turn_back(turned)
+        return ((how + "（量完已轉回原本方向）；") if how else "") + r
+
+    def _cal_depth_measure(self):
+        d, k, used = self._depth_once()
         v2 = ""
-        if self.verify2:                           # 10/18 二次驗證：接著再走 1 秒量第二次
-            d2, k2 = self._depth_once()
+        if self.verify2:                           # 10/18 二次驗證：接著再量第二次（10/23 起用第一次量到的最短秒數、量完退回）
+            d2, k2, _ = self._depth_once(used if k else None)
             good = lambda dd, kk: kk is not None and kk > 1.05 and dd >= 15
             ok = good(d, k) and good(d2, k2) and abs(k - k2) <= 0.15
-            v2 = self._v2("量比例 走1秒放大", f"{k:.2f}" if k else "量不出", f"{k2:.2f}" if k2 else "量不出", ok, "倍")
+            v2 = self._v2("量比例 走1秒放大", f"{k:.2f}" if k else "量不出", f"{k2:.2f}" if k2 else "量不出", ok, "倍") + f"（走 {used} 秒量、換算成 1 秒）"
             if not ok:
                 if k is None and k2 is None and d >= 15 and d2 >= 15:
                     # 10/18 04:4x：兩次都「有走、但放大量不出」他只看到「換空曠處再量」→ 17 輪叫了 12 次量比例。這種是量法本身的限制，要講清楚
                     return (v2 + f"（兩次都有走出去：畫面變化 {d:.0f}、{d2:.0f}，但中央放大量不出來" + self._center_note(d) + "——"
                             "換地方重量也一樣量不出；校準檔沒改）。深度比例目前量不準，估距離用 找東西／估距 的框高")
                 return (v2 + "（兩次差超過 0.15 倍或有一次量不出＝這次不算，校準檔沒改）；"
-                        f"第一次畫面變化 {d:.0f}、第二次 {d2:.0f}。換前方空曠、走 2 秒都不會撞牆的地方再量比例")
+                        f"第一次畫面變化 {d:.0f}、第二次 {d2:.0f}。")
             k = round((k + k2) / 2, 2)
             v2 = "；" + v2 + "（用平均）"
         if d < 2:
-            return "走 1 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
+            return f"走 {used} 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
         if k is None:
             return (f"走 1 秒畫面變化 {d:.0f}，但中央放大量不出來" + self._center_note(d) + "，這次不算，校準檔沒改；"
                     "深度比例目前量不準，估距離用 找東西／估距 的框高")
@@ -1140,10 +1234,10 @@ class Tools(ExtraTools):
             cal = json.load(open(p, encoding="utf-8"))
         except Exception:  # noqa: BLE001
             cal = {}
-        cal["深度"] = {"走1秒放大倍數": k, "方法": "中央區放大比對（工具版 量比例）", "時間": datetime.now().strftime("%m/%d %H:%M")}
+        cal["深度"] = {"走1秒放大倍數": k, "方法": f"中央區放大比對（工具版 量比例；走 {used} 秒量、量完退回，換算成 1 秒）", "時間": datetime.now().strftime("%m/%d %H:%M")}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
-        return f"深度比例：走 1 秒畫面中央放大 {k:.1f} 倍（畫面變化 {d:.0f}）{v2}。之後估「前方幾步」用這個換算"
+        return f"深度比例：換算成走 1 秒畫面中央放大 {k:.1f} 倍（走 {used} 秒量、量完退回原地；畫面變化 {d:.0f}）{v2}。之後估「前方幾步」用這個換算"
 
     def cal_startup(self):
         """開工測試：逐項量、逐項回報（使用者要求的幾個數值）。"""
