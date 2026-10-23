@@ -87,9 +87,9 @@ class ExtraTools:
 
     # 20:xx 使用者：「描述畫面要更快，不要進入思考，只用最簡單的方式給出答案，一次最多 20 秒」
     # → 不思考（快思）、逐行短格式（JSON 太長要 45 秒；逐行約 13 秒）、整個工具（含 OCR）限 20 秒，時間到就用已經收到的行
-    DESC_LIMIT = 20.0
+    DESC_LIMIT = 25.0            # 11:4x 加了深度（前方＋每項幾個身高）字變多，20 秒會截掉最後幾行
     desc_items = []          # 描述畫面給的點：[{"編號","名稱","x","y","種類"}]（走過去／追蹤 用）
-    DESC_KEYS = ("類型", "視角", "自己", "擋住", "互動提示", "場景", "介面", "道具欄")
+    DESC_KEYS = ("類型", "視角", "自己", "擋住", "前方", "互動提示", "場景", "介面", "道具欄")
 
     def see_describe(self, 重點="", image=None):
         if image is None:
@@ -113,15 +113,17 @@ class ExtraTools:
                 + "視角：第一人稱／第三人稱／俯視／2D" + NL
                 + "自己：自己的角色在哪（看不到寫看不到）" + NL
                 + "擋住：中間有沒有東西擋住" + NL
-                + "互動提示：(x,y) [按鍵] 字｜在什麼上；最多 2 項，沒有寫沒有" + NL
-                + "場景：東西 (x,y) 近／中／遠；最多 4 項，由近到遠" + NL
+                + "前方：正前方約幾個身高會碰到東西、是什麼（例：約 2 個身高 牆）；看不出寫看不出" + NL
+                + "互動提示：(x,y) [按鍵] 字｜在什麼上｜約幾個身高遠；最多 2 項，沒有寫沒有" + NL
+                + "場景：東西 (x,y) 約幾個身高遠；最多 4 項，由近到遠" + NL
+                + "（距離一律用「自己角色的身高」當尺，例：約 3 個身高；看不到自己就用一般人的身高）" + NL
                 + "介面：內容（可能是什麼）；最多 4 項，不寫座標" + NL
                 + "道具欄：每格有什麼，沒有寫沒有")
         left = max(4.0, self.DESC_LIMIT - (time.time() - t0) - 0.3)
         try:
             raw, trunc, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), system,
                                            [{"type": "image_url", "image_url": {"url": T.img_uri(im)}}, {"type": "text", "text": user}],
-                                           300, time.time() + left, 0.3, effort="快思")
+                                           380, time.time() + left, 0.3, effort="快思")
         except Exception as e:  # noqa: BLE001
             return f"描述畫面失敗：{e}"
         LAST_REASONING["text"] = ""
@@ -145,7 +147,10 @@ class ExtraTools:
                         pre, on = name.split("｜", 1)
                         name = re.sub(r"^在|上$", "", on.strip()) + "（" + pre.strip() + "）"
                     name = re.sub(r"\s+", " ", name).strip(" ，,、")[:30]
-                    items.append({"編號": n, "名稱": name, "x": float(m.group(1)), "y": float(m.group(2)), "種類": k})
+                    md = re.search(r"約?\s*([\d.]+)\s*個?\s*身高", part)
+                    name = re.sub(r"[｜|]?\s*約?\s*[\d.]+\s*個?\s*身高\s*遠?", "", name).strip(" ，,、｜")
+                    items.append({"編號": n, "名稱": name, "x": float(m.group(1)), "y": float(m.group(2)), "種類": k,
+                                  "身高": (float(md.group(1)) if md else None)})
                     parts.append(f"[{n}]" + part.strip())
                 elif part.strip():
                     parts.append(part.strip())

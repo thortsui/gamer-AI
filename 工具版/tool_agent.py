@@ -1187,6 +1187,7 @@ class Tools(ExtraTools):
     #   11:0x 使用者：「盡量移動最少距離 拿作為實驗數據」→ 從最短 0.15 秒開始，量不出才加長（0.25→0.4）；
     #   每一次探／量都記進 記憶/工具版/深度量測.jsonl（走幾秒、哪個方向、兩側背景變化、畫面變化、放大、成不成）
     DEPTH_TS = (0.15, 0.25, 0.4)
+    RATIO_TS = (0.4,)             # 11:4x 使用者「0.4秒試試看」：量比例 固定走 0.4 秒（0.15／0.25 中央放大幾乎都量不出）；驗開工 深度 照舊由短到長
     DEPTH_T = 0.4                 # 驗開工 深度、說明文字用（實際量比例 由短到長）
     PROBE_T = 0.15
 
@@ -1248,17 +1249,25 @@ class Tools(ExtraTools):
         after = self.grab()
         self._key("s", t)
         time.sleep(0.3)
+        back = self.grab()
         k = self.zoom_factor(before, after)
         d = self.diff(before, after)
         k1 = round(k ** (1 / t), 2) if k else None
-        ok = k is not None and k > 1.01 and d >= 4
-        self._depth_log(種類=tag, 秒=t, 畫面變化=round(d, 1), 放大=k, 換算1秒=k1, 量到=ok)
+        # 11:4x 使用者：「0.4秒試試看 但是絕對要在範圍內」→ 走出去兩側背景要有動（沒卡住）、退回來要回到原位（比走出去那點更近起點），不然不算
+        r = self._pc_pair(before, after) if (before is not None and after is not None) else None
+        back_d = self.diff(before, back)
+        in_range = (r is not None and r[1] >= 6) and back_d < d * 0.8
+        ok = k is not None and k > 1.01 and d >= 4 and in_range
+        self._depth_log(種類=tag, 秒=t, 畫面變化=round(d, 1), 兩側背景變=(round(r[1], 1) if r else None), 退回差=round(back_d, 1),
+                        在範圍內=in_range, 放大=k, 換算1秒=k1, 量到=ok)
+        if not in_range:
+            print(f"   ⚠ 量比例 {t} 秒：{'走的時候卡住' if not (r and r[1] >= 6) else '退回來沒回到原位'}，這次不算")
         return d, (k1 if ok else None), t
 
     def _depth_once(self, t=None):
         """從最短的距離開始量（量不出才加長），每次量完退回原地 → (畫面變化, 換算成走 1 秒的放大倍數, 用了幾秒)"""
         d, k1, used = 0.0, None, None
-        for tt in ([t] if t else self.DEPTH_TS):
+        for tt in ([t] if t else self.RATIO_TS):
             d, k1, used = self._depth_try(tt, "量比例" if not t else "量比例 第二次")
             if k1:
                 break
