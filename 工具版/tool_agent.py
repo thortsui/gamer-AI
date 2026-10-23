@@ -3584,7 +3584,15 @@ def main():
     ap.add_argument("--no-small-update", action="store_true",
                     help="10/23 使用者「切換任務的更新先暫時關掉」：不做 出現變動就重新想任務／定期小任務更新（10/22 停 43 次共 105 分鐘沒人操作）")
     ap.add_argument("--steps", type=int, default=0, help="每輪排幾步（10/18 12:5x 使用者「改成 預測兩步驟」→ 2）；0＝看 --plan3")
+    # 10/24 使用者：模型比較實驗（haiku／sonnet／sonnet 自由搜尋 各一小時，其他一模一樣）→ claude_brain.py
+    ap.add_argument("--brain", default="", help="空＝本地 8888；haiku／sonnet＝每次叫大腦開一個新的 claude -p")
+    ap.add_argument("--brain-search", action="store_true", help="--brain 時多給 WebSearch／WebFetch")
     args = ap.parse_args()
+    if args.brain:
+        import claude_brain
+        claude_brain.setup(args.brain, args.brain_search,
+                           os.path.join(ROOT, "專案", args.game, "記憶", "工具版", "claude大腦.jsonl"),
+                           args.brain + ("+搜尋" if args.brain_search else ""))
     global NO_SMALL_UPDATE
     NO_SMALL_UPDATE = args.no_small_update
     plan_n = max(0, min(5, args.steps)) or (3 if args.plan3 else 0)
@@ -3621,7 +3629,7 @@ def main():
         threading.Thread(target=_live_writer, daemon=True).start()
     tools.verify2, tools.effort_locked = bool(args.verify2), bool(args.lock_effort)
     tools.effort_fixed = args.effort
-    model = detect_model(args.endpoint)
+    model = ("claude-" + args.brain + ("+搜尋" if args.brain_search else "")) if args.brain else detect_model(args.endpoint)
     tools.endpoint, tools.model = args.endpoint, model
     system = build_system(args.game, cat, plan_n)
     if live:

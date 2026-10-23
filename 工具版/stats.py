@@ -37,10 +37,15 @@ def main():
     ap.add_argument("--game", default="動物醫院")
     ap.add_argument("--date", default="")
     ap.add_argument("--since", default="", help="只算這個時刻之後（HH:MM）")
+    ap.add_argument("--file", default="", help="直接讀這個 jsonl（10/24 模型比較實驗：每個模型那一小時切出來的檔）")
     a = ap.parse_args()
     d = os.path.join(ROOT, "專案", a.game, "記憶", "工具版")
-    date = a.date or sorted(f for f in os.listdir(d) if re.fullmatch(r"\d{4}-\d\d-\d\d\.jsonl", f))[-1][:-6]   # 10/23：問Claude.jsonl 不算
-    recs = [json.loads(l) for l in open(os.path.join(d, date + ".jsonl"), encoding="utf-8")]
+    if a.file:
+        date = os.path.splitext(os.path.basename(a.file))[0]
+        recs = [json.loads(l) for l in open(a.file, encoding="utf-8") if l.strip()]
+    else:
+        date = a.date or sorted(f for f in os.listdir(d) if re.fullmatch(r"\d{4}-\d\d-\d\d\.jsonl", f))[-1][:-6]   # 10/23：問Claude.jsonl 不算
+        recs = [json.loads(l) for l in open(os.path.join(d, date + ".jsonl"), encoding="utf-8")]
     # 10/16 04:3x：「不符沒檢討」原本取最後一筆的程序累計值（重啟歸零、不管 --since）→ 逐筆算增量
     prev_miss = 0
     for r in recs:
