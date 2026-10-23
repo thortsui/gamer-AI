@@ -1720,8 +1720,20 @@ class Tools(ExtraTools):
             return "要寫 第一人稱 或 第三人稱"
         self.startup["人稱"] = v
         self._append("開工數值.md", f"人稱:{v}")
+        # 12:3x：兩種人稱上下全程不同（第一 240、第三 520）→ 照他回報的人稱換上下極限用的全程（像素）
+        note = ""
+        mode = "第一人稱" if "第一" in v else ("第三人稱" if "第三" in v else "")
+        try:
+            vr = (json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8")).get("垂直") or {}).get(f"全程_{mode}")
+        except Exception:  # noqa: BLE001
+            vr = None
+        if mode and vr:
+            self.vrange_px = int(vr)
+            note = f"（上下極限改用{mode}量到的全程 {vr} 像素：離極限 15% 以上、±45 度內）"
+        if self.person_hint and mode and not self.person_hint.startswith(mode):
+            note += f"（提醒：程式量到的證據是「{self.person_hint}」，跟你回報的不一樣）"
         print(f"   🧪 人稱回報：{v}｜開工數值：{self.startup_text()}")
-        return f"記下：{v}。開工數值現在：{self.startup_text()}"
+        return f"記下：{v}{note}。開工數值現在：{self.startup_text()}"
 
     def cal_loop(self, dx=""):
         """驗一圈：他自己算「轉 360 度要送多少 dx」填進來（不寫＝照目前刻度 360×每度dx），程式拖完比對起點畫面，
@@ -1887,7 +1899,14 @@ class Tools(ExtraTools):
                     if self.self_mask is not None else (self_note + "；看不到自己，改看兩側遠景；" if self_note else ""))
         v2_note += (f"垂直：每步 10 像素慢慢找上下極限（往上先多走了 {top_extra} 像素才頂到），全程 {full_dy} 像素，回到中間＝水平；"
                     if full_dy else "垂直：慢慢找極限沒找到（兩側遠景看不出上下移），")
-        dy_deg = round(full_dy / 178.0, 2) if dy_ok else self.dy_deg
+        # 12:3x 使用者「目前的更動繼續執行到完成」→ 待決 1 照建議 ①：第一人稱全程 240、第三人稱 520，「全程＝178 度」只對第三人稱成立
+        #   → 兩種人稱分開存全程（離極限 15%、回水平都用像素，不靠度數）；每度 dy 只用第三人稱的全程換（第一人稱不改每度 dy）
+        first = self.person_hint.startswith("第一人稱")
+        mode = "第一人稱" if first else ("第三人稱" if self.person_hint.startswith("第三人稱") else "")
+        dy_from_range = dy_ok and not first
+        dy_deg = round(full_dy / 178.0, 2) if dy_from_range else self.dy_deg
+        if dy_ok and first:
+            v2_note += f"第一人稱全程 {full_dy} 像素（跟第三人稱不同，只拿來當極限與回水平，不換每度 dy）；"
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
         note = v2_note
         old_dx, old_dy = self.dx_deg, self.dy_deg
@@ -1907,7 +1926,7 @@ class Tools(ExtraTools):
             note += r18
             if r18.endswith("不採用；"):
                 dx_deg = old_dx
-        if dy_ok:
+        if dy_from_range:
             r18 = self._rule18("垂直每度 dy", dy_deg, _v.get("量測每度dy"), old_dy, False)
             note += r18
             if r18.endswith("不採用；"):
@@ -1921,8 +1940,11 @@ class Tools(ExtraTools):
         now = datetime.now().strftime("%m/%d %H:%M")
         cal["水平"] = {"一圈dx": loop_dx or _h.get("一圈dx"), "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
                      "量測每度dx": round(loop_dx / 360.0, 2) if loop_dx else _h.get("量測每度dx")}
-        cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "每步 10 像素慢慢找上下極限（工具版 量刻度，10/23）", "時間": now,
-                     "量測每度dy": round(full_dy / 178.0, 2) if dy_ok else _v.get("量測每度dy")}
+        cal["垂直"] = {"全程dy": (full_dy if dy_from_range else _v.get("全程dy")), "每度dy": dy_deg,
+                     "方法": "每步 10 像素慢慢找上下極限（工具版 量刻度，10/23；每度 dy 只用第三人稱全程換）", "時間": now,
+                     "量測每度dy": round(full_dy / 178.0, 2) if dy_from_range else _v.get("量測每度dy"),
+                     "全程_第一人稱": (full_dy if (dy_ok and mode == "第一人稱") else _v.get("全程_第一人稱")),
+                     "全程_第三人稱": (full_dy if (dy_ok and mode == "第三人稱") else _v.get("全程_第三人稱"))}
         cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
