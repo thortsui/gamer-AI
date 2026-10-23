@@ -1842,18 +1842,21 @@ class Tools(ExtraTools):
         top_extra, full_dy, full2 = self._find_vlimit(-1)[0], None, None
         full_dy, steps1 = self._find_vlimit(+1)
         dy_ok = full_dy is not None and full_dy >= 100
-        at = "底"                                  # 現在鏡頭在哪一端
+        # 12:0x 使用者：「量測到極限之後記得要先切回水平再量測」→ 一路記住鏡頭離底端幾像素（pos），最後一律拉到全程一半＝水平才做下一項
+        #   （11:59 二次驗證從底往上 90 像素就誤判頂到，原本以為在頂、往下拉半程 → 其實拉到底，對著地板做後面的量測）
+        pos = 0                                    # 剛往下找到底＝0
         est = full_dy or int(178 * self.dy_deg)     # 找不到全程時用舊刻度估
         if self.verify2 and dy_ok:                # 二次驗證：從底再慢慢往上數到頂，全程再量一次
             full2, _ = self._find_vlimit(-1)
-            at = "頂"
+            pos = self._vl_moved                   # 往上真的動了多少（誤判停下也照實算）
             dy_ok = full2 is not None and abs(full_dy - full2) <= 0.10 * (full_dy + full2) / 2
             v2_note += (self._v2("量刻度 上下全程（10 像素慢慢找極限）", full_dy, full2 if full2 is not None else "量不出", dy_ok, "像素")
                         + ("（相差 10% 內，用平均）" if dy_ok else "（相差超過 10%，垂直這次不採用）") + "；")
             if dy_ok:
                 full_dy = est = int(round((full_dy + full2) / 2))
-        self._drag(0, (est // 2) if at == "頂" else -(est // 2))     # 從那一端拉回一半＝水平
+        self._drag(0, pos - est // 2)                # 正＝往下：從離底 pos 拉到離底 est/2＝水平
         time.sleep(0.3)
+        self._depth_log(種類="回水平", 離底像素=pos, 全程=est, 拉=pos - est // 2)
         self.pitch_acc = 0.0
         if dy_ok:
             self.vrange_px = full_dy
@@ -1995,6 +1998,7 @@ class Tools(ExtraTools):
         return r + f"｜水平儀（程式累計你送的 仰）：現在約 {lv}；歪了用 修水平 一次拉回"
 
     VSTEP = 10            # 11:5x 使用者：每次 10 像素慢慢動
+    _vl_moved = 0
     VSTILL = 0.006        # 兩側遠景上下位移 < 0.6% 畫面高＝這一步沒動
 
     def _find_vlimit(self, sign, max_px=2000):
@@ -2023,6 +2027,7 @@ class Tools(ExtraTools):
             prev = cur
         self._depth_log(種類="找上下極限", 方向=("上" if sign < 0 else "下"), 每步像素=self.VSTEP, 步數=steps, 有動像素=moved,
                         頂到=(still >= 4), 紋理太弱步數=blind)
+        self._vl_moved = moved                        # 沒頂到也要知道真的動了多少（回水平用）
         return (moved if still >= 4 else None), steps
 
     def _sweep_pitch(self, sign, max_steps, step=80):
