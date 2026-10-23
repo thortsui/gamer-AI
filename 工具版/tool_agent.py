@@ -587,6 +587,12 @@ class Tools(ExtraTools):
     #      按鍵全送進 Studio → 送任何輸入前先確認前景是遊戲視窗。使用者 60 秒內有動滑鼠鍵盤＝有人在用電腦，不搶前景、不按；
     #      60 秒都沒人動才把遊戲切回前景
     FG_IDLE = 60
+    # 10/23 11:2x：使用者開著 Chrome 視訊會議（「…的個人會議室」）只聽不動 66 秒 → 代理把 Roblox 切到前景搶走會議視窗。
+    #   前景是會議視窗就不搶，不管多久沒人動
+    NO_STEAL = re.compile(r"會議|meet|zoom|teams|webex|視訊|通話", re.I)
+
+    def _may_steal(self, title, idle):
+        return idle >= self.FG_IDLE and not self.NO_STEAL.search(str(title or ""))
 
     @staticmethod
     def _user_idle():
@@ -655,7 +661,7 @@ class Tools(ExtraTools):
         if ok:
             return
         idle = self._user_idle()
-        if idle >= self.FG_IDLE and self.win.activate():
+        if self._may_steal(title, idle) and self.win.activate():
             print(f"   ⚠ 遊戲不在前景（前景是「{title}」，{idle:.0f} 秒沒人動）→ 已切回遊戲")
             return
         raise RuntimeError(f"遊戲視窗不在前景（前景是「{title}」，{idle:.0f} 秒前有人動過滑鼠鍵盤），這一步沒按，免得按到別的程式；等一下再試")
@@ -839,6 +845,30 @@ class Tools(ExtraTools):
             if best is None or v < best:
                 best, best_s = v, s
         return best_s / W          # 景物往左移＝負（右轉鏡頭）
+
+    @staticmethod
+    def shift_y(a, b):
+        """兩張圖的垂直位移（b 相對 a），佔畫面高的比例（景物往下移＝正＝鏡頭往上抬）。只看左右兩側 1/3，避開中央的角色。"""
+        import numpy as np
+        if a is None or b is None:
+            return None
+        W, H = 240, 180
+        ga = np.asarray(a.convert("L").resize((W, H)), dtype=np.float32)
+        gb = np.asarray(b.convert("L").resize((W, H)), dtype=np.float32)
+        cols = np.r_[0:W // 3, 2 * W // 3:W]
+        ra, rb = ga[:, cols].mean(axis=1), gb[:, cols].mean(axis=1)
+        best, best_s = None, 0
+        for sft in range(-120, 121):
+            if sft >= 0:
+                x, y = ra[:H - sft], rb[sft:]
+            else:
+                x, y = ra[-sft:], rb[:H + sft]
+            if len(x) < 50:
+                continue
+            v = float(np.mean(np.abs(x - y)))
+            if best is None or v < best:
+                best, best_s = v, sft
+        return best_s / H
 
     @staticmethod
     def shift_x_moving(a, b):
@@ -1040,12 +1070,16 @@ class Tools(ExtraTools):
         res["一圈"] = "**回到原點**" in r1
         notes.append("水平：" + r1)
         # ② 垂直來回
+        up_room = self.PITCH_LIM - self.pitch_acc            # 10/23：上下 ±45 度內，往空間大的那邊、最多 30 度
+        sgn = 1 if up_room >= self.PITCH_LIM + self.pitch_acc else -1
+        amp = max(5.0, min(30.0, up_room if sgn > 0 else self.PITCH_LIM + self.pitch_acc))
+
         def updown():
             b = self.grab()
-            self._drag(0, -30 * self.dy_deg)
+            self._drag(0, -sgn * amp * self.dy_deg)
             time.sleep(0.3)
             mid = self.grab()
-            self._drag(0, 30 * self.dy_deg)
+            self._drag(0, sgn * amp * self.dy_deg)
             time.sleep(0.3)
             a = self.grab()
             return self.diff(b, mid), self.diff(b, a)
@@ -1057,7 +1091,7 @@ class Tools(ExtraTools):
             notes.append(self._v2("驗開工 上下", "✓" if res["上下"] else "✗", "✓" if ok2 else "✗", res["上下"] == ok2)
                          + f"（第二次抬頭變化 {m2:.0f}、回來差 {b2:.0f}）")
             res["上下"] = res["上下"] and ok2
-        notes.append(f"垂直：抬 30 度（dy {30 * self.dy_deg:.0f}）畫面變化 {moved:.0f}，再低 30 度回來跟起點差 {back:.0f}"
+        notes.append(f"垂直（上下限 ±{self.PITCH_LIM:.0f} 度內）：{'抬' if sgn > 0 else '低'} {amp:.0f} 度（dy {amp * self.dy_deg:.0f}）畫面變化 {moved:.0f}，再{'低' if sgn > 0 else '抬'} {amp:.0f} 度回來跟起點差 {back:.0f}"
                      + ("，回到原點" if res["上下"] else ("，抬頭時畫面沒變＝已頂到上限或刻度太小，先 仰(-20) 回到水平再驗" if moved < 8 else "，沒回到原點：每度 dy 可能不對，重 量刻度")))
         # ③ 深度來回（10/23：先轉到前方有空間的方向；從最短 0.15 秒走起，走出去畫面沒變夠才加長；驗完轉回原本方向）
         turned, how = self._face_open()
@@ -1688,19 +1722,35 @@ class Tools(ExtraTools):
         # 垂直：先往上掃到頂（畫面不再變），再往下掃到底，算全程
         # 04:09 量到全程 dy 1600（每度 8.99，前兩次 560／3.15）：掃到底時畫面還有別人在動、diff 降不到 1.5 → 掃滿 20 步。
         # 改成「連續兩步變化都很小」就算到底，而且全程最多 1000。
-        self._sweep_pitch(-1, 14)
-        full_dy = min(max(self._sweep_pitch(+1, 13), 80), 1000)
-        dy_ok = True
-        if self.verify2:                          # 10/18 二次驗證：從底再掃回頂，全程再量一次
-            full2 = min(max(self._sweep_pitch(-1, 13), 80), 1000)
-            dy_ok = abs(full_dy - full2) <= 0.15 * (full_dy + full2) / 2
-            v2_note += self._v2("量刻度 全程dy", full_dy, full2, dy_ok) + ("（相差 15% 內，用平均）" if dy_ok else "（相差超過 15%，垂直這次不採用）") + "；"
-            self._drag(0, full2 // 2)             # 在頂端 → 往下一半回到中間
-            full_dy = int(round((full_dy + full2) / 2))
-        else:
-            self._drag(0, -full_dy // 2)        # 在底端 → 往上一半回到中間
-        self.pitch_acc = 0.0
-        dy_deg = round(full_dy / 178.0, 2) if dy_ok else self.dy_deg
+        # 10/23 11:2x 使用者：「他上下抬頭低頭量測時也不要超過」（±45 度）→ 不再掃到頂／底；
+        #   在限制內往有空間的那邊轉 20 度（照目前刻度的 dy），量畫面上下位移、用針孔模型（垂直視角 70 度）換算實際轉了幾度，量完轉回來
+        def vmeasure():
+            sign = 1 if self.PITCH_LIM - self.pitch_acc >= 20 else -1          # 1＝往上抬
+            px = int(round(20 * self.dy_deg))
+            b0 = self.grab()
+            self._drag(0, -sign * px)
+            time.sleep(0.3)
+            b1 = self.grab()
+            self._drag(0, sign * px)
+            time.sleep(0.3)
+            sy = self.shift_y(b0, b1)
+            if sy is None or abs(sy) < 0.03:
+                return None, px
+            import math
+            deg = abs(math.degrees(math.atan(abs(sy) * 2 * math.tan(math.radians(self.V_FOV / 2)))))
+            return (px / deg if deg >= 3 else None), px
+        k1, px1 = vmeasure()
+        dy_ok = k1 is not None
+        full_dy = int(round((k1 or self.dy_deg) * 178))
+        if self.verify2:                          # 10/18 二次驗證：再量一次
+            k2, _ = vmeasure()
+            dy_ok = k1 is not None and k2 is not None and abs(k1 - k2) <= 0.15 * (k1 + k2) / 2
+            v2_note += (self._v2("量刻度 上下20度", f"{k1:.2f}" if k1 else "量不出", f"{k2:.2f}" if k2 else "量不出", dy_ok, "每度dy")
+                        + ("（相差 15% 內，用平均）" if dy_ok else "（量不出或相差超過 15%，垂直這次不採用）") + "；")
+            if dy_ok:
+                k1 = (k1 + k2) / 2
+        v2_note += f"垂直：在 ±{self.PITCH_LIM:.0f} 度內轉 20 度（dy {px1}）量畫面上下位移換算，不掃到頂／底；"
+        dy_deg = round(k1, 2) if dy_ok else self.dy_deg
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
         note = v2_note
         old_dx, old_dy = self.dx_deg, self.dy_deg
@@ -1843,46 +1893,29 @@ class Tools(ExtraTools):
         return moved
 
     def look_level(self):
-        """修水平（10/17 他叫了 3 次；19:0x 看地板卡近 50 分鐘還以為水平）：往下掃到底→量出原本歪幾度→往上拉 89 度回水平；
-        再往下掃一次驗證（二次驗證：第二次量應該接近 0 度）。"""
+        """修水平：10/23 使用者限制上下 ±45 度（量測也不能超過）→ 不再往下掃到底再拉 89 度；
+        照水平儀（程式累計你送的上下度數）反向拉回 0，拉之前、之後各拍一張量上下位移當驗證。"""
         if self.image_path or not self.live:
-            return "[dry-run] 會往下掃到底再往上拉 89 度回水平"
-        # 10/22 13:5x：第三人稱角色／別的玩家一直在動，「畫面不再變＝到底」永遠成立不了 → 掃了 dy 1620（全程才 ~567），
-        # 量出抬頭 199 度、修不好，他看天花板卡了 30 輪。改成：直接往下拖 185 度（鏡頭本來就會卡在最底）→ 往上拉 89 度；
-        # 量原本歪幾度／驗證的掃描上限 185 度，掃到上限＝畫面一直在變、量不出（不再報不可能的度數）
-        half = int(round(89 * self.dy_deg))
-        cap = int(185 * self.dy_deg)
-        steps = max(4, cap // 60 + 1)
-        down1 = self._sweep_pitch(+1, steps, 60)
-        if down1 < cap:                              # 掃描停了＝真的到底；沒停就直接補拖到底
-            self._drag(0, cap - down1)
-        else:
-            self._drag(0, cap)
-        time.sleep(0.25)
-        was = (down1 / self.dy_deg - 89) if down1 < cap - 60 else None   # 原本仰角（正＝抬頭）；掃到上限＝量不出
-        self._drag(0, -half)
-        time.sleep(0.25)
-        down2 = self._sweep_pitch(+1, steps, 60)    # 驗證：從修好的位置再掃到底，應該約 89 度
-        now = (down2 / self.dy_deg - 89) if down2 < cap - 60 else None
-        self._drag(0, cap)                           # 再拖到底、拉回水平（不管驗證量不量得出）
-        time.sleep(0.25)
-        self._drag(0, -half)
-        time.sleep(0.25)
+            return f"[dry-run] 會照水平儀反向拉 {-self.pitch_acc:+.0f} 度回水平"
+        was = self.pitch_acc
+        if abs(was) < 2:
+            self.level_meas = (datetime.now().strftime("%H:%M"), "約水平（水平儀本來就是 0）")
+            return "水平儀顯示已經約水平（累計 0 度），沒拉；畫面看起來歪就是刻度不準，量刻度 重量"
+        b0 = self.grab()
+        self._drag(0, int(round(was * self.dy_deg)))     # 抬頭 was 度 → 往下拉回
+        time.sleep(0.3)
+        b1 = self.grab()
         self.pitch_acc = 0.0
-        ok = now is not None and abs(now) <= 17      # 掃描一步 60 像素≈16 度，誤差在一步內算水平
-
-        def lv(v):
-            if v is None:
-                return "量不出（畫面一直在變：角色／別人在動）"
-            return "約水平" if abs(v) < 8 else f"{'抬頭' if v > 0 else '低頭'}約 {abs(v):.0f} 度"
-        self._append("刻度樣本.md", f"修水平：原本 {lv(was)}｜修完再量 {lv(now)}｜{'水平' if ok else '驗不出' if now is None else '沒修好'}")
-        tail = ("**已回水平**" if ok else
-                "已經拖到最底再往上拉 89 度＝照刻度應該是水平，但畫面一直在變、驗不出來；看畫面地平線在不在中間" if now is None else
-                "**沒修好**（每度 dy 可能不對，量刻度 重量）")
-        self.level_meas = (datetime.now().strftime("%H:%M"), lv(now))
-        return (f"修水平：原本{lv(was)} → 拖到最底（dy {cap}）再往上拉 dy {half}（89 度）；再量一次：{lv(now)} → " + tail
-                + "；" + self._v2("水平", lv(was), lv(now), ok) + "（第一次＝修之前、第二次＝修之後應約水平）"
-                + "。水平儀已歸零")
+        sy = self.shift_y(b0, b1)
+        import math
+        got = (math.degrees(math.atan(abs(sy) * 2 * math.tan(math.radians(self.V_FOV / 2)))) if sy is not None else None)
+        ok = got is not None and abs(got - abs(was)) <= max(6, 0.3 * abs(was))
+        lv = ("約水平" if ok else ("驗不出（畫面一直在變）" if got is None or got < 1 else f"拉了約 {got:.0f} 度、跟水平儀的 {abs(was):.0f} 度對不上"))
+        self.level_meas = (datetime.now().strftime("%H:%M"), lv)
+        self._append("刻度樣本.md", f"修水平（±45 版）：水平儀 {was:+.0f} 度 → 反向拉回｜實測轉了 {got if got is None else round(got)} 度｜{lv}")
+        return (f"修水平：水平儀原本{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度 → 反向拉 {abs(was):.0f} 度（dy {int(round(was * self.dy_deg)):+d}）；"
+                f"實測畫面上下移了約 {got:.0f} 度 → {lv}" if got is not None else
+                f"修水平：水平儀原本{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度 → 反向拉回；實測量不出")             + f"。上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制），不再掃到頂／底。水平儀已歸零"
 
     # ---- 視角移動到（10/18 16:5x 使用者）：給畫面上的點，程式算角度、一次轉過去讓它到正中央
     V_FOV = 70.0          # Roblox 預設垂直視角；10/18 刻度樣本：轉 10／20／30 度實測位移 6／12／19%，照這個針孔模型算 6.5／13／21%
@@ -3254,8 +3287,9 @@ def main():
             fg_ok, fg_title = tools.fg_state()
             if not fg_ok:
                 idle = tools._user_idle()
-                if idle < tools.FG_IDLE or not tools.win.activate():
-                    print(f"[{rnd}] 遊戲不在前景（前景是「{fg_title}」，{idle:.0f} 秒前有人動過），不按、等 10 秒")
+                if not tools._may_steal(fg_title, idle) or not tools.win.activate():
+                    why = "是會議視窗、不搶" if tools.NO_STEAL.search(str(fg_title or "")) else f"{idle:.0f} 秒前有人動過"
+                    print(f"[{rnd}] 遊戲不在前景（前景是「{fg_title}」，{why}），不按、等 10 秒")
                     time.sleep(10)
                     continue
                 print(f"   ⚠ 遊戲不在前景（前景是「{fg_title}」，{idle:.0f} 秒沒人動）→ 已切回遊戲")
