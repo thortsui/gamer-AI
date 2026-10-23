@@ -871,6 +871,22 @@ class Tools(ExtraTools):
         return best_s / H
 
     @staticmethod
+    def vshift_pc(a, b):
+        """12:0x：左右兩側各做一次二維相位相關（cv2.phaseCorrelate），回 [(上下位移比例, 可信度), …]。
+        比列平均（shift_y）穩：地板、牆面這種上下紋理少的畫面，列平均常量成 0 → 誤判頂到。"""
+        import cv2
+        import numpy as np
+        W, H = 240, 180
+        ga = np.asarray(a.convert("L").resize((W, H)), dtype=np.float32)
+        gb = np.asarray(b.convert("L").resize((W, H)), dtype=np.float32)
+        win = cv2.createHanningWindow((80, H), cv2.CV_32F)
+        out = []
+        for x0 in (0, 160):
+            (dx, dy), resp = cv2.phaseCorrelate(ga[:, x0:x0 + 80], gb[:, x0:x0 + 80], win)
+            out.append((dy / H, float(resp)))
+        return out
+
+    @staticmethod
     def shift_x_moving(a, b):
         """只拿轉頭前後有變的像素量水平位移（扣掉釘在畫面上的東西）；回傳 (比例, 用到的像素比例) 或 None。
         10/17 03:0x：他手上拿拍立得照片時照片蓋在畫面中央，整欄加總的 shift_x 被釘著的照片拉到 0%，
@@ -2010,13 +2026,12 @@ class Tools(ExtraTools):
             self._drag(0, sign * self.VSTEP)
             time.sleep(0.08)
             cur = self.grab()
-            sy = self.shift_y(prev, cur)
+            pcs = self.vshift_pc(prev, cur)
             steps += 1
-            # 12:0x 實測：從底往上數時對著地板（上下幾乎沒紋理）位移量成 0 → 90 像素就誤判頂到。兩側上下紋理太弱＝看不出來，不算「停了」
-            g = np.asarray(cur.convert("L").resize((240, 180)), dtype=np.float32)
-            prof = np.r_[g[:, :80].mean(axis=1), g[:, 160:].mean(axis=1)]
-            weak = float(np.std(np.diff(prof))) < 2.0             # 大廳截圖 6.2、純色 0；先抓 2.0，看實測再調
-            if sy is not None and abs(sy) < self.VSTILL and not weak:
+            # 12:0x 實測：列平均（shift_y）在地板／牆面常量成 0 → 誤判頂到（90、250 像素就停）。
+            #   改兩側各做二維相位相關：兩側都「可信度夠、上下位移 < VSTILL」才算這一步沒動；任一側可信度不夠＝看不出來，不算停
+            weak = any(r < 0.15 for _, r in pcs)
+            if not weak and all(abs(d) < self.VSTILL for d, _ in pcs):
                 still += 1
                 if still >= 4:
                     break
