@@ -92,6 +92,50 @@ def tail_rounds(n=12):
     return out[-n:][::-1]
 
 
+# 10/23 使用者：「給我他之前的任務的選項（寫入網站」
+# 遊戲任務：10/19～10/23 右上任務字（OCR）出現 ≥5 次的、合併 OCR 斷字後的正式名稱（雜字如「囝庫」「檢舉」不列）
+GAME_TASKS = ["蓋印表格", "拍照", "從房間 1 中的病人身上採集樣本", "從房間 2 中的病人身上採集樣本", "從房間 5 中的病人身上採集樣本",
+              "在電腦上註冊", "獲取徽章", "列印徽章", "檢查病人的情況", "跟隨病人到他的房間", "分析樣本", "緊急情況"]
+EXTRA = ["走到大廳正前方的配對踏板開始配對"]
+
+
+def task_options():
+    words = {}
+    days = sorted(f for f in os.listdir(MDIR) if re.fullmatch(r"\d{4}-\d\d-\d\d\.jsonl", f))[-5:]
+    for f in days:
+        for ln in open(os.path.join(MDIR, f), encoding="utf-8", errors="replace"):
+            if "右上字" not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                continue
+            txt = "".join(str(w[0]) for w in (r.get("右上字") or []) if isinstance(w, list) and w).replace(" ", "")
+            for g in GAME_TASKS:
+                key = g.replace(" ", "")
+                if key in txt or (len(key) > 7 and key[:-1] in txt) or ("採集樣本" in key and key[:7] in txt and "採集樣本" in txt):
+                    words[g] = words.get(g, 0) + 1
+    game = [{"任務": g, "次數": words.get(g, 0)} for g in GAME_TASKS]
+    game.sort(key=lambda x: -x["次數"])
+    small = {}
+    try:
+        for ln in open(os.path.join(MDIR, "小任務.md"), encoding="utf-8"):
+            m = re.search(r"開始[:：]([^｜]+)｜怎麼做[:：]([^｜]*)", ln)
+            if m:
+                n = m.group(1).strip()
+                small[n] = {"任務": n, "怎麼做": m.group(2).strip()[:60], "次數": small.get(n, {}).get("次數", 0) + 1}
+    except OSError:
+        pass
+    sent = []
+    for t in reversed(jload("派發任務.json", [])):
+        if t["任務"] not in sent:
+            sent.append(t["任務"])
+    return {"遊戲任務": game, "他設過的小任務": list(small.values())[::-1][:15], "你派過的": sent[:10] + [x for x in EXTRA if x not in sent]}
+
+
+_opt_cache = {"t": 0, "v": None}
+
+
 def state():
     live = jload("即時.json", {})
     try:
@@ -108,7 +152,13 @@ def state():
     sm = small.get("小任務") if isinstance(small, dict) else None
     return {"現在": datetime.now().strftime("%H:%M:%S"), "在跑": age < 20, "即時": live, "即時多久前": round(age, 1),
             "小任務": (sm or {}).get("名稱") if isinstance(sm, dict) else None,
-            "派發": jload("派發任務.json", []), "問答": qa[-10:][::-1], "輪": tail_rounds(), "停": stop}
+            "派發": jload("派發任務.json", []), "問答": qa[-10:][::-1], "輪": tail_rounds(), "停": stop, "選項": options()}
+
+
+def options():
+    if time.time() - _opt_cache["t"] > 60 or _opt_cache["v"] is None:      # 掃 5 天紀錄，一分鐘算一次就好
+        _opt_cache.update(t=time.time(), v=task_options())
+    return _opt_cache["v"]
 
 
 def save_tasks(tasks):
@@ -148,11 +198,14 @@ button{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--ac
 button.ghost{background:transparent;color:var(--acc);padding:3px 9px;font-size:13px}
 .task{display:flex;gap:6px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}.task span{flex:1}
 .done{text-decoration:line-through;color:var(--mute)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}.chip{font-size:13.5px;padding:5px 10px;border-radius:99px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.chip small{color:var(--mute);margin-left:4px}.grp{font-size:12.5px;color:var(--mute);margin-top:8px}
 </style></head><body>
 <header><span id="dot" class="dot"></span><h1>代理直播</h1><span id="clock" class="mute"></span></header>
 <main>
 <section class="card"><h2>派發任務給他</h2>
 <form id="f"><input id="t" type="text" placeholder="例：走到大廳正前方的配對踏板開始配對" maxlength="200"><button>派發</button></form>
+<details id="optbox"><summary>他之前的任務（點一下填進上面）</summary><div id="opts"></div></details>
 <div id="tasks"></div></section>
 <section class="card" id="now"><h2>正在想／正在做</h2><div id="nowbody" class="mute">讀取中…</div></section>
 <section id="rounds"></section>
@@ -178,6 +231,15 @@ function render(S){
     row.append(sp,el('span','mute',t.時間+' · '+t.狀態));
     if(t.狀態==='進行中'){const b1=el('button','ghost','完成');b1.onclick=()=>upd(t.id,'完成');const b2=el('button','ghost','取消');b2.onclick=()=>upd(t.id,'取消');row.append(b1,b2)}
     tb.append(row)});
+  // 之前的任務選項（只在第一次或內容變了才重畫，免得手指點到一半被換掉）
+  const O=S.選項||{},sig=JSON.stringify(O);
+  if(sig!==window._osig){window._osig=sig;const ob=$('#opts');ob.replaceChildren();
+    const grp=(title,items,fmt)=>{if(!items||!items.length)return;ob.append(el('div','grp',title));const w=el('div','chips');
+      items.forEach(it=>{const [txt,sub]=fmt(it);const b=el('button','chip',txt);if(sub){const sm=el('small',null,sub);b.append(sm)}
+        b.onclick=()=>{$('#t').value=txt;$('#t').focus()};w.append(b)});ob.append(w)};
+    grp('遊戲任務（右上任務字，近 5 天出現過的）',O.遊戲任務,it=>[it.任務,it.次數?'×'+it.次數:'']);
+    grp('他自己設過的小任務',O.他設過的小任務,it=>[it.任務,it.次數>1?'×'+it.次數:'']);
+    grp('你派過的／常用',O.你派過的,it=>[it,'']);}
   // 即時
   const L=S.即時||{},nb=$('#nowbody');nb.replaceChildren();nb.className='';
   if(!S.在跑){nb.append(el('div','mute','代理停著（即時檔 '+Math.round(S.即時多久前)+' 秒沒更新）'))}
