@@ -1070,23 +1070,37 @@ class Tools(ExtraTools):
         res["一圈"] = "**回到原點**" in r1
         notes.append("水平：" + r1)
         # ② 垂直來回
-        up_room = self.PITCH_LIM - self.pitch_acc            # 10/23：上下 ±45 度內，往空間大的那邊、最多 30 度
+        up_room = self.PITCH_LIM - self.pitch_acc            # 10/23：上下 ±45 度內，往空間大的那邊
         sgn = 1 if up_room >= self.PITCH_LIM + self.pitch_acc else -1
-        amp = max(5.0, min(30.0, up_room if sgn > 0 else self.PITCH_LIM + self.pitch_acc))
+        room = up_room if sgn > 0 else self.PITCH_LIM + self.pitch_acc
+        amp = 5.0                                            # 11:3x：從 5 度開始，畫面變化不夠才加大，最多 15 度
 
-        def updown():
+        def updown1(a_):
             b = self.grab()
-            self._drag(0, -sgn * amp * self.dy_deg)
+            self._drag(0, -sgn * a_ * self.dy_deg)
             time.sleep(0.3)
             mid = self.grab()
-            self._drag(0, sgn * amp * self.dy_deg)
+            self._drag(0, sgn * a_ * self.dy_deg)
             time.sleep(0.3)
             a = self.grab()
-            return self.diff(b, mid), self.diff(b, a)
+            mv, bk = self.diff(b, mid), self.diff(b, a)
+            self._depth_log(種類="驗開工 上下", 度數=a_, 方向=("抬" if sgn > 0 else "低"), 轉出去變化=round(mv, 1), 回來差=round(bk, 1),
+                            過=(mv >= 8 and bk < 10))
+            return mv, bk
+
+        def updown():
+            nonlocal amp
+            mv = bk = 0.0
+            for a_ in (5.0, 10.0, 15.0):
+                amp = min(a_, max(3.0, room))
+                mv, bk = updown1(amp)
+                if mv >= 8:
+                    break
+            return mv, bk
         moved, back = updown()
         res["上下"] = moved >= 8 and back < 10
         if self.verify2:
-            m2, b2 = updown()
+            m2, b2 = updown1(amp)
             ok2 = m2 >= 8 and b2 < 10
             notes.append(self._v2("驗開工 上下", "✓" if res["上下"] else "✗", "✓" if ok2 else "✗", res["上下"] == ok2)
                          + f"（第二次抬頭變化 {m2:.0f}、回來差 {b2:.0f}）")
@@ -1183,6 +1197,11 @@ class Tools(ExtraTools):
         except OSError:
             pass
 
+    # 11:3x 使用者：「測量移動時 要避開障礙物」→ 探一小步時三種都算擋：
+    #   ①兩側背景沒跟著動（貼牆／卡住）②走 0.15 秒中央就放大超過 NEAR_ZOOM 倍（前面很近有東西，再走會撞）
+    #   ③退回來跟起點差很多（後面有東西、退不回原位）
+    NEAR_ZOOM = 1.15
+
     def _blocked_ahead(self):
         b = self.grab()
         self._key("w", self.PROBE_T)
@@ -1190,18 +1209,24 @@ class Tools(ExtraTools):
         a = self.grab()
         self._key("s", self.PROBE_T)
         time.sleep(0.25)
+        c = self.grab()
         r = self._pc_pair(b, a) if (a is not None and b is not None) else None
-        blocked = r is None or r[1] < 6
+        z = self.zoom_factor(b, a)
+        out_d, back_d = self.diff(b, a), self.diff(b, c)
+        why = ("兩側背景沒動（貼牆／卡住）" if (r is None or r[1] < 6) else
+               f"前面很近有障礙物（走 {self.PROBE_T} 秒中央就放大 {z:.2f} 倍）" if (z and z >= self.NEAR_ZOOM) else
+               "後面有東西、退不回原位" if (out_d >= 8 and back_d > out_d * 0.9) else "")
         self._depth_log(種類="探前方", 秒=self.PROBE_T, 兩側背景變=(round(r[1], 1) if r else None),
-                        中央變=(round(r[0], 1) if r else None), 畫面變化=round(self.diff(b, a), 1), 被擋=blocked)
-        return blocked, (round(r[1], 1) if r else None)
+                        中央變=(round(r[0], 1) if r else None), 畫面變化=round(out_d, 1), 中央放大=z,
+                        退回差=round(back_d, 1), 被擋=bool(why), 原因=why)
+        return bool(why), (f"{why}" if why else f"兩側背景變 {round(r[1], 1) if r else None}")
 
     def _face_open(self):
         """→ (轉了幾度 或 None＝四面都擋, 說明)"""
         turned, tried = 0, []
         for _ in range(4):
             blocked, side = self._blocked_ahead()
-            tried.append(f"{turned} 度{'被擋' if blocked else '有空間'}（兩側背景變 {side}）")
+            tried.append(f"{turned} 度{'擋：' if blocked else '有空間：'}{side}")
             if not blocked:
                 return turned, ("" if turned == 0 else "前面是牆／被擋，" + "、".join(tried) + f" → 改朝 {turned} 度那邊量")
             self._drag(90 * self.dx_deg, 0)
@@ -1724,32 +1749,37 @@ class Tools(ExtraTools):
         # 改成「連續兩步變化都很小」就算到底，而且全程最多 1000。
         # 10/23 11:2x 使用者：「他上下抬頭低頭量測時也不要超過」（±45 度）→ 不再掃到頂／底；
         #   在限制內往有空間的那邊轉 20 度（照目前刻度的 dy），量畫面上下位移、用針孔模型（垂直視角 70 度）換算實際轉了幾度，量完轉回來
+        # 11:3x 使用者：「上下抬頭測量時 轉動幅度越小越好 必須改善」→ 從 5 度開始，量不出（位移 <2.5% 畫面高）才加到 8、12 度
         def vmeasure():
-            sign = 1 if self.PITCH_LIM - self.pitch_acc >= 20 else -1          # 1＝往上抬
-            px = int(round(20 * self.dy_deg))
-            b0 = self.grab()
-            self._drag(0, -sign * px)
-            time.sleep(0.3)
-            b1 = self.grab()
-            self._drag(0, sign * px)
-            time.sleep(0.3)
-            sy = self.shift_y(b0, b1)
-            if sy is None or abs(sy) < 0.03:
-                return None, px
             import math
-            deg = abs(math.degrees(math.atan(abs(sy) * 2 * math.tan(math.radians(self.V_FOV / 2)))))
-            return (px / deg if deg >= 3 else None), px
+            for want in (5, 8, 12):
+                sign = 1 if self.PITCH_LIM - self.pitch_acc >= want else -1          # 1＝往上抬
+                px = int(round(want * self.dy_deg))
+                b0 = self.grab()
+                self._drag(0, -sign * px)
+                time.sleep(0.3)
+                b1 = self.grab()
+                self._drag(0, sign * px)
+                time.sleep(0.3)
+                sy = self.shift_y(b0, b1)
+                deg = (math.degrees(math.atan(abs(sy) * 2 * math.tan(math.radians(self.V_FOV / 2)))) if sy is not None else None)
+                ok = sy is not None and abs(sy) >= 0.025 and deg >= 2
+                self._depth_log(種類="量刻度 上下", 照刻度度數=want, dy=px, 位移比例=(round(sy, 3) if sy is not None else None),
+                                實測度數=(round(deg, 1) if deg else None), 每度dy=(round(px / deg, 2) if ok else None), 量到=ok)
+                if ok:
+                    return px / deg, px
+            return None, px
         k1, px1 = vmeasure()
         dy_ok = k1 is not None
         full_dy = int(round((k1 or self.dy_deg) * 178))
         if self.verify2:                          # 10/18 二次驗證：再量一次
             k2, _ = vmeasure()
             dy_ok = k1 is not None and k2 is not None and abs(k1 - k2) <= 0.15 * (k1 + k2) / 2
-            v2_note += (self._v2("量刻度 上下20度", f"{k1:.2f}" if k1 else "量不出", f"{k2:.2f}" if k2 else "量不出", dy_ok, "每度dy")
+            v2_note += (self._v2("量刻度 上下小角度", f"{k1:.2f}" if k1 else "量不出", f"{k2:.2f}" if k2 else "量不出", dy_ok, "每度dy")
                         + ("（相差 15% 內，用平均）" if dy_ok else "（量不出或相差超過 15%，垂直這次不採用）") + "；")
             if dy_ok:
                 k1 = (k1 + k2) / 2
-        v2_note += f"垂直：在 ±{self.PITCH_LIM:.0f} 度內轉 20 度（dy {px1}）量畫面上下位移換算，不掃到頂／底；"
+        v2_note += f"垂直：在 ±{self.PITCH_LIM:.0f} 度內從 5 度轉起、量不出才加大（這次 dy {px1}）量畫面上下位移換算，不掃到頂／底；"
         dy_deg = round(k1, 2) if dy_ok else self.dy_deg
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
         note = v2_note
