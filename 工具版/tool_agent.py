@@ -1435,7 +1435,8 @@ class Tools(ExtraTools):
                 + f"① 畫面尺寸：{self.startup['畫面']}（{r1}）" + NL
                 + f"② 每度 dx：{self.dx_deg}；③ 每度 dy：{self.dy_deg}（{r2}）" + NL
                 + f"④ 深度比例：{self.startup.get('深度比例', '沒量到')}（{r3}）" + NL
-                + "⑤ 第幾人稱：你看現在的畫面回報——看得到自己背影＝第三人稱，畫面中央有準心＝第一人稱 → 送 回報人稱(第幾人稱)。" + NL
+                + "⑤ 第幾人稱：你看現在的畫面回報——看得到自己背影＝第三人稱，畫面中央有準心＝第一人稱 → 送 回報人稱(第幾人稱)。"
+                + (f"（程式量到的證據：{self.person_hint}）" if self.person_hint else "") + NL
                 + "⑥ 然後**必須** 驗開工：程式照這些數值轉一圈、上下來回、走退來回，確認全部回到原點；全過才算開工完成，之後才做別的")
 
     # ---- 10/19 10:2x 使用者：「他要記錄應該是第幾人稱，如果畫面是第三人稱就要放大鏡頭（中鍵），相反也一樣」
@@ -1855,8 +1856,14 @@ class Tools(ExtraTools):
         #   → 每步 10 像素慢慢往上，看兩側遠景有沒有跟著上下移（不用「畫面有沒有變」：別人在動畫面永遠在變）；連三步沒移＝頂到了。
         #     再每步 10 像素往下數到底＝上下全程幾像素；從底往上拉一半＝水平（不靠累計）。
         #     度數：全程當 178 度（大多數 3D 遊戲上下卡在約 ±89 度）換每度 dy；之後轉頭／量測都離兩端至少 15% 全程
+        self_note = self.find_self() if self.live and not self.image_path else ""
         top_extra, full_dy, full2 = self._find_vlimit(-1)[0], None, None
+        self._vl_track = []
         full_dy, steps1 = self._find_vlimit(+1)
+        if full_dy and self.self_mask is not None:  # 從頂往下掃的每一步：離底＝全程−從頂往下走了多少
+            self.self_table = [(max(0, full_dy - m), v) for m, v in self._vl_track if m <= full_dy]
+        self._person_verdict(getattr(self, "_vl_diffs", []))
+        self._vl_track = []
         dy_ok = full_dy is not None and full_dy >= 100
         # 12:0x 使用者：「量測到極限之後記得要先切回水平再量測」→ 一路記住鏡頭離底端幾像素（pos），最後一律拉到全程一半＝水平才做下一項
         #   （11:59 二次驗證從底往上 90 像素就誤判頂到，原本以為在頂、往下拉半程 → 其實拉到底，對著地板做後面的量測）
@@ -1876,6 +1883,8 @@ class Tools(ExtraTools):
         self.pitch_acc = 0.0
         if dy_ok:
             self.vrange_px = full_dy
+        v2_note += ((self_note + "；轉到底沒：看兩側遠景整片位移（遠景看不清才看自己那塊），自己的樣子每步記成對照表（" + (f"{len(self.self_table)} 步" if self.self_table else "沒記到") + "）；")
+                    if self.self_mask is not None else (self_note + "；看不到自己，改看兩側遠景；" if self_note else ""))
         v2_note += (f"垂直：每步 10 像素慢慢找上下極限（往上先多走了 {top_extra} 像素才頂到），全程 {full_dy} 像素，回到中間＝水平；"
                     if full_dy else "垂直：慢慢找極限沒找到（兩側遠景看不出上下移），")
         dy_deg = round(full_dy / 178.0, 2) if dy_ok else self.dy_deg
@@ -2017,21 +2026,168 @@ class Tools(ExtraTools):
     _vl_moved = 0
     VSTILL = 0.006        # 兩側遠景上下位移 < 0.6% 畫面高＝這一步沒動
 
+    # 12:1x 使用者：「有背景在動是因為 有其他玩家可能在畫面中移 所以必須要先找出你的角色長什麼樣子 以及只看鏡頭相對角色的角度」
+    #   ①找自己：鏡頭左右各轉一點點（每步 10 像素），背景整片滑動、自己的角色留在中央 → 中央「轉頭時幾乎不變」的像素＝自己（遮罩＋框），
+    #     不轉頭拍兩張量待機動作雜訊當門檻；存 長相/自己
+    #   ②找極限時只看自己那塊：鏡頭還在轉＝自己看起來的角度在變；頂到了＝不再變（別的玩家怎麼走都沒關係）
+    #   ③每一步記「離底幾像素 ↔ 自己的樣子」，修水平 可以拿現在的樣子對照，知道鏡頭相對角色的角度
+    self_mask = None            # 240×124 的 bool 遮罩
+    self_box = None             # (x0,y0,x1,y1) 0～1
+    self_noise = 0.0
+    self_table = []             # [(離底像素, 自己那塊的灰階向量)]
+    _vl_track = []
+    SG = (240, 124)
+
+    def _gray_small(self, im):
+        import numpy as np
+        return np.asarray(im.convert("L").resize(self.SG), dtype=np.float32)
+
+    def find_self(self):
+        import numpy as np
+        import cv2
+        if not self.live or self.image_path:
+            return "離線／dry-run 不能找自己"
+        W, H = self.SG
+        f0 = self.grab()
+        time.sleep(0.3)
+        f0b = self.grab()
+        g0, g0b = self._gray_small(f0), self._gray_small(f0b)
+        noise_map = np.abs(g0 - g0b)
+        changes, preds = [], []
+        for sign in (1, -1):                        # 右轉 2 步再轉回、左轉 2 步再轉回（每步 10 像素，總共約 ±8 度）
+            for _ in range(2):
+                self._drag(sign * self.VSTEP, 0)
+                time.sleep(0.12)
+                gi = self._gray_small(self.grab())
+                (sx, sy), _r = cv2.phaseCorrelate(g0, gi)           # 背景整片移了多少
+                M = np.float32([[1, 0, sx], [0, 1, sy]])
+                pred = cv2.warpAffine(g0, M, (W, H), borderMode=cv2.BORDER_REPLICATE)
+                changes.append(np.abs(gi - g0))
+                preds.append(np.abs(gi - pred))                     # 實際跟「當它是背景」的預測差多少（背景＝小；跟著鏡頭的＝大）
+            self._drag(-sign * 2 * self.VSTEP, 0)
+            time.sleep(0.15)
+        ch = np.mean(changes, axis=0)
+        pr = np.mean(preds, axis=0)
+        bg = float(np.median(ch))                   # 背景平均變多少
+        if bg < 4:
+            self._self_status = "看不出"
+            return f"轉頭時畫面幾乎沒變（背景變化 {bg:.1f}），找不到自己——可能被擋住或游標鎖住"
+        # 12:3x：「沒變」不夠——純色背景轉頭也不會變。要「當它是背景的預測跟實際差很多（不是跟背景走）、實際卻幾乎沒變」才算跟著鏡頭
+        cand = ((pr > 10) & (ch < pr * 0.35)).astype(np.uint8)
+        core = cand.copy()                           # 真的「留在原位」的核心像素（判斷是角色還是 UI 用，不含補起來的）
+        cand = cv2.morphologyEx(cand, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))      # 角色身體純色：邊緣算到了，中間補起來
+        cand[:, : int(W * 0.3)] = 0                  # 只看中央：兩邊、最上面是 HUD／天空
+        cand[:, int(W * 0.7):] = 0
+        cand[: int(H * 0.2), :] = 0
+        # 12:2x 模擬：角色身體多半是純色（加紋理條件會只剩輪廓、改挑到地板）→ 不看紋理；
+        wide = cv2.morphologyEx(cand, cv2.MORPH_OPEN, np.ones((1, int(W * 0.25)), np.uint8))   # 連續超過 1/4 畫面寬的橫條＝地板／墊子
+        cand[wide > 0] = 0
+        cand[:, : int(W * 0.3)] = 0                  # 只看中央：兩邊、最上面是 HUD／天空
+        cand[:, int(W * 0.7):] = 0
+        cand[: int(H * 0.2), :] = 0
+        cand = cv2.morphologyEx(cand, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        n, lab, stats, cent = cv2.connectedComponentsWithStats(cand)
+        best, bscore = None, 0
+        for i in range(1, n):
+            x, y, w, h, area = stats[i]
+            cx, cy = cent[i]
+            if not (x <= W * 0.55 and x + w >= W * 0.45):      # 第三人稱角色在畫面正中間那一欄
+                continue
+            score = area / (1 + abs(cx - W / 2) / W * 4)
+            if area >= 0.004 * W * H and score > bscore:
+                best, bscore = i, score
+        if best is None:
+            self.self_mask = None
+            self._self_status = "沒有"
+            return f"中央沒有「轉頭時留在原位」的一塊（背景變化 {bg:.1f}）＝看不到自己（可能第一人稱）"
+        m = lab == best
+        self.self_area = float(stats[best][4]) / (W * H)
+        self.self_core = m & (core > 0)
+        self._self_status = "有"
+        x, y, w, h, area = stats[best]
+        self.self_mask, self.self_box = m, (x / W, y / H, (x + w) / W, (y + h) / H)
+        self.self_noise = float(noise_map[m].mean())
+        try:
+            from PIL import ImageDraw
+            d = os.path.join(self.mdir, "長相", "自己")
+            os.makedirs(d, exist_ok=True)
+            big = f0.convert("RGB").resize((1024, int(1024 * f0.height / f0.width)))
+            bx = [int(v * s) for v, s in zip(self.self_box, (big.width, big.height, big.width, big.height))]
+            ts = datetime.now().strftime("%m%d_%H%M%S")
+            big.crop(bx).save(os.path.join(d, ts + "_近.png"))
+            mk = big.copy()
+            ImageDraw.Draw(mk).rectangle(bx, outline=(255, 0, 0), width=4)
+            mk.save(os.path.join(d, ts + "_框.png"))
+        except Exception:  # noqa: BLE001
+            pass
+        self._depth_log(種類="找自己", 背景變化=round(bg, 1), 自己框=[round(v, 2) for v in self.self_box],
+                        面積比=round(area / (W * H), 3), 待機雜訊=round(self.self_noise, 1))
+        return (f"找到自己：畫面 ({self.self_box[0]:.2f},{self.self_box[1]:.2f})～({self.self_box[2]:.2f},{self.self_box[3]:.2f})"
+                f"（轉頭時背景變 {bg:.0f}、這一塊幾乎不變；待機動作雜訊 {self.self_noise:.1f}），存成長相「自己」")
+
+    # 12:2x 使用者：「第三人稱時視角無論怎麼移動你的玩家都會在正中心 這個也要作為判斷的依據 因為第一人稱時你視角左右移動是不可能有一個東西持續停留在畫面中間除了UI」
+    #   → 轉頭時中央有一塊一直留著 ＋ 上下看時它的樣子會變（看的角度變了）＝自己的角色＝第三人稱；
+    #     留著但上下看也完全不變＝UI（準心、面板）＝第一人稱；中央沒有留著的＝第一人稱。只給證據，人稱還是他自己回報
+    person_hint = ""
+    self_core = None
+    self_area = 0.0
+    SELF_MIN_AREA = 0.012       # 第三人稱角色在大廳截圖約佔 4～5%；準心之類的 UI 通常只有一小點
+    _core_diffs = []
+    _self_status = ""
+    _vl_diffs = []
+
+    def _person_verdict(self, self_diffs):
+        if self._self_status in ("", "看不出"):
+            self.person_hint = "看不出（轉頭時畫面幾乎沒變，可能被擋住或游標鎖住）" if self._self_status else ""
+        elif self.self_mask is None:
+            self.person_hint = "第一人稱（轉頭時中央沒有一塊一直留著——第一人稱轉頭除了 UI 不會有東西停在中間）"
+        elif self.self_area < self.SELF_MIN_AREA:
+            # 12:3x：用「上下看會不會變」分 UI／角色，模擬 12 次只對 7 次（角色上下看時在畫面上幾乎不動）→ 改看大小
+            self.person_hint = (f"第一人稱（中央只有一小塊一直留著（佔畫面 {self.self_area * 100:.1f}%），像準心之類的 UI，不像角色）")
+            self.self_mask, self.self_table = None, []
+        else:
+            self.person_hint = (f"第三人稱（轉頭時中央有一塊一直在正中間、佔畫面 {self.self_area * 100:.1f}%＝自己的角色）")
+        self._depth_log(種類="人稱證據", 結論=self.person_hint, 面積比=round(self.self_area, 3),
+                        核心上下看變化=(self._core_diffs[:60] if self._core_diffs else None))
+        return self.person_hint
+
+    def _self_vec(self, im):
+        return self._gray_small(im)[self.self_mask] if self.self_mask is not None else None
+
+    @staticmethod
+    def _self_diff(a, b):
+        """自己那塊的變化：去掉變最多的 20%（別的玩家剛好走過去擋到一部分）再平均"""
+        import numpy as np
+        d = np.sort(np.abs(a - b))
+        return float(d[: max(1, int(len(d) * 0.8))].mean())
+
     def _find_vlimit(self, sign, max_px=2000):
         """每步 VSTEP 像素往上（sign -1）／往下（+1）慢慢拖，直到連三步兩側遠景都沒上下移＝頂到 → (真的有動的像素, 步數)。"""
         import numpy as np
         prev = self.grab()
         moved, still, steps, blind = 0, 0, 0, 0
+        use_self = self.self_mask is not None
+        thr = max(2.5, self.self_noise * 2 + 1.0)
+        diffs, cdiffs = [], []
         while moved + still * self.VSTEP < max_px:
             self._drag(0, sign * self.VSTEP)
-            time.sleep(0.08)
+            time.sleep(0.12)
             cur = self.grab()
-            pcs = self.vshift_pc(prev, cur)
             steps += 1
-            # 12:0x 實測：列平均（shift_y）在地板／牆面常量成 0 → 誤判頂到（90、250 像素就停）。
-            #   改兩側各做二維相位相關：兩側都「可信度夠、上下位移 < VSTILL」才算這一步沒動；任一側可信度不夠＝看不出來，不算停
+            pcs = self.vshift_pc(prev, cur)          # 主判斷：兩側遠景整片有沒有上下移（相位相關量整片位移，別的玩家只占一小塊）
             weak = any(r < 0.15 for _, r in pcs)
-            if not weak and all(abs(d) < self.VSTILL for d, _ in pcs):
+            is_still = not weak and all(abs(d) < self.VSTILL for d, _ in pcs)
+            if use_self:                            # 12:1x：自己那塊——每一步記樣子（對照表）；遠景看不清時改用它判斷
+                if sign > 0:
+                    self._vl_track.append((moved + self.VSTEP * (still + 1), self._self_vec(cur)))
+                dv = self._self_diff(self._self_vec(cur), self._self_vec(prev))
+                diffs.append(round(dv, 1))
+                if self.self_core is not None and self.self_core.any():
+                    gc, gp = self._gray_small(cur), self._gray_small(prev)
+                    cdiffs.append(round(float(np.abs(gc[self.self_core] - gp[self.self_core]).mean()), 1))
+                if weak:
+                    is_still, weak = dv < thr, False
+            if is_still:
                 still += 1
                 if still >= 4:
                     break
@@ -2041,8 +2197,12 @@ class Tools(ExtraTools):
                 still = 0
             prev = cur
         self._depth_log(種類="找上下極限", 方向=("上" if sign < 0 else "下"), 每步像素=self.VSTEP, 步數=steps, 有動像素=moved,
-                        頂到=(still >= 4), 紋理太弱步數=blind)
+                        頂到=(still >= 4), 紋理太弱步數=blind, 看=("兩側遠景＋自己" if use_self else "兩側遠景"),
+                        門檻=(round(thr, 1) if use_self else None), 自己變化=(diffs[:80] if use_self else None))
         self._vl_moved = moved                        # 沒頂到也要知道真的動了多少（回水平用）
+        self._vl_diffs = diffs if (use_self and sign > 0) else getattr(self, "_vl_diffs", [])
+        if use_self and sign > 0:
+            self._core_diffs = cdiffs
         return (moved if still >= 4 else None), steps
 
     def _sweep_pitch(self, sign, max_steps, step=80):
@@ -2068,6 +2228,29 @@ class Tools(ExtraTools):
         if self.image_path or not self.live:
             return f"[dry-run] 會照水平儀反向拉 {-self.pitch_acc:+.0f} 度回水平"
         was = self.pitch_acc
+        if self.self_table and self.self_mask is not None and self.vrange_px:
+            # 12:1x：拿現在自己的樣子對 量刻度 時記的表 → 鏡頭相對角色現在在離底幾像素 → 跟水平（全程一半）差多少
+            import numpy as np
+            cur = self._self_vec(self.grab())
+            errs = [(self._self_diff(cur, v), pos) for pos, v in self.self_table]
+            err, pos = min(errs)
+            if err < max(6.0, self.self_noise * 3):
+                was = (self.vrange_px / 2 - pos) / self.dy_deg * -1    # 離底比一半多＝抬頭（正）
+                if abs(was) >= 2:                   # 照自己的樣子拉回，再對一次表驗證
+                    self._drag(0, int(round(was * self.dy_deg)))
+                    time.sleep(0.3)
+                    cur2 = self._self_vec(self.grab())
+                    err2, pos2 = min((self._self_diff(cur2, v), p2) for p2, v in self.self_table)
+                    now = (pos2 - self.vrange_px / 2) / self.dy_deg
+                    ok = abs(now) <= 4
+                    lv = "約水平" if ok else f"{'抬頭' if now > 0 else '低頭'}約 {abs(now):.0f} 度"
+                    self.pitch_acc = 0.0
+                    self.level_meas = (datetime.now().strftime("%H:%M"), lv + "（看自己）")
+                    self._depth_log(種類="修水平 看自己 驗證", 拉回後離底像素=pos2, 推算角度=round(now, 1), 對照誤差=round(err2, 1))
+                    return (f"修水平（看自己的樣子對照 量刻度 記的表）：鏡頭相對角色原本{'抬頭' if was > 0 else '低頭'}約 {abs(was):.0f} 度"
+                            f"（水平儀以為 {self.pitch_acc:+.0f} 度）→ 拉回 → 再對一次表：{lv}。上下只能 ±{self.PITCH_LIM:.0f} 度，不掃到頂／底。水平儀已歸零")
+                self._depth_log(種類="修水平 看自己", 離底像素=pos, 全程=self.vrange_px, 推算角度=round(was, 1), 對照誤差=round(err, 1),
+                                水平儀原本=round(self.pitch_acc, 1))
         if abs(was) < 2:
             self.level_meas = (datetime.now().strftime("%H:%M"), "約水平（水平儀本來就是 0）")
             return "水平儀顯示已經約水平（累計 0 度），沒拉；畫面看起來歪就是刻度不準，量刻度 重量"
