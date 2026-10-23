@@ -1820,7 +1820,7 @@ class Tools(ExtraTools):
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
         self._append("大任務.md", f"量刻度：一圈 dx {loop_dx}（每度 {dx_deg}）、全程 dy {full_dy}（每度 {dy_deg}）")
-        return (note + f"量好了：水平一圈 dx {loop_dx or '（不採用）'} → 每度 dx {dx_deg}；垂直全程 dy {full_dy} → 每度 dy {dy_deg}；"
+        return (note + f"量好了：水平一圈 dx {loop_dx or '（不採用）'} → 每度 dx {dx_deg}；垂直 " + (f"量到每度 dy {dy_deg}" if dy_ok else f"這次沒量準、沿用每度 dy {dy_deg}") + "；"
                 f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
                 "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
