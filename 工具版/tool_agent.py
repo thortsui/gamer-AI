@@ -1187,6 +1187,7 @@ class Tools(ExtraTools):
     #     量的時候只走 0.4 秒、量完退回原地，最後轉回原本的方向
     #   11:0x 使用者：「盡量移動最少距離 拿作為實驗數據」→ 從最短 0.15 秒開始，量不出才加長（0.25→0.4）；
     #   每一次探／量都記進 記憶/工具版/深度量測.jsonl（走幾秒、哪個方向、兩側背景變化、畫面變化、放大、成不成）
+    last_locks = []
     DEPTH_TS = (0.15, 0.25, 0.4)
     RATIO_TS = (0.4,)             # 11:4x 使用者「0.4秒試試看」：量比例 固定走 0.4 秒（0.15／0.25 中央放大幾乎都量不出）；驗開工 深度 照舊由短到長
     DEPTH_T = 0.4                 # 驗開工 深度、說明文字用（實際量比例 由短到長）
@@ -1243,6 +1244,61 @@ class Tools(ExtraTools):
             self._drag(-turned * self.dx_deg, 0)
             time.sleep(0.4)
 
+    # 11:5x 使用者：「量測距離 能用 鎖定一個物品 並且朝他稍微移動 就能知道相對移動速度了（相似三角能算出來）」
+    #   原本比畫面中央放大（第三人稱中央是自己角色 → 一半以上量不出）→ 鎖定中央以外的 1～3 個東西，走 t 秒後用多倍數圖塊比對找它變大幾倍 r：
+    #   相似三角：還要走 t×r/(r−1) 秒才會碰到它；描述畫面有給它「約幾個身高遠」→ 走路速度＝身高 ÷ 秒
+    def _pick_patches(self, im, n=3):
+        import numpy as np
+        W, H = 480, 248
+        g = np.asarray(im.convert("L").resize((W, H)), dtype=np.float32)
+        pw, ph = 48, 32
+        out = []
+        if self.desc_items and time.time() - getattr(self, "desc_at", 0) < 120:      # 先用描述畫面剛認出、中央以外的東西
+            for it in self.desc_items:
+                x, y = it["x"], it["y"]
+                if 0.12 <= x <= 0.88 and 0.1 <= y <= 0.8 and not (0.38 <= x <= 0.62 and y >= 0.35) and "自己" not in it["名稱"]:
+                    out.append({"名稱": it["名稱"], "x": x, "y": y, "身高": it.get("身高")})
+        gy, gx = np.gradient(g)
+        en = np.abs(gx) + np.abs(gy)
+        cands = []
+        for yy in range(int(0.1 * H), int(0.8 * H) - ph, 8):
+            for xx in range(int(0.1 * W), int(0.9 * W) - pw, 8):
+                cx, cy = (xx + pw / 2) / W, (yy + ph / 2) / H
+                if 0.35 <= cx <= 0.65 and cy >= 0.3:                # 中央下方是自己的角色
+                    continue
+                cands.append((float(en[yy:yy + ph, xx:xx + pw].mean()), cx, cy))
+        cands.sort(reverse=True)
+        for e, cx, cy in cands:
+            if len(out) >= n:
+                break
+            if all(abs(cx - o["x"]) > 0.12 or abs(cy - o["y"]) > 0.12 for o in out):
+                out.append({"名稱": "自動挑的紋理塊", "x": cx, "y": cy, "身高": None})
+        return out[:n], g
+
+    def _patch_zoom(self, before, after, t):
+        """→ [{名稱, r, 相似度, 秒到, 身高, 速度}]（只留找得到、有放大的）"""
+        import numpy as np
+        pats, g0 = self._pick_patches(before)
+        W, H = 480, 248
+        g1 = np.asarray(after.convert("L").resize((W, H)), dtype=np.float32)
+        pw, ph = 48, 32
+        res = []
+        for p in pats:
+            x0, y0 = int(p["x"] * W - pw / 2), int(p["y"] * H - ph / 2)
+            if x0 < 0 or y0 < 0 or x0 + pw > W or y0 + ph > H:
+                continue
+            tpl = g0[y0:y0 + ph, x0:x0 + pw]
+            if tpl.std() < 6:
+                continue
+            f = self._trk_find(g1, tpl, near=(p["x"], p["y"]), r=0.2, scales=tuple(x / 50 for x in range(50, 81)))
+            if not f or f[2] < 0.7 or f[3] <= 1.01:
+                continue
+            r = f[3]
+            sec = t * r / (r - 1)
+            res.append({"名稱": p["名稱"], "r": round(r, 2), "相似度": round(f[2], 2), "秒到": round(sec, 2),
+                        "身高": p["身高"], "速度": (round(p["身高"] / sec, 2) if p["身高"] else None)})
+        return res
+
     def _depth_try(self, t, tag):
         before = self.grab()
         self._key("w", t)
@@ -1251,16 +1307,22 @@ class Tools(ExtraTools):
         self._key("s", t)
         time.sleep(0.3)
         back = self.grab()
-        k = self.zoom_factor(before, after)
+        locks = self._patch_zoom(before, after, t) if (before is not None and after is not None) else []
+        if locks:                                           # 鎖定的東西放大倍數取中位數
+            rs = sorted(x["r"] for x in locks)
+            k = rs[len(rs) // 2]
+        else:
+            k = self.zoom_factor(before, after)             # 鎖不到才退回比畫面中央
         d = self.diff(before, after)
         k1 = round(k ** (1 / t), 2) if k else None
+        self.last_locks = locks
         # 11:4x 使用者：「0.4秒試試看 但是絕對要在範圍內」→ 走出去兩側背景要有動（沒卡住）、退回來要回到原位（比走出去那點更近起點），不然不算
         r = self._pc_pair(before, after) if (before is not None and after is not None) else None
         back_d = self.diff(before, back)
         in_range = (r is not None and r[1] >= 6) and back_d < d * 0.8
         ok = k is not None and k > 1.01 and d >= 4 and in_range
         self._depth_log(種類=tag, 秒=t, 畫面變化=round(d, 1), 兩側背景變=(round(r[1], 1) if r else None), 退回差=round(back_d, 1),
-                        在範圍內=in_range, 放大=k, 換算1秒=k1, 量到=ok)
+                        在範圍內=in_range, 放大=k, 換算1秒=k1, 量到=ok, 方法=("鎖定物品" if locks else "畫面中央"), 鎖定=locks)
         if not in_range:
             print(f"   ⚠ 量比例 {t} 秒：{'走的時候卡住' if not (r and r[1] >= 6) else '退回來沒回到原位'}，這次不算")
         return d, (k1 if ok else None), t
@@ -1323,7 +1385,17 @@ class Tools(ExtraTools):
         cal["深度"] = {"走1秒放大倍數": k, "方法": f"中央區放大比對（工具版 量比例；走 {used} 秒量、量完退回，換算成 1 秒）", "時間": datetime.now().strftime("%m/%d %H:%M")}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
-        return f"深度比例：換算成走 1 秒畫面中央放大 {k:.1f} 倍（走 {used} 秒量、量完退回原地；畫面變化 {d:.0f}）{v2}。之後估「前方幾步」用這個換算"
+        lk = self.last_locks
+        lk_txt = ""
+        if lk:
+            lk_txt = "；鎖定 " + "、".join(
+                f"{x['名稱']}（放大 {x['r']} 倍＝還要走約 {x['秒到']} 秒" + (f"，描述說約 {x['身高']:g} 個身高遠 → 速度約 {x['速度']} 身高/秒" if x.get("速度") else "") + "）"
+                for x in lk)
+            sp = [x["速度"] for x in lk if x.get("速度")]
+            if sp:
+                self.startup["速度"] = f"約 {sorted(sp)[len(sp) // 2]} 身高/秒"
+        return (f"深度比例：換算成走 1 秒放大 {k:.1f} 倍（{'鎖定物品' if lk else '畫面中央'}，走 {used} 秒量、量完退回原地；畫面變化 {d:.0f}）{v2}{lk_txt}。"
+                "相似三角：東西放大 r 倍＝還要走 秒數×r/(r−1) 秒才到；之後估「前方幾步」用這個換算")
 
     def cal_startup(self):
         """開工測試：逐項量、逐項回報（使用者要求的幾個數值）。"""
