@@ -1291,14 +1291,16 @@ class Tools(ExtraTools):
         if self.verify2:                           # 10/18 二次驗證：接著再量第二次（10/23 起用第一次量到的最短秒數、量完退回）
             d2, k2, _ = self._depth_once(used if k else None)
             good = lambda dd, kk: kk is not None and kk > 1.05 and dd >= 15
-            ok = good(d, k) and good(d2, k2) and abs(k - k2) <= 0.15
+            # 11:4x：k 是「換算成走 1 秒」（原始放大的 1/秒 次方），短距離的小差距換算後會被放大（0.4 秒 1.36／1.44 → 2.16／2.49）
+            #   → 比原始放大（走 used 秒量到的），差 0.1 內算一致
+            ok = good(d, k) and good(d2, k2) and abs(k ** used - k2 ** used) <= 0.10
             v2 = self._v2("量比例 走1秒放大", f"{k:.2f}" if k else "量不出", f"{k2:.2f}" if k2 else "量不出", ok, "倍") + f"（走 {used} 秒量、換算成 1 秒）"
             if not ok:
                 if k is None and k2 is None and d >= 15 and d2 >= 15:
                     # 10/18 04:4x：兩次都「有走、但放大量不出」他只看到「換空曠處再量」→ 17 輪叫了 12 次量比例。這種是量法本身的限制，要講清楚
                     return (v2 + f"（兩次都有走出去：畫面變化 {d:.0f}、{d2:.0f}，但中央放大量不出來" + self._center_note(d) + "——"
                             "換地方重量也一樣量不出；校準檔沒改）。深度比例目前量不準，估距離用 找東西／估距 的框高")
-                return (v2 + "（兩次差超過 0.15 倍或有一次量不出＝這次不算，校準檔沒改）；"
+                return (v2 + "（兩次原始放大差超過 0.1 倍或有一次量不出＝這次不算，校準檔沒改）；"
                         f"第一次畫面變化 {d:.0f}、第二次 {d2:.0f}。")
             k = round((k + k2) / 2, 2)
             v2 = "；" + v2 + "（用平均）"
