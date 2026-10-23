@@ -1999,25 +1999,31 @@ class Tools(ExtraTools):
 
     def _find_vlimit(self, sign, max_px=2000):
         """每步 VSTEP 像素往上（sign -1）／往下（+1）慢慢拖，直到連三步兩側遠景都沒上下移＝頂到 → (真的有動的像素, 步數)。"""
+        import numpy as np
         prev = self.grab()
-        moved, still, steps = 0, 0, 0
+        moved, still, steps, blind = 0, 0, 0, 0
         while moved + still * self.VSTEP < max_px:
             self._drag(0, sign * self.VSTEP)
             time.sleep(0.08)
             cur = self.grab()
             sy = self.shift_y(prev, cur)
             steps += 1
-            if sy is not None and abs(sy) < self.VSTILL:
+            # 12:0x 實測：從底往上數時對著地板（上下幾乎沒紋理）位移量成 0 → 90 像素就誤判頂到。兩側上下紋理太弱＝看不出來，不算「停了」
+            g = np.asarray(cur.convert("L").resize((240, 180)), dtype=np.float32)
+            prof = np.r_[g[:, :80].mean(axis=1), g[:, 160:].mean(axis=1)]
+            weak = float(np.std(np.diff(prof))) < 2.0             # 大廳截圖 6.2、純色 0；先抓 2.0，看實測再調
+            if sy is not None and abs(sy) < self.VSTILL and not weak:
                 still += 1
-                if still >= 3:
+                if still >= 4:
                     break
             else:
+                blind += int(weak)
                 moved += self.VSTEP * (still + 1)       # 中間短暫沒量到也算有動
                 still = 0
             prev = cur
         self._depth_log(種類="找上下極限", 方向=("上" if sign < 0 else "下"), 每步像素=self.VSTEP, 步數=steps, 有動像素=moved,
-                        頂到=(still >= 3))
-        return (moved if still >= 3 else None), steps
+                        頂到=(still >= 4), 紋理太弱步數=blind)
+        return (moved if still >= 4 else None), steps
 
     def _sweep_pitch(self, sign, max_steps, step=80):
         """上下掃到頂／底（連續兩步畫面幾乎不變＝頂到了），回傳掃了多少 dy。sign -1＝往上、+1＝往下。"""
