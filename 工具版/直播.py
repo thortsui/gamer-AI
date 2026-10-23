@@ -198,6 +198,7 @@ button{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--ac
 button.ghost{background:transparent;color:var(--acc);padding:3px 9px;font-size:13px}
 .task{display:flex;gap:6px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}.task span{flex:1}
 .done{text-decoration:line-through;color:var(--mute)}
+.gauges{display:flex;gap:16px;justify-content:space-around;flex-wrap:wrap}.c{text-align:center}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}.chip{font-size:13.5px;padding:5px 10px;border-radius:99px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 .chip small{color:var(--mute);margin-left:4px}.grp{font-size:12.5px;color:var(--mute);margin-top:8px}
 </style></head><body>
@@ -207,6 +208,10 @@ button.ghost{background:transparent;color:var(--acc);padding:3px 9px;font-size:1
 <form id="f"><input id="t" type="text" placeholder="例：走到大廳正前方的配對踏板開始配對" maxlength="200"><button>派發</button></form>
 <details id="optbox"><summary>他之前的任務（點一下填進上面）</summary><div id="opts"></div></details>
 <div id="tasks"></div></section>
+<section class="card"><h2>水平儀（他以為自己面對的方向，照他送的轉頭／仰的度數累計）</h2>
+<div class="gauges"><div><svg id="att" viewBox="-60 -60 120 120" width="150" height="150" aria-label="上下"></svg><div id="attTxt" class="big c"></div></div>
+<div><svg id="cmp" viewBox="-60 -60 120 120" width="150" height="150" aria-label="左右"></svg><div id="cmpTxt" class="big c"></div></div></div>
+<div id="lvNote" class="mute"></div></section>
 <section class="card" id="now"><h2>正在想／正在做</h2><div id="nowbody" class="mute">讀取中…</div></section>
 <section id="rounds"></section>
 <section class="card"><h2>問 Claude</h2><div id="qa" class="mute">（沒有）</div></section>
@@ -240,6 +245,27 @@ function render(S){
     grp('遊戲任務（右上任務字，近 5 天出現過的）',O.遊戲任務,it=>[it.任務,it.次數?'×'+it.次數:'']);
     grp('他自己設過的小任務',O.他設過的小任務,it=>[it.任務,it.次數>1?'×'+it.次數:'']);
     grp('你派過的／常用',O.你派過的,it=>[it,'']);}
+  // 水平儀
+  const V=(S.即時||{}).視角;
+  if(V){const p=Math.max(-89,Math.min(89,V.上下||0)),y=V.左右||0,off=Math.max(-55,Math.min(55,p*1.1));
+    const sky=getComputedStyle(document.body).getPropertyValue('--acc');
+    $('#att').innerHTML='<defs><clipPath id="cc"><circle r="56"/></clipPath></defs><g clip-path="url(#cc)">'
+      +'<rect x="-60" y="-200" width="120" height="'+(200+off)+'" fill="#6fa8dc"/><rect x="-60" y="'+off+'" width="120" height="200" fill="#a0784f"/>'
+      +[-60,-30,30,60].map(d=>{const yy=off-d*1.1;return Math.abs(yy)<56?'<line x1="-12" x2="12" y1="'+yy+'" y2="'+yy+'" stroke="#fff" stroke-width="1"/><text x="16" y="'+(yy+3)+'" font-size="8" fill="#fff">'+(d>0?'+':'')+d+'</text>':''}).join('')
+      +[45,-45].map(d=>{const yy=off-d*1.1;return Math.abs(yy)<56?'<line x1="-40" x2="40" y1="'+yy+'" y2="'+yy+'" stroke="#e5484d" stroke-width="1.5" stroke-dasharray="3 2"/>':''}).join('')
+      +'<line x1="-60" x2="60" y1="'+off+'" y2="'+off+'" stroke="#fff" stroke-width="1.5"/></g>'
+      +'<circle r="56" fill="none" stroke="currentColor" stroke-width="2"/><path d="M-28 0H-8M8 0H28M0 -3V3" stroke="#ffd400" stroke-width="3"/>';
+    $('#att').style.color='var(--ink)';
+    $('#attTxt').textContent=Math.abs(p)<3?'水平':(p>0?'抬頭 ':'低頭 ')+Math.abs(p).toFixed(0)+'°';
+    const ticks=[0,90,180,270].map(d=>{const r=d*Math.PI/180;return '<text x="'+(Math.sin(r)*46)+'" y="'+(-Math.cos(r)*46+3)+'" font-size="9" text-anchor="middle" fill="currentColor">'+(d===0?'0':d===90?'右90':d===180?'後':'左90')+'</text>'}).join('');
+    const yr=y*Math.PI/180;
+    $('#cmp').innerHTML='<circle r="56" fill="none" stroke="currentColor" stroke-width="2"/>'+ticks
+      +'<line x1="0" y1="0" x2="'+(Math.sin(yr)*36)+'" y2="'+(-Math.cos(yr)*36)+'" stroke="#e5484d" stroke-width="4" stroke-linecap="round"/><circle r="4" fill="currentColor"/>';
+    $('#cmp').style.color='var(--ink)';
+    $('#cmpTxt').textContent=Math.abs(y)<3?'正前方（開工方向）':(y>0?'向右 ':'向左 ')+Math.abs(y).toFixed(0)+'°';
+    $('#lvNote').textContent='左右以 '+(V.左右從||'?')+' 開工測試時面對的方向為 0°；上下 修水平 時歸零。'+(V.修水平量到?'最近一次 修水平 實際量到（'+V.修水平量到[0]+'）：'+V.修水平量到[1]:'今天這次還沒 修水平 過。')
+      +'（這是照他送出的度數算的「他以為的方向」，不是遊戲回報的真實角度；紅虛線＝上下 ±45° 限制）';
+  } else {$('#lvNote').textContent='代理沒在跑或還沒開工測試'}
   // 即時
   const L=S.即時||{},nb=$('#nowbody');nb.replaceChildren();nb.className='';
   if(!S.在跑){nb.append(el('div','mute','代理停著（即時檔 '+Math.round(S.即時多久前)+' 秒沒更新）'))}

@@ -356,6 +356,11 @@ class Tools(ExtraTools):
         self._ocr = None
         self._eyes = None
         self.pitch_acc = 0.0            # 水平儀：仰 累計的度數（正＝抬頭）；修水平／水平歸零／量刻度 歸零
+        # 10/23 使用者：「網站上製作一個水平儀 上面標注著他覺得自己目前面對的角度（包含是否低頭等）」
+        #   左右：每次拖曳都照他的刻度換成度數累計（正＝右轉），開工測試時歸零＝「開工那時面對的方向」；上下用 pitch_acc
+        self.yaw_acc = 0.0
+        self.yaw_zero = ""
+        self.level_meas = None          # 最近一次 修水平 量到的（時間, 結果）
         self.verify2 = False            # 10/18 使用者：「量測都要二次驗證」（--verify2）
         self.effort_locked = False      # 10/18 使用者：「這次挑戰都用高思考」（--lock-effort）
 
@@ -801,6 +806,9 @@ class Tools(ExtraTools):
             pydirectinput.mouseUp(button="right")
             pydirectinput.moveTo(cx, cy)
             time.sleep(0.08)
+        if self.dx_deg:
+            y = self.yaw_acc + dx / self.dx_deg
+            self.yaw_acc = (y + 180) % 360 - 180
 
     # ---- 實測（2026-10-15 使用者：他要能確保工具出來的結果跟他腦中的一致 → 每次轉視角都量畫面實際位移）
     @staticmethod
@@ -1015,6 +1023,13 @@ class Tools(ExtraTools):
                 f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜{v_txt}｜量於 {s.get('時間', '?')}")
 
     def cal_verify(self):
+        y0 = self.yaw_acc
+        try:
+            return self._cal_verify()
+        finally:
+            self.yaw_acc = y0
+
+    def _cal_verify(self):
         """驗開工：開場必做（2026-10-15 11:2x 使用者：「這個是他開場必須做的事情，確認他所有的測量都是正確的」）。
         水平：照目前刻度轉 360 度回不回原點；垂直：抬 30 再低 30 回不回原點；深度：走 1 秒再退 1 秒回不回原點。"""
         if self.image_path or not self.live:
@@ -1243,6 +1258,7 @@ class Tools(ExtraTools):
         """開工測試：逐項量、逐項回報（使用者要求的幾個數值）。"""
         if self.image_path or not self.live:
             return "離線／dry-run 不能開工測試"
+        self.yaw_acc, self.yaw_zero = 0.0, datetime.now().strftime("%H:%M")
         im = self.grab()
         r1 = self.cal_screen()
         self.startup["畫面"] = f"{im.width}×{im.height}" if im is not None else "?"
@@ -1647,6 +1663,13 @@ class Tools(ExtraTools):
                 f"｜來源 記憶/視角校準.json｜轉 90 度＝dx {90 * self.dx_deg:.0f}、抬頭 30 度＝dy {30 * self.dy_deg:.0f}")
 
     def cal_scale(self):
+        y0 = self.yaw_acc
+        try:
+            return self._cal_scale()
+        finally:
+            self.yaw_acc = y0
+
+    def _cal_scale(self):
         """程式帶他量：水平一圈（轉到畫面回起點）→ 每度 dx；垂直掃到頂、掃到底 → 每度 dy。寫進 視角校準.json。"""
         if self.image_path or not self.live:
             return "離線／dry-run 不能量刻度"
@@ -1777,14 +1800,27 @@ class Tools(ExtraTools):
         # （底層 _drag 自己會把超過 220 像素的拖曳拆成小段，但總量照他的數字）
         return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 180, 30)
 
+    # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
+    PITCH_LIM = 45.0
+
+    def _pitch_room(self, d):
+        """想轉 d 度（正＝抬頭）→ 限制內實際能轉幾度"""
+        return max(-self.PITCH_LIM, min(self.PITCH_LIM, self.pitch_acc + d)) - self.pitch_acc
+
     def look_pitch(self, 度=""):
         d = num(度, None)
         if d is None:
             return "仰 要給度數：正＝抬頭、負＝低頭，例如 仰(-20)"
-        d = max(-60, min(60, d))
+        want = max(-60, min(60, d))
+        d = self._pitch_room(want)
+        lim_note = ""
+        if abs(d - want) >= 1:
+            lim_note = (f"｜上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制）：你要{'抬' if want > 0 else '低'} {abs(want):.0f} 度，"
+                        f"現在已經{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度，只轉了 {abs(d):.0f} 度")
         if abs(d) < 3:
-            return "度數太小（<3 度）沒意義"
-        r = self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15)
+            return (f"上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制），現在已經{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度，"
+                    f"再往{'上' if want > 0 else '下'}就超過了，這次沒轉" if abs(want) >= 3 else "度數太小（<3 度）沒意義")
+        r = self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15) + lim_note
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + d))
         lv = ("水平" if abs(self.pitch_acc) < 3 else f"{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度")
         return r + f"｜水平儀（程式累計你送的 仰）：現在約 {lv}；歪了用 修水平 一次拉回"
@@ -1843,6 +1879,7 @@ class Tools(ExtraTools):
         tail = ("**已回水平**" if ok else
                 "已經拖到最底再往上拉 89 度＝照刻度應該是水平，但畫面一直在變、驗不出來；看畫面地平線在不在中間" if now is None else
                 "**沒修好**（每度 dy 可能不對，量刻度 重量）")
+        self.level_meas = (datetime.now().strftime("%H:%M"), lv(now))
         return (f"修水平：原本{lv(was)} → 拖到最底（dy {cap}）再往上拉 dy {half}（89 度）；再量一次：{lv(now)} → " + tail
                 + "；" + self._v2("水平", lv(was), lv(now), ok) + "（第一次＝修之前、第二次＝修之後應約水平）"
                 + "。水平儀已歸零")
@@ -1916,7 +1953,9 @@ class Tools(ExtraTools):
         box = (max(0, cx - pw // 2), max(0, cy - ph // 2), min(SW, cx + pw // 2), min(SH, cy + ph // 2))
         patch = small.crop(box)
         yaw, pitch = self._angles_to(fx, fy, W, H)
-        pitch = max(-60.0, min(60.0, pitch))
+        pitch0 = max(-60.0, min(60.0, pitch))
+        pitch = self._pitch_room(pitch0)                  # 10/23：上下只能 ±45 度
+        lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度）" if abs(pitch - pitch0) >= 1 else "")
         self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
         after = self._settled()
@@ -1930,7 +1969,7 @@ class Tools(ExtraTools):
                 # 10/18 21:56：中央、上方都拖不動（整張畫面沒變）又補轉 → 直接回報，不補轉
                 return (f"視角移動到：算好要轉 左右 {yaw:+.0f}、上下 {pitch:+.0f} 度，但從畫面中央、上方拖兩次畫面都沒變——"
                         "鏡頭現在轉不動（可能有面板／選單擋住滑鼠，或游標被鎖）；沒有補轉。先 關掉 面板或看看畫面上有什麼擋著")
-        out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"]
+        out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}" + lim_note]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
         pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and self.diff(before, after) >= 8) else None
@@ -1971,6 +2010,7 @@ class Tools(ExtraTools):
             out.append(f"轉完找目標：在 ({loc1[0]:.2f},{loc1[1]:.2f})（相似度 {loc1[2]:.2f}）")
             if abs(loc1[0] - 0.5) > 0.04 or abs(loc1[1] - 0.5) > 0.06:      # 偏了補一次
                 y2, p2 = self._angles_to(loc1[0], loc1[1], W, H)
+                p2 = self._pitch_room(p2)
                 self._drag(y2 * self.dx_deg, -p2 * self.dy_deg)
                 self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + p2))
                 after = self._settled()
@@ -3141,7 +3181,9 @@ def main():
                             "思考強度": st.get("effort", ""),
                             "推理": "".join(st.get("reason") or [])[-6000:] if LIVE["階段"] == "想" else "",
                             "輸出": "".join(st.get("text") or [])[-3000:] if LIVE["階段"] == "想" else "",
-                            "做": [{k: v for k, v in x.items()} for x in LIVE["做"]]}
+                            "做": [{k: v for k, v in x.items()} for x in LIVE["做"]],
+                            "視角": {"左右": round(tools.yaw_acc, 1), "上下": round(tools.pitch_acc, 1), "左右從": tools.yaw_zero,
+                                     "修水平量到": tools.level_meas, "每度dx": tools.dx_deg, "每度dy": tools.dy_deg}}
                     tmp = path + ".tmp"
                     with open(tmp, "w", encoding="utf-8") as f:
                         json.dump(snap, f, ensure_ascii=False, default=str)
