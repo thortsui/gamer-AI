@@ -2253,15 +2253,21 @@ class Tools(ExtraTools):
         # 17:4x 實測：水平儀（累計）會跟真的鏡頭差很多——開著 Roblox 選單時拖了不會轉但照樣累計、轉到極限停了也照樣累計
         #   → 他看著天花板、水平儀卻說低頭 30～45 度，修水平 照錯的累計拉、越修越歪。
         #   改用使用者教的方法：每步 10 像素慢慢往下拖到停（底端極限），再往上拉這個人稱全程的一半＝真的水平，不靠累計
-        if self.vrange_px:
-            down, _ = self._find_vlimit(+1)
-            self._drag(0, -(self.vrange_px // 2))
+        # 18:1x 實測：他在醫院裡（第一人稱，全程 240）卻回報第三人稱 → 用了第三人稱全程 520 的一半 260 往上拉 → 拉過頭看天花板。
+        #   → 全程不靠回報、當場量：慢慢往下到底 → 慢慢往上數到頂＝這次的全程 → 往下拉一半
+        if True:
+            self._find_vlimit(+1)
+            down_px = self._vl_moved
+            top, _ = self._find_vlimit(-1)
+            full = top if top else (self.vrange_px or int(178 * self.dy_deg))
+            self._drag(0, full // 2)
             time.sleep(0.3)
             self.pitch_acc = 0.0
-            lv = "回到水平（從底端拉回全程一半）" if down is not None else "往下沒找到底（畫面看不出停），照全程一半拉回，可能不準"
+            lv = (f"回到水平（當場量到全程 {full} 像素，從頂端往下拉一半）" if top else
+                  f"往上沒找到頂（畫面看不出停），照記的全程 {full} 的一半拉，可能不準")
             self.level_meas = (datetime.now().strftime("%H:%M"), lv)
-            self._depth_log(種類="修水平 找底", 往下像素=self._vl_moved, 頂到=down is not None, 全程=self.vrange_px, 水平儀原本=round(was, 1))
-            return (f"修水平：每步 10 像素慢慢往下拖到停（往下動了 {self._vl_moved} 像素才到底）→ 往上拉全程一半 {self.vrange_px // 2} 像素＝{lv}。"
+            self._depth_log(種類="修水平 找底再找頂", 往下像素=down_px, 往上全程=top, 用的全程=full, 水平儀原本=round(was, 1))
+            return (f"修水平：每步 10 像素慢慢往下到底（往下動了 {down_px} 像素）→ 再慢慢往上數到頂 → 往下拉一半＝{lv}。"
                     f"水平儀原本以為{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度（累計會跟真的差：開選單時拖、轉到極限都還在算），已歸零")
         if self.self_table and self.self_mask is not None and self.vrange_px:
             # 12:1x：拿現在自己的樣子對 量刻度 時記的表 → 鏡頭相對角色現在在離底幾像素 → 跟水平（全程一半）差多少
