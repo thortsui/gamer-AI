@@ -28,7 +28,8 @@ START = os.path.join(OUT, "_起點")
 STOP = os.path.join(ROOT, "stop.txt")
 ARGS = ["--game", "動物醫院", "--live", "--rounds", "5000", "--deadline", "600", "--max-tokens", "8000",
         "--effort", "慢想", "--lock-effort", "--verify2", "--steps", "2", "--no-small-update"]   # 跟本地 10/24 挑戰同一組
-RUNS = [("haiku", False, "1_haiku"), ("sonnet", False, "2_sonnet"), ("sonnet", True, "3_sonnet搜尋")]
+# 10/24 04:1x 使用者「從早上8:00開始執行 第三次就使用原生的Claude 不要洗掉 試試看」→ 第三個改 sonnet 原生（同一個 session、原本 system＋原生工具）
+RUNS = [("haiku", "", "1_haiku"), ("sonnet", "", "2_sonnet"), ("sonnet", "--brain-native", "3_sonnet原生")]
 ENV = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
 TEXT = (".md", ".json", ".jsonl", ".txt", ".log")
 SKIP = ("stdout.log", "stderr.log", "claude大腦.jsonl")
@@ -165,7 +166,7 @@ def run_one(model, search, label, minutes):
         log(f"{label} 已跑過，跳過")
         return
     restore()
-    cmd = [sys.executable, "-u", os.path.join(HERE, "tool_agent.py")] + ARGS + ["--brain", model] + (["--brain-search"] if search else [])
+    cmd = [sys.executable, "-u", os.path.join(HERE, "tool_agent.py")] + ARGS + ["--brain", model] + ([search] if search else [])
     log(f"{label} 開始：{' '.join(cmd[3:])}")
     t0 = time.time()
     with open(os.path.join(TV, "stdout.log"), "w", encoding="utf-8") as so, \
@@ -198,8 +199,8 @@ def report(minutes):
     open(os.path.join(OUT, "結果.md"), "w", encoding="utf-8").write(
         f"# 模型比較實驗（10/24，各 {minutes:g} 分鐘）\n\n"
         "三個模型都從同一份記憶（本地模型收工時）開始，同一組參數（慢想鎖定、二次驗證、兩步、時限 600、max_tokens 8000、"
-        "--no-small-update），同樣的 system、面板、截圖、103 個工具；每次叫大腦都是全新的 `claude -p`（不帶上一輪對話，跟本地一樣）。"
-        "搜尋版多了 WebSearch／WebFetch。遊戲現場（在大廳或局內、別的玩家）沒辦法還原，每個模型開場的畫面不同。\n\n"
+        "--no-small-update），同樣的 system、面板、截圖、103 個工具；1、2 每次叫大腦都是全新的 `claude -p`（不帶上一輪對話，跟本地一樣）。"
+        "3 是原生 Claude：保留 Claude Code 原本的 system（遊戲 system 接在後面）、原生工具（自動允許搜尋／看網頁／讀檔）、整小時同一個 session 不洗掉。遊戲現場（在大廳或局內、別的玩家）沒辦法還原，每個模型開場的畫面不同。\n\n"
         + "\n".join(rows))
     log("結果.md 寫好")
 
@@ -232,7 +233,7 @@ def main():
     if a.test:
         return
     subprocess.run(["git", "add", "-A", OUT], cwd=ROOT)
-    subprocess.run(["git", "commit", "-qm", "10/24 模型比較實驗結果（haiku／sonnet／sonnet 搜尋 各一小時）\n\n"
+    subprocess.run(["git", "commit", "-qm", "10/24 模型比較實驗結果（haiku／sonnet／sonnet 原生 各一小時）\n\n"
                     "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"
                     "Claude-Session: https://claude.ai/code/session_01L3jYTqqjiukHgtLXxRHTLT"], cwd=ROOT)
     subprocess.run(["git", "push", "-q"], cwd=ROOT)

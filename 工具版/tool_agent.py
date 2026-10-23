@@ -3587,12 +3587,15 @@ def main():
     # 10/24 使用者：模型比較實驗（haiku／sonnet／sonnet 自由搜尋 各一小時，其他一模一樣）→ claude_brain.py
     ap.add_argument("--brain", default="", help="空＝本地 8888；haiku／sonnet＝每次叫大腦開一個新的 claude -p")
     ap.add_argument("--brain-search", action="store_true", help="--brain 時多給 WebSearch／WebFetch")
+    ap.add_argument("--brain-native", action="store_true",
+                    help="10/24 使用者「原生的Claude 不要洗掉」：保留 Claude Code 原本 system＋原生工具、整段同一個 session")
     args = ap.parse_args()
     if args.brain:
         import claude_brain
         claude_brain.setup(args.brain, args.brain_search,
                            os.path.join(ROOT, "專案", args.game, "記憶", "工具版", "claude大腦.jsonl"),
-                           args.brain + ("+搜尋" if args.brain_search else ""))
+                           args.brain + ("+原生" if args.brain_native else "+搜尋" if args.brain_search else ""),
+                           native=args.brain_native)
     global NO_SMALL_UPDATE
     NO_SMALL_UPDATE = args.no_small_update
     plan_n = max(0, min(5, args.steps)) or (3 if args.plan3 else 0)
@@ -3629,7 +3632,7 @@ def main():
         threading.Thread(target=_live_writer, daemon=True).start()
     tools.verify2, tools.effort_locked = bool(args.verify2), bool(args.lock_effort)
     tools.effort_fixed = args.effort
-    model = ("claude-" + args.brain + ("+搜尋" if args.brain_search else "")) if args.brain else detect_model(args.endpoint)
+    model = ("claude-" + args.brain + ("+原生" if args.brain_native else "+搜尋" if args.brain_search else "")) if args.brain else detect_model(args.endpoint)
     tools.endpoint, tools.model = args.endpoint, model
     system = build_system(args.game, cat, plan_n)
     if live:

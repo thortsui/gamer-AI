@@ -8,6 +8,9 @@
 - 思考強度照 --effort 對應：快思推理 low、中想 medium、慢想 xhigh（跟本地 THINK_MODES 同一檔）。
 - max_tokens 用 CLAUDE_CODE_MAX_OUTPUT_TOKENS 給；時限＝deadline 到了就殺掉當沒回（跟本地一樣算頂時限）。
 - 搜尋版：多給 WebSearch／WebFetch 兩個工具（自動允許），其他一樣。
+- 原生版（10/24 04:1x 使用者「第三次就使用原生的Claude 不要洗掉 試試看」）：不換掉 Claude Code 自己的 system，遊戲的 system
+  接在後面（--append-system-prompt-file）；整段同一個 session（--resume，前面每一輪都記得，不洗掉）；工具用它原生那一套，
+  自動允許 WebSearch／WebFetch／Read／Glob／Grep，其他（改檔、跑指令）在 -p 沒人批准會被擋。
 - 每次呼叫另記一行到 記憶/工具版/claude大腦.jsonl：模型、秒數、API 秒數、token、費用、搜尋次數與搜尋字。
 """
 import base64
@@ -18,12 +21,12 @@ import tempfile
 import time
 
 EFFORT = {"反射": "low", "快思": "low", "快思推理": "low", "中想": "medium", "慢想": "xhigh"}
-CFG = {"model": "", "search": False, "log": "", "label": ""}
+CFG = {"model": "", "search": False, "log": "", "label": "", "native": False, "session": "", "cost_total": 0.0}
 CWD = tempfile.mkdtemp(prefix="claude_brain_")          # 空資料夾：不讀任何 CLAUDE.md
 
 
-def setup(model, search, log_path, label):
-    CFG.update(model=model, search=bool(search), log=log_path, label=label)
+def setup(model, search, log_path, label, native=False):
+    CFG.update(model=model, search=bool(search), log=log_path, label=label, native=bool(native))
     import play_agent
     play_agent.stream_json = stream_json
 
@@ -59,16 +62,23 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
     with open(sp, "w", encoding="utf-8") as f:
         f.write(system_text)
     cmd = ["claude", "-p", "--model", CFG["model"], "--input-format", "stream-json", "--output-format", "stream-json",
-           "--verbose", "--system-prompt-file", sp, "--no-session-persistence", "--setting-sources", "",
-           "--strict-mcp-config", "--effort", EFFORT.get(effort, "medium")]
-    if CFG["search"]:
+           "--verbose", "--setting-sources", "", "--strict-mcp-config", "--effort", EFFORT.get(effort, "medium")]
+    if CFG["native"]:
+        cmd += ["--append-system-prompt-file", sp, "--allowedTools", "WebSearch", "WebFetch", "Read", "Glob", "Grep",
+                "--max-turns", "12"] + (["--resume", CFG["session"]] if CFG["session"] else [])
+    else:
+        cmd += ["--system-prompt-file", sp, "--no-session-persistence"]
+    if CFG["native"]:
+        pass
+    elif CFG["search"]:
         cmd += ["--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch", "WebFetch", "--max-turns", "12"]
     else:
         cmd += ["--tools", "", "--max-turns", "1"]
     env = dict(os.environ, CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(int(max_tokens)))
     msg = {"type": "user", "message": {"role": "user", "content": _blocks(content)}}
     t0 = time.time()
-    rec = {"時間": time.strftime("%H:%M:%S"), "實驗": CFG["label"], "模型": CFG["model"], "思考": EFFORT.get(effort, "medium")}
+    rec = {"時間": time.strftime("%H:%M:%S"), "實驗": CFG["label"], "模型": CFG["model"], "思考": EFFORT.get(effort, "medium"),
+           "session": CFG["session"]}
     raw, trunc, ttft, usage, thinking, searches = "", False, None, None, [], []
     try:
         p = subprocess.run(cmd, input=json.dumps(msg, ensure_ascii=False) + "\n", capture_output=True, text=True,
@@ -87,10 +97,15 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
                     elif b.get("type") == "text" and ttft is None:
                         ttft = time.time() - t0
             elif o.get("type") == "result":
+                if CFG["native"] and o.get("session_id"):
+                    CFG["session"] = o["session_id"]
                 raw = o.get("result") or ""
                 usage = o.get("usage")
                 trunc = o.get("subtype") not in ("success", None) or (o.get("stop_reason") == "max_tokens")
-                rec.update(API秒=round((o.get("duration_api_ms") or 0) / 1000, 1), 費用=o.get("total_cost_usd"),
+                cost = o.get("total_cost_usd") or 0
+                if CFG["native"]:                      # 同一個 session 回的是累計費用 → 記這次增加的
+                    cost, CFG["cost_total"] = max(0.0, cost - CFG["cost_total"]), cost
+                rec.update(API秒=round((o.get("duration_api_ms") or 0) / 1000, 1), 費用=round(cost, 6),
                            結果=o.get("subtype"), 輪數=o.get("num_turns"))
         if not raw and p.returncode:
             rec["錯誤"] = (p.stderr or p.stdout)[-400:]
