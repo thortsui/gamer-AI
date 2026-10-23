@@ -244,12 +244,15 @@ class ExtraTools:
                 im = self.grab()
                 f = self._look_find(name, im) if im is not None else None
                 if f:
-                    self.look_how = f"{name} 在 ({f['x']:.2f},{f['y']:.2f})，{f['法']}"
+                    self.look_how = f"{name} 在 ({f['x']:.2f},{f['y']:.2f})，{f['法']}" + self.look_alias_note
+                    self.look_alias_note = ""
                     return f["x"], f["y"], name
                 return f"畫面上用照片找不到「{name}」（記了 {len(self._look_files(name))} 張）；轉頭看看，或先 描述畫面"
+        known = [n for n in self._look_names() if n != "自己"]
+        known_txt = ("；記過的長相有：" + "、".join(known) + "（用這些名字）") if known else ""
         if not self.desc_items:
-            return "還沒有描述畫面給的點、也沒有記過它的長相：先叫 描述畫面，再用 編號／名稱；或直接給座標，例：走過去(0.72,0.55)"
-        return "描述畫面的點裡沒有「" + q + "」；有：" + "、".join(f"[{i['編號']}]{i['名稱']}" for i in self.desc_items)
+            return f"還沒有描述畫面給的點、也沒有記過「{q}」的長相" + known_txt + "：先叫 描述畫面，再用 編號／名稱；或直接給座標，例：走過去(0.72,0.55)"
+        return "描述畫面的點裡沒有「" + q + "」；有：" + "、".join(f"[{i['編號']}]{i['名稱']}" for i in self.desc_items) + known_txt
 
     # ---------------- 長相照片（20:xx 使用者：「他需要可以對東西進行截圖後，直接訓練他自己去對這個東西更認識——
     # 例如他要找電腦，就用腦中之前截到的電腦照片直接去尋找，這樣會更快」）
@@ -278,6 +281,8 @@ class ExtraTools:
         except OSError:
             return []
 
+    look_alias_note = ""
+
     def _look_names(self):
         try:
             return sorted(n for n in os.listdir(self._look_dir()) if self._look_files(n))
@@ -286,7 +291,18 @@ class ExtraTools:
 
     def _look_name(self, q):
         names = self._look_names()
-        return next((n for n in names if n == q), None) or next((n for n in names if q in n or n in q), None)
+        hit = next((n for n in names if n == q), None) or next((n for n in names if q in n or n in q), None)
+        if hit or not q:
+            return hit
+        # 10/23 16:44：他叫 走過去(發光藍踏板)，記的長相叫「配對踏板」→ 對不上就放棄了。
+        #   兩個名字有 2 個字以上相同的一段、而且只對得上一個長相 → 當成那個（回傳會說）
+        def common(a, b):
+            return max((k for k in range(2, min(len(a), len(b)) + 1) for i in range(len(a) - k + 1) if a[i:i + k] in b), default=0)
+        cands = [n for n in names if n != "自己" and common(q, n) >= 2]
+        if len(cands) == 1:
+            self.look_alias_note = f"（你寫的「{q}」當成記過的長相「{cands[0]}」）"
+            return cands[0]
+        return None
 
     def _look_ask(self, files, im, name=""):
         """照片＋現在的畫面給大腦（不思考、只回一行）→ ((x,y) 或 None, 秒)；只有 1 張照片時加名字（實驗 89%→95%）"""
