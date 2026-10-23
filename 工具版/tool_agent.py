@@ -1070,9 +1070,10 @@ class Tools(ExtraTools):
         res["一圈"] = "**回到原點**" in r1
         notes.append("水平：" + r1)
         # ② 垂直來回
-        up_room = self.PITCH_LIM - self.pitch_acc            # 10/23：上下 ±45 度內，往空間大的那邊
-        sgn = 1 if up_room >= self.PITCH_LIM + self.pitch_acc else -1
-        room = up_room if sgn > 0 else self.PITCH_LIM + self.pitch_acc
+        L = self._pitch_lim()                                 # 10/23：上下 ±45 度內、離極限 15% 全程以上，往空間大的那邊
+        up_room = L - self.pitch_acc
+        sgn = 1 if up_room >= L + self.pitch_acc else -1
+        room = up_room if sgn > 0 else L + self.pitch_acc
         amp = 5.0                                            # 11:3x：從 5 度開始，畫面變化不夠才加大，最多 15 度
 
         def updown1(a_):
@@ -1761,37 +1762,32 @@ class Tools(ExtraTools):
         # 10/23 11:2x 使用者：「他上下抬頭低頭量測時也不要超過」（±45 度）→ 不再掃到頂／底；
         #   在限制內往有空間的那邊轉 20 度（照目前刻度的 dy），量畫面上下位移、用針孔模型（垂直視角 70 度）換算實際轉了幾度，量完轉回來
         # 11:3x 使用者：「上下抬頭測量時 轉動幅度越小越好 必須改善」→ 從 5 度開始，量不出（位移 <2.5% 畫面高）才加到 8、12 度
-        def vmeasure():
-            import math
-            for want in (5, 8, 12):
-                sign = 1 if self.PITCH_LIM - self.pitch_acc >= want else -1          # 1＝往上抬
-                px = int(round(want * self.dy_deg))
-                b0 = self.grab()
-                self._drag(0, -sign * px)
-                time.sleep(0.3)
-                b1 = self.grab()
-                self._drag(0, sign * px)
-                time.sleep(0.3)
-                sy = self.shift_y(b0, b1)
-                deg = (math.degrees(math.atan(abs(sy) * 2 * math.tan(math.radians(self.V_FOV / 2)))) if sy is not None else None)
-                ok = sy is not None and abs(sy) >= 0.025 and deg >= 2
-                self._depth_log(種類="量刻度 上下", 照刻度度數=want, dy=px, 位移比例=(round(sy, 3) if sy is not None else None),
-                                實測度數=(round(deg, 1) if deg else None), 每度dy=(round(px / deg, 2) if ok else None), 量到=ok)
-                if ok:
-                    return px / deg, px
-            return None, px
-        k1, px1 = vmeasure()
-        dy_ok = k1 is not None
-        full_dy = int(round((k1 or self.dy_deg) * 178))
-        if self.verify2:                          # 10/18 二次驗證：再量一次
-            k2, _ = vmeasure()
-            dy_ok = k1 is not None and k2 is not None and abs(k1 - k2) <= 0.15 * (k1 + k2) / 2
-            v2_note += (self._v2("量刻度 上下小角度", f"{k1:.2f}" if k1 else "量不出", f"{k2:.2f}" if k2 else "量不出", dy_ok, "每度dy")
-                        + ("（相差 15% 內，用平均）" if dy_ok else "（量不出或相差超過 15%，垂直這次不採用）") + "；")
+        # 11:5x 使用者：「5度 只是如果是全新遊戲他怎麼知道5度是多少？所以有沒有辦法每次用少量移動（例如10像素 慢慢動直到停了
+        #   再去回推移動了多少像素 先知道極限值在開始量（注意真正在量時 不要靠近極限值」
+        #   → 每步 10 像素慢慢往上，看兩側遠景有沒有跟著上下移（不用「畫面有沒有變」：別人在動畫面永遠在變）；連三步沒移＝頂到了。
+        #     再每步 10 像素往下數到底＝上下全程幾像素；從底往上拉一半＝水平（不靠累計）。
+        #     度數：全程當 178 度（大多數 3D 遊戲上下卡在約 ±89 度）換每度 dy；之後轉頭／量測都離兩端至少 15% 全程
+        top_extra, full_dy, full2 = self._find_vlimit(-1)[0], None, None
+        full_dy, steps1 = self._find_vlimit(+1)
+        dy_ok = full_dy is not None and full_dy >= 100
+        at = "底"                                  # 現在鏡頭在哪一端
+        est = full_dy or int(178 * self.dy_deg)     # 找不到全程時用舊刻度估
+        if self.verify2 and dy_ok:                # 二次驗證：從底再慢慢往上數到頂，全程再量一次
+            full2, _ = self._find_vlimit(-1)
+            at = "頂"
+            dy_ok = full2 is not None and abs(full_dy - full2) <= 0.10 * (full_dy + full2) / 2
+            v2_note += (self._v2("量刻度 上下全程（10 像素慢慢找極限）", full_dy, full2 if full2 is not None else "量不出", dy_ok, "像素")
+                        + ("（相差 10% 內，用平均）" if dy_ok else "（相差超過 10%，垂直這次不採用）") + "；")
             if dy_ok:
-                k1 = (k1 + k2) / 2
-        v2_note += f"垂直：在 ±{self.PITCH_LIM:.0f} 度內從 5 度轉起、量不出才加大（這次 dy {px1}）量畫面上下位移換算，不掃到頂／底；"
-        dy_deg = round(k1, 2) if dy_ok else self.dy_deg
+                full_dy = est = int(round((full_dy + full2) / 2))
+        self._drag(0, (est // 2) if at == "頂" else -(est // 2))     # 從那一端拉回一半＝水平
+        time.sleep(0.3)
+        self.pitch_acc = 0.0
+        if dy_ok:
+            self.vrange_px = full_dy
+        v2_note += (f"垂直：每步 10 像素慢慢找上下極限（往上先多走了 {top_extra} 像素才頂到），全程 {full_dy} 像素，回到中間＝水平；"
+                    if full_dy else "垂直：慢慢找極限沒找到（兩側遠景看不出上下移），")
+        dy_deg = round(full_dy / 178.0, 2) if dy_ok else self.dy_deg
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
         note = v2_note
         old_dx, old_dy = self.dx_deg, self.dy_deg
@@ -1825,7 +1821,7 @@ class Tools(ExtraTools):
         now = datetime.now().strftime("%m/%d %H:%M")
         cal["水平"] = {"一圈dx": loop_dx or _h.get("一圈dx"), "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
                      "量測每度dx": round(loop_dx / 360.0, 2) if loop_dx else _h.get("量測每度dx")}
-        cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "機械掃描（工具版 量刻度）", "時間": now,
+        cal["垂直"] = {"全程dy": full_dy, "每度dy": dy_deg, "方法": "每步 10 像素慢慢找上下極限（工具版 量刻度，10/23）", "時間": now,
                      "量測每度dy": round(full_dy / 178.0, 2) if dy_ok else _v.get("量測每度dy")}
         cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
         with open(p, "w", encoding="utf-8") as f:
@@ -1894,9 +1890,19 @@ class Tools(ExtraTools):
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
     PITCH_LIM = 45.0
 
+    vrange_px = None      # 量刻度 找到的上下全程（像素）
+
+    def _pitch_lim(self):
+        """上下能轉到幾度：使用者的 ±45，和「離極限至少 15% 全程」取小的"""
+        lim = self.PITCH_LIM
+        if self.vrange_px and self.dy_deg:
+            lim = min(lim, (self.vrange_px * 0.5 - self.vrange_px * 0.15) / self.dy_deg)
+        return lim
+
     def _pitch_room(self, d):
         """想轉 d 度（正＝抬頭）→ 限制內實際能轉幾度"""
-        return max(-self.PITCH_LIM, min(self.PITCH_LIM, self.pitch_acc + d)) - self.pitch_acc
+        L = self._pitch_lim()
+        return max(-L, min(L, self.pitch_acc + d)) - self.pitch_acc
 
     def look_pitch(self, 度=""):
         d = num(度, None)
@@ -1915,6 +1921,31 @@ class Tools(ExtraTools):
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + d))
         lv = ("水平" if abs(self.pitch_acc) < 3 else f"{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度")
         return r + f"｜水平儀（程式累計你送的 仰）：現在約 {lv}；歪了用 修水平 一次拉回"
+
+    VSTEP = 10            # 11:5x 使用者：每次 10 像素慢慢動
+    VSTILL = 0.006        # 兩側遠景上下位移 < 0.6% 畫面高＝這一步沒動
+
+    def _find_vlimit(self, sign, max_px=2000):
+        """每步 VSTEP 像素往上（sign -1）／往下（+1）慢慢拖，直到連三步兩側遠景都沒上下移＝頂到 → (真的有動的像素, 步數)。"""
+        prev = self.grab()
+        moved, still, steps = 0, 0, 0
+        while moved + still * self.VSTEP < max_px:
+            self._drag(0, sign * self.VSTEP)
+            time.sleep(0.08)
+            cur = self.grab()
+            sy = self.shift_y(prev, cur)
+            steps += 1
+            if sy is not None and abs(sy) < self.VSTILL:
+                still += 1
+                if still >= 3:
+                    break
+            else:
+                moved += self.VSTEP * (still + 1)       # 中間短暫沒量到也算有動
+                still = 0
+            prev = cur
+        self._depth_log(種類="找上下極限", 方向=("上" if sign < 0 else "下"), 每步像素=self.VSTEP, 步數=steps, 有動像素=moved,
+                        頂到=(still >= 3))
+        return (moved if still >= 3 else None), steps
 
     def _sweep_pitch(self, sign, max_steps, step=80):
         """上下掃到頂／底（連續兩步畫面幾乎不變＝頂到了），回傳掃了多少 dy。sign -1＝往上、+1＝往下。"""
