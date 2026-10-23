@@ -2250,6 +2250,19 @@ class Tools(ExtraTools):
         if self.image_path or not self.live:
             return f"[dry-run] 會照水平儀反向拉 {-self.pitch_acc:+.0f} 度回水平"
         was = self.pitch_acc
+        # 17:4x 實測：水平儀（累計）會跟真的鏡頭差很多——開著 Roblox 選單時拖了不會轉但照樣累計、轉到極限停了也照樣累計
+        #   → 他看著天花板、水平儀卻說低頭 30～45 度，修水平 照錯的累計拉、越修越歪。
+        #   改用使用者教的方法：每步 10 像素慢慢往下拖到停（底端極限），再往上拉這個人稱全程的一半＝真的水平，不靠累計
+        if self.vrange_px:
+            down, _ = self._find_vlimit(+1)
+            self._drag(0, -(self.vrange_px // 2))
+            time.sleep(0.3)
+            self.pitch_acc = 0.0
+            lv = "回到水平（從底端拉回全程一半）" if down is not None else "往下沒找到底（畫面看不出停），照全程一半拉回，可能不準"
+            self.level_meas = (datetime.now().strftime("%H:%M"), lv)
+            self._depth_log(種類="修水平 找底", 往下像素=self._vl_moved, 頂到=down is not None, 全程=self.vrange_px, 水平儀原本=round(was, 1))
+            return (f"修水平：每步 10 像素慢慢往下拖到停（往下動了 {self._vl_moved} 像素才到底）→ 往上拉全程一半 {self.vrange_px // 2} 像素＝{lv}。"
+                    f"水平儀原本以為{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度（累計會跟真的差：開選單時拖、轉到極限都還在算），已歸零")
         if self.self_table and self.self_mask is not None and self.vrange_px:
             # 12:1x：拿現在自己的樣子對 量刻度 時記的表 → 鏡頭相對角色現在在離底幾像素 → 跟水平（全程一半）差多少
             import numpy as np
