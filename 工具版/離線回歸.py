@@ -79,4 +79,10 @@ if im is not None:
     g_np, _ = t._landmark_turn(im, _af, 1, 15, pitch=0); g_p, txt_p = t._landmark_turn(im, _af, 1, 15, pitch=10)
     check("標點 轉15＋抬頭10：帶 pitch 找得到", g_p is not None and 11 <= g_p <= 19, (g_np, g_p, txt_p[:80]))
 r0 = t.look_at(0.5, 0.5); check("視角移動到(0.5,0.5) 不轉", "已經在畫面正中央" in r0, r0)
+if im is not None:
+    _dy10 = int(im.size[1] * _m2.tan(_m2.radians(10)) / (2 * _m2.tan(_m2.radians(35))))
+    _up = Image.new("RGB", im.size); _up.paste(im, (0, _dy10))
+    pm, pm_txt = t._pitch_from_vshift(im, _up); check("上下位移換算 抬頭 10 度", pm is not None and 7 <= pm <= 13, (round(pm, 1) if pm is not None else None, pm_txt))
+    _dn = Image.new("RGB", im.size); _dn.paste(im, (0, -_dy10))
+    pm2, _ = t._pitch_from_vshift(im, _dn); check("上下位移換算 低頭 10 度", pm2 is not None and -13 <= pm2 <= -7, pm2)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

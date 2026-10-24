@@ -1176,6 +1176,22 @@ class Tools(ExtraTools):
         thr_y = min(0.03, max(0.012, 0.4 * abs(exp_dy) + 0.005))
         return abs(dx_found) < thr_x and abs(dy_found) < thr_y
 
+    def _pitch_from_vshift(self, before, after):
+        """上下位移（兩側相位相關）換算鏡頭上下轉了幾度：景物往下移＝抬頭＝正。→ (度 或 None, 說明)"""
+        import math
+        try:
+            pcs = self.vshift_pc(before, after)
+        except Exception as e:  # noqa: BLE001
+            return None, f"相位相關失敗：{e}"
+        good = [d for d, r in pcs if r >= 0.15]
+        if not good:
+            return None, "兩側遠景都看不出上下移（可信度太低）"
+        if len(good) == 2 and abs(good[0] - good[1]) > 0.04:
+            return None, f"左右兩側上下位移不一致（{good[0] * 100:+.0f}%／{good[1] * 100:+.0f}%）"
+        dy = sum(good) / len(good)
+        deg = math.degrees(math.atan(dy * 2 * math.tan(math.radians(self.V_FOV / 2))))
+        return deg, f"景物上下移了 {dy * 100:+.0f}% 畫面高 ≈ 鏡頭{'抬頭' if deg > 0 else '低頭'} {abs(deg):.0f} 度"
+
     def _landmark_verify(self, before, after, want, sh=None, pitch=0.0):
         """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""
         import math
@@ -2806,7 +2822,7 @@ class Tools(ExtraTools):
         yaw_calc = yaw
         if abs(yaw) > 30 and self.live and not self.image_path:
             meas_, parts_, done_, stopped_, lm_used_ = self._turn_chunks(yaw)   # 10/25：超過 30 度分段轉、每段實測（使用者：確保前後畫面還有同一個東西）
-            chunk_meas = (meas_, parts_ + (f"；中途量不出，停在 {done_:+.0f} 度" if stopped_ else ""), lm_used_)
+            chunk_meas = (meas_, parts_ + (f"；中途量不出，停在 {done_:+.0f} 度" if stopped_ else ""), lm_used_, stopped_, done_)
             yaw = done_
             self._drag(0, -pitch * self.dy_deg)
         else:
@@ -2886,12 +2902,19 @@ class Tools(ExtraTools):
             d_all = self.diff(before, after)
             sh, _ = self._shift(before, after, d_all)
             if chunk_meas is not None:
-                meas, parts, lm_used = chunk_meas
+                meas, parts, lm_used, stopped_c, done_c = chunk_meas
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
+                short = abs(done_c - yaw_calc) >= 3            # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）
+                if short or lm_used == 0:
+                    ok = False
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
                            f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
                 n_seg = max(1, int(math.ceil(abs(yaw) / 30.0)))
-                if getattr(self, "_rep_flag", False) and not (lm_used >= n_seg - 1 and ok):
+                if short:
+                    out.append(f"**只轉了 {done_c:+.0f} 度（要 {yaw_calc:+.0f}），目標還沒到中央**；剩下的 {yaw_calc - done_c:+.0f} 度下一輪再 視角移動到（目標現在應該在畫面{'左' if yaw_calc < 0 else '右'}半邊）")
+                elif lm_used == 0:
+                    out.append("（沒有標點、沒量到實際轉了幾度，不能說已對準；看下一張畫面確認）")
+                elif getattr(self, "_rep_flag", False) and not (lm_used >= n_seg - 1 and ok):
                     out.append(f"（{self.REP_NOTE}）")
                     ok = False
                 elif getattr(self, "_chunk_unsure", False) and not ok:
@@ -2919,6 +2942,15 @@ class Tools(ExtraTools):
                     ok = abs(scene_deg - yaw) <= max(5.0, 0.15 * abs(yaw))      # 10/25 稽核：改比度數、用 _cmp（原本「要 vs 實測」混進二次驗證一致率）
                     out.append(head + f"→ 標點量不到（{lm_txt}）、改用整張位移（左右兩帶）換算：鏡頭轉了約 {scene_deg:+.0f} 度（要轉 {yaw:+.0f} 度；畫面變化 {d_all:.0f}）")
                     out.append(self._cmp("視角移動到 整張位移", f"{yaw:+.0f}", f"{scene_deg:+.0f}", ok, "度") + "（沒有標點，整張位移沒標點準）")
+                elif abs(yaw) < 3 and abs(pitch) >= 3:
+                    # 10/25 06:5x：純上下時標點 x 不會動、整張位移是水平的 → 全「量不出」；改量上下位移換算度數
+                    pm, pm_txt = self._pitch_from_vshift(before, after)
+                    if pm is not None:
+                        ok = abs(pm - pitch) <= max(3.0, 0.3 * abs(pitch))
+                        out.append(head + f"→ 只有上下轉，改量上下位移：{pm_txt}（要轉 {pitch:+.0f} 度）")
+                        out.append(self._cmp("視角移動到 上下", f"{pitch:+.0f}", f"{pm:+.0f}", ok, "度") + ("（目標應該在正中央、可能被自己擋住）" if ok else ""))
+                    else:
+                        out.append(head + f"→ 只有上下轉，上下位移也量不出（{pm_txt}；畫面變化 {d_all:.0f}），看下一張畫面確認")
                 else:
                     out.append(f"轉完找不到原本那一塊，標點（{lm_txt}）和整張畫面的位移也量不出來（畫面變化 {d_all:.0f}），看下一張畫面確認")
         if final and final[2] >= GOOD and loc1 and loc1[2] >= GOOD:
