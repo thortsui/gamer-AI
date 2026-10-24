@@ -2103,25 +2103,30 @@ class Tools(ExtraTools):
         d = num(度, None)
         if d is None:
             return "轉 要給度數：正＝右、負＝左，例如 轉(90)、轉(-30)、轉(180)"
-        d = max(-180, min(180, d))
+        d0 = d
+        d = max(-90, min(90, d))                       # 10/25 使用者：一次最多 90 度，確保前後畫面還有同一個東西
+        cap_note = f"（左右一次最多 90 度（使用者限制）：你要 {d0:+.0f}，只轉 {d:+.0f}；剩下的下一輪再轉）" if abs(d - d0) >= 1 else ""
         if abs(d) < 3:
             return "度數太小（<3 度）沒意義"
         # 11:0x 使用者：「轉幾度要按照他輸入的計算才對」→ 他填幾度就送 幾度×每度dx，不分段、不改值
         # （底層 _drag 自己會把超過 220 像素的拖曳拆成小段，但總量照他的數字）
-        if TOOLFIX and abs(d) > 50 and self.live and not self.image_path:
-            # 10/25 00:4x 工具迭代：轉 ≥50 度前後畫面沒重疊量不出（六個模型 40/40 都還是照轉）→ 總量照他的數字，但分成 ≤45 度一段一段轉、每段實測、合計
-            meas, parts = self._turn_chunks(d)
-            ok = abs(meas - d) <= max(5.0, 0.15 * abs(d))
-            return (f"轉 {d:+.0f} 度：分段轉（每段 ≤45 度、每段實測）{parts}；合計實測鏡頭轉了 {meas:+.0f} 度（要轉 {d:+.0f}）；"
-                    + self._v2("轉頭合計", f"{d:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝要轉、第二次＝實測合計）")
-        return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 180, 30)
+        if abs(d) > 45 and self.live and not self.image_path:
+            # 10/25 工具迭代：超過 45 度前後畫面沒重疊量不出 → 分成 ≤45 度一段一段轉、每段實測、合計；
+            # 使用者：「確保至少還有一個東西維持相同的畫面」→ 哪一段量不出（前後畫面找不到同一個東西）就停在那裡、照實說
+            meas, parts, done = self._turn_chunks(d)
+            ok = abs(meas - done) <= max(5.0, 0.15 * abs(done))
+            stop_note = f"；**第 {parts.count('→') }段起量不出，停在 {done:+.0f} 度沒再轉**" if abs(done - d) >= 1 else ""
+            return (f"轉 {d:+.0f} 度：分段轉（每段 ≤45 度、每段實測）{parts}；合計實測鏡頭轉了 {meas:+.0f} 度（要轉 {d:+.0f}）{stop_note}；"
+                    + self._v2("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝送出的、第二次＝實測合計）" + cap_note)
+        return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 90, 30) + cap_note
 
     def _turn_chunks(self, deg):
-        """把 deg 度拆成 ≤45 度的段，一段一段拖、每段量景物位移換算成實際轉了幾度 → (合計實測度數, 每段說明)。正＝右。"""
+        """把 deg 度拆成 ≤45 度的段，一段一段拖、每段量景物位移換算成實際轉了幾度 → (合計實測度數, 每段說明, 實際送出的度數)。正＝右。
+        哪一段量不出（前後畫面找不到同一個東西）就停，不再往下轉（使用者：確保至少還有一個東西維持相同的畫面）。"""
         import math
         n = max(1, int(math.ceil(abs(deg) / 45.0)))
         chunk = deg / n
-        meas, parts = 0.0, []
+        meas, parts, done = 0.0, [], 0.0
         for i in range(n):
             before = self.grab()
             self._drag(chunk * self.dx_deg, 0)
@@ -2132,15 +2137,16 @@ class Tools(ExtraTools):
                 after = self._settled()
                 dd = self.diff(before, after)
             sh, _ = self._shift(before, after, dd)
+            done += chunk
             if sh is None or abs(sh) >= 0.45:
-                parts.append(f"第{i + 1}段 {chunk:+.0f}→量不出")
-                continue
+                parts.append(f"第{i + 1}段 {chunk:+.0f}→量不出（前後畫面找不到同一個東西）")
+                break
             W, H = before.size
             th = math.tan(math.radians(self.V_FOV / 2)) * W / H
             turned = -math.degrees(math.atan(sh * 2 * th))         # 景物往左移＝鏡頭往右轉
             meas += turned
             parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}")
-        return meas, "、".join(parts)
+        return meas, "、".join(parts), done
 
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
     PITCH_LIM = 45.0
@@ -2529,8 +2535,10 @@ class Tools(ExtraTools):
         pitch = self._pitch_room(pitch0)                  # 10/23：上下只能 ±45 度
         lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度）" if abs(pitch - pitch0) >= 1 else "")
         chunk_meas = None
-        if TOOLFIX and abs(yaw) > 50 and self.live and not self.image_path:
-            chunk_meas = self._turn_chunks(yaw)                # 10/25 工具迭代：大角度一次轉量不出 → 分段轉、每段實測
+        if abs(yaw) > 45 and self.live and not self.image_path:
+            meas_, parts_, done_ = self._turn_chunks(yaw)      # 10/25：超過 45 度分段轉、每段實測（使用者：確保前後畫面還有同一個東西）
+            chunk_meas = (meas_, parts_ + (f"；量不出就停在 {done_:+.0f} 度" if abs(done_ - yaw) >= 1 else ""))
+            yaw = done_
             self._drag(0, -pitch * self.dy_deg)
         else:
             self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
