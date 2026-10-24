@@ -30,6 +30,9 @@ ARGS = ["--game", "動物醫院", "--live", "--rounds", "5000", "--deadline", "6
         "--effort", "慢想", "--lock-effort", "--verify2", "--steps", "2", "--no-small-update"]   # 跟本地 10/24 挑戰同一組
 # 10/24 04:1x 使用者「從早上8:00開始執行 第三次就使用原生的Claude 不要洗掉 試試看」→ 第三個改 sonnet 原生（同一個 session、原本 system＋原生工具）
 RUNS = [("haiku", "", "1_haiku"), ("sonnet", "", "2_sonnet"), ("sonnet", "--brain-native", "3_sonnet原生")]
+# 10/24 14:2x 使用者「請opus 的 原生 和 用我本地的 標準的 各一個小時 也記錄 每次跑必須重開」→ --runs opus --reset
+RUN_SETS = {"claude": RUNS, "opus": [("opus", "", "4_opus標準"), ("opus", "--brain-native", "5_opus原生")]}
+LOBBY_PLACE = 78515283254292          # 專案/動物醫院/遊戲.json 大廳place
 ENV = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
 TEXT = (".md", ".json", ".jsonl", ".txt", ".log")
 SKIP = ("stdout.log", "stderr.log", "claude大腦.jsonl")
@@ -61,16 +64,43 @@ def snapshot():
     log("起點存好")
 
 
-def restore():
+def save_now(dst):
+    """10/24 14:2x：第二批實驗前先存本地現在的記憶（11:29 之後本地又跑了、有大檢討），做完還原回這份，不是回 08:00 起點。"""
+    os.makedirs(os.path.join(dst, "頂層"))
+    shutil.copytree(TV, os.path.join(dst, "工具版"))
+    for f in top_files(MEM):
+        shutil.copy2(os.path.join(MEM, f), os.path.join(dst, "頂層", f))
+    log(f"本地現在的記憶存到 {os.path.basename(dst)}")
+
+
+def restore(src=None):
+    src = src or START
     shutil.rmtree(TV)
-    shutil.copytree(os.path.join(START, "工具版"), TV)
-    keep = set(top_files(os.path.join(START, "頂層")))
+    shutil.copytree(os.path.join(src, "工具版"), TV)
+    keep = set(top_files(os.path.join(src, "頂層")))
     for f in top_files(MEM):
         if f not in keep:
             os.remove(os.path.join(MEM, f))
     for f in keep:
-        shutil.copy2(os.path.join(START, "頂層", f), os.path.join(MEM, f))
-    log("記憶還原成起點")
+        shutil.copy2(os.path.join(src, "頂層", f), os.path.join(MEM, f))
+    log(f"記憶還原成 {os.path.basename(src)}")
+
+
+def reset_game():
+    """每次開跑前重開遊戲：關 Roblox → roblox:// 深層連結回大廳 → 等載入。大家都從大廳、理智滿開始。"""
+    subprocess.run(["taskkill", "/F", "/IM", "RobloxPlayerBeta.exe"], capture_output=True)
+    time.sleep(8)
+    os.startfile(f"roblox://experiences/start?placeId={LOBBY_PLACE}")
+    t0 = time.time()
+    while time.time() - t0 < 180:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/NH"], capture_output=True, text=True).stdout
+        if "RobloxPlayerBeta" in out:
+            break
+        time.sleep(3)
+    else:
+        log("重開 Roblox：3 分鐘沒看到 RobloxPlayerBeta")
+    time.sleep(60)                                    # 等進大廳載入完
+    log(f"重開遊戲完成（{round(time.time() - t0)} 秒）")
 
 
 def agent_running():
@@ -161,11 +191,13 @@ def local_baseline(minutes):
     log(f"本地對照：{len(pick)} 輪")
 
 
-def run_one(model, search, label, minutes):
+def run_one(model, search, label, minutes, reset=False):
     if os.path.exists(os.path.join(OUT, label, "stats.txt")):
         log(f"{label} 已跑過，跳過")
         return
     restore()
+    if reset:
+        reset_game()
     cmd = [sys.executable, "-u", os.path.join(HERE, "tool_agent.py")] + ARGS + ["--brain", model] + ([search] if search else [])
     log(f"{label} 開始：{' '.join(cmd[3:])}")
     t0 = time.time()
@@ -192,7 +224,7 @@ def run_one(model, search, label, minutes):
 
 def report(minutes):
     rows = []
-    for label in ["0_本地最後一小時"] + [r[2] for r in RUNS]:
+    for label in sorted(d for d in os.listdir(OUT) if d[:1].isdigit() and os.path.isdir(os.path.join(OUT, d))):
         p = os.path.join(OUT, label, "stats.txt")
         rows.append(f"## {label}\n" + (f"大腦呼叫：{json.dumps(brain_sum(label), ensure_ascii=False)}\n" if label[0] != "0" else "")
                     + "```\n" + (open(p, encoding="utf-8").read() if os.path.exists(p) else "（沒有）") + "```\n")
@@ -208,6 +240,8 @@ def report(minutes):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=60)
+    ap.add_argument("--runs", default="claude", choices=list(RUN_SETS), help="claude＝haiku/sonnet/sonnet原生（08:00 那批）；opus＝opus 標準/原生")
+    ap.add_argument("--reset", action="store_true", help="每次開跑前重開遊戲（關 Roblox 回大廳）")
     ap.add_argument("--test", default="", help="測試用：另一個遊戲資料夾＋離線截圖（例：claude測試,截圖路徑），不碰真的記憶、不 push")
     a = ap.parse_args()
     global MEM, TV, OUT, START
@@ -226,18 +260,23 @@ def main():
     snapshot()
     if not os.path.exists(os.path.join(OUT, "0_本地最後一小時", "stats.txt")):
         local_baseline(a.minutes)
-    for model, search, label in RUNS:
-        run_one(model, search, label, a.minutes)
-    restore()
+    back = START
+    if a.runs != "claude":
+        back = os.path.join(OUT, "_本地現況_" + a.runs)
+        if not os.path.isdir(back):
+            save_now(back)
+    for model, search, label in RUN_SETS[a.runs]:
+        run_one(model, search, label, a.minutes, reset=a.reset)
+    restore(back)
     report(a.minutes)
     if a.test:
         return
     subprocess.run(["git", "add", "-A", OUT], cwd=ROOT)
-    subprocess.run(["git", "commit", "-qm", "10/24 模型比較實驗結果（haiku／sonnet／sonnet 原生 各一小時）\n\n"
+    subprocess.run(["git", "commit", "-qm", f"10/24 模型比較實驗結果（{a.runs}：" + "／".join(r[2] for r in RUN_SETS[a.runs]) + "）\n\n"
                     "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"
                     "Claude-Session: https://claude.ai/code/session_01L3jYTqqjiukHgtLXxRHTLT"], cwd=ROOT)
     subprocess.run(["git", "push", "-q"], cwd=ROOT)
-    log("全部完成、已 commit+push")
+    log(f"{a.runs} 全部完成、已 commit+push")
 
 
 if __name__ == "__main__":
