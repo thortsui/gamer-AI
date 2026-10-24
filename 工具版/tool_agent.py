@@ -319,6 +319,8 @@ def _parse_call(item, cat):
     args = [x.strip() for x in re.split(r"[,，]", raw)] if raw and raw.strip() else []
     if raw and "、" in raw and len(args) == 1 and len(keys) > 1:      # 10/25 審查：有逗號但格數不夠（選填沒寫）不能再用「、」切
         args = [x.strip() for x in re.split(r"[,，、]", raw)]
+    if raw and len(args) == 1 and len(keys) > 1 and raw.count("；") >= len(keys) - 1:   # 10/25 04:0x：Claude 用「；」分五格 → 檢討 沒記下
+        args = [x.strip() for x in re.split(r"[；;]", raw)]
     params = {}
     if len(keys) == 1 and args:
         params[keys[0]] = raw.strip()
@@ -1070,6 +1072,40 @@ class Tools(ExtraTools):
                 + f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + v2_txt + "。對不上就 量刻度 重量")
 
+    @staticmethod
+    def _repetitive(im):
+        """畫面是不是重複花紋（天花板方磚、地磚、格線牆）→ (是不是, 週期佔畫面寬的比例)。
+        10/25 04:0x：Claude 原生對著天花板磚量 轉(90) 三段都量到 12～14（標點認到隔壁同款磚），實際轉了幾度根本量不準。
+        自相關（FFT）沿水平／垂直的剖面：先降到谷、再升回 ≥0.5 的峰（比谷高 ≥0.25）＝真的有週期；只看「離中心還很像」會把平滑畫面也當重複。"""
+        import numpy as np
+        try:
+            g = np.asarray(im.convert("L").resize((240, 124)), dtype=np.float32)
+        except Exception:  # noqa: BLE001
+            return False, 0.0
+        g = g - g.mean()
+        if g.std() < 4:
+            return False, 0.0
+        F = np.fft.rfft2(g)
+        ac = np.fft.irfft2(F * np.conj(F), s=g.shape)
+        ac = ac / (ac[0, 0] + 1e-6)
+        best = (False, 0.0)
+        for prof, lim, scale in ((ac[0, :120], 100, 240.0), (ac[:62, 0], 50, 124.0)):   # 水平剖面、垂直剖面（未 shift：lag 從 0 起）
+            prof = prof[:lim]
+            i = 1
+            while i + 1 < len(prof) and prof[i + 1] <= prof[i]:
+                i += 1
+            valley = float(prof[i]) if i < len(prof) else 1.0
+            if i + 4 >= len(prof):
+                continue
+            j = i + 1 + int(np.argmax(prof[i + 1:]))
+            peak = float(prof[j])
+            if peak >= 0.5 and peak - valley >= 0.25 and j >= 6:
+                best = (True, j / scale)
+                break
+        return best
+
+    REP_NOTE = "⚠ 畫面是重複花紋（天花板磚／地磚／格線），標點和整張位移都可能認到隔壁同款、量到的度數會偏小——僅參考、不判一致；轉到有明顯不同東西的地方再量"
+
     def _landmark_turn(self, before, after, sign, want=None):
         """10/25 01:0x 使用者：「為了讓他理解自己是轉了幾度，工具也要回饋說他轉了幾度，並且也要有一個物品類的標點來確認轉動是否正確」
         轉前在畫面「轉向那一側」挑一塊最有紋理的東西當標點（右轉挑右邊、左轉挑左邊，轉完它還會在畫面裡），
@@ -1101,19 +1137,30 @@ class Tools(ExtraTools):
         ang = lambda v: math.degrees(math.atan((v - 0.5) * 2 * th))   # noqa: E731
         pin_thr = max(0.02, 0.3 * abs(want) * 0.0065) if want else 0.02   # 小角度時釘住的門檻跟預期位移（約 0.65%/度）成比例
         why = []
+        ambiguous = 0
+        self._lm_ambiguous = False
         for _, x, y in picked:
             patch = Image.fromarray(g[y:y + ph, x:x + pw].astype(np.uint8))
             x0, y0 = (x + pw / 2) / W, (y + ph / 2) / H
-            loc = self._locate(patch, after, near=(0.5, y0, 0.55))
+            loc = self._locate(patch, after, near=(0.5, y0, 0.55), second=True)
             if not loc or loc[2] < 0.8:
                 why.append(f"({x0:.2f},{y0:.2f}) 轉後找不到")
                 continue
-            x1, y1, sim = loc
+            x1, y1, sim, sim2 = loc
+            if sim2 >= max(0.75, sim - 0.08):
+                # 10/25 04:1x：天花板磚／地磚／格線牆上，這塊東西在轉後畫面有好幾個一樣的（第二像 ≥0.75 且跟最像差不到 0.08）
+                #   → 認到隔壁同款、度數會偏小（Claude 原生 轉(90) 三段都量到 12～14）。這塊不能當標點
+                why.append(f"({x0:.2f},{y0:.2f}) 轉後有好幾塊一樣的（最像 {sim:.2f}、第二像 {sim2:.2f}）＝重複花紋")
+                ambiguous += 1
+                continue
             if abs(x1 - x0) < pin_thr:
                 why.append(f"({x0:.2f},{y0:.2f}) 轉後沒動＝釘在畫面上的字／面板")
                 continue
             deg = ang(x0) - ang(x1)
             return deg, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後在 ({x1:.2f},{y1:.2f})（相似度 {sim:.2f}）→ 鏡頭實際轉了 {deg:+.0f} 度"
+        if ambiguous >= 2 or (ambiguous and ambiguous >= len(picked) - 1):
+            self._lm_ambiguous = True
+            return None, "標點：" + "、".join(why[:3]) + "，都不能當標點——畫面是重複花紋，整張位移也會認到隔壁同款、僅參考"
         return None, "標點：" + "、".join(why[:3]) + "，都不能當標點"
 
     @staticmethod
@@ -1128,6 +1175,9 @@ class Tools(ExtraTools):
         """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""
         import math
         lm_deg, lm_txt = self._landmark_turn(before, after, 1 if want > 0 else -1, want)
+        self._rep_flag = bool(self._repetitive(before)[0]) or bool(getattr(self, "_lm_ambiguous", False))
+        if self._rep_flag and lm_deg is not None:
+            lm_txt += f"（{self.REP_NOTE}）"
         scene_deg = None
         if sh is not None and abs(sh) < 0.45:
             Ws, Hs = before.size
@@ -2190,8 +2240,9 @@ class Tools(ExtraTools):
         self.startup["每度dx"], self.startup["每度dy"] = self.dx_deg, self.dy_deg   # 10/25 審查：單獨叫 量刻度 時面板的開工數值要跟著換、驗證要重做
         self.startup.pop("驗證", None)
         return (note + f"量好了：水平一圈 dx {loop_dx or '（不採用）'} → 每度 dx {dx_deg}；垂直 " + (f"量到每度 dy {dy_deg}" if dy_ok else f"這次沒量準、沿用每度 dy {dy_deg}") + "；"
-                f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
-                "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
+                f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點"
+                + ("、上下回到中間。" if dy_ok else "；上下：這次沒找到極限、**上下沒有調整、不保證水平**（看下一張畫面：滿是天花板／地板就用 仰 自己拉，或到有牆有地的地方 修水平）。")
+                + "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
     def _loop_once(self):
         """水平轉一圈：每步 dx 60，轉到跟起點最像的位置，回傳一圈 dx（鏡頭停在約起點）。"""
@@ -2255,8 +2306,11 @@ class Tools(ExtraTools):
             meas, parts, done, stopped, lm_used = self._turn_chunks(d)
             ok = abs(meas - done) <= max(5.0, 0.15 * abs(done))
             stop_note = f"；**中途量不出，停在 {done:+.0f} 度沒再轉（要轉 {d:+.0f}，剩下的下一輪再轉）**" if stopped else ""
-            v2 = (self._cmp("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）" if lm_used
-                  else f"（沒有找到標點，{meas:+.0f} 度是整張位移估的，僅參考、不算一致／不一致）")
+            if getattr(self, "_rep_flag", False):
+                v2 = f"（{self.REP_NOTE}）"
+            else:
+                v2 = (self._cmp("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）" if lm_used
+                      else f"（沒有找到標點，{meas:+.0f} 度是整張位移估的，僅參考、不算一致／不一致）")
             return (f"轉 {d:+.0f} 度：分段轉（每段 ≤30 度、每段實測）{parts}；**你實際轉了約 {meas:+.0f} 度（送出 {done:+.0f}）**{stop_note}；" + v2 + cap_note)
         return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 90, 30) + cap_note
 
@@ -2269,12 +2323,15 @@ class Tools(ExtraTools):
         n = max(1, int(math.ceil(abs(deg) / 30.0)))
         chunk = deg / n
         meas, parts, done, stopped, lm_used = 0.0, [], 0.0, False, 0
+        self._rep_flag = False
         for i in range(n):
             before = self.grab()
             if before is None:
                 parts.append(f"第{i + 1}段 抓不到畫面，沒轉")
                 stopped = True
                 break
+            if self._repetitive(before)[0]:
+                self._rep_flag = True
             self._drag(chunk * self.dx_deg, 0)
             after = self._settled()
             dd = self.diff(before, after)
@@ -2285,6 +2342,8 @@ class Tools(ExtraTools):
             sh, _ = self._shift(before, after, dd)
             done += chunk
             lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1, chunk)
+            if getattr(self, "_lm_ambiguous", False):
+                self._rep_flag = True
             scene_deg = None
             if sh is not None and abs(sh) < 0.45:
                 Ws, Hs = before.size
@@ -2590,8 +2649,9 @@ class Tools(ExtraTools):
         return yaw, pitch
 
     @staticmethod
-    def _locate(patch_im, im, near=None):
-        """在 im 裡找 patch（灰階縮小後 SSD 比對）→ (x, y 0~1, 相似度 0~1)；near＝預期位置附近優先。"""
+    def _locate(patch_im, im, near=None, second=False):
+        """在 im 裡找 patch（灰階縮小後 NCC 比對）→ (x, y 0~1, 相似度 0~1)；near＝預期位置附近優先。
+        second=True 多回第 4 項：離最像那塊 ≥10 像素的「第二像」相似度（10/25 04:1x：重複花紋時第二像跟最像差不多＝認不出是哪一塊）。"""
         import numpy as np
         W, H = 240, 124
         a = np.asarray(im.convert("L").resize((W, H)), dtype=np.float32)
@@ -2612,7 +2672,12 @@ class Tools(ExtraTools):
             yy, xx = np.mgrid[0:ncc.shape[0], 0:ncc.shape[1]]
             ncc = np.where((np.abs(xx - cx0) <= r * W) & (np.abs(yy - cy0) <= r * H), ncc, -1.0)
         iy, ix = np.unravel_index(int(np.argmax(ncc)), ncc.shape)
-        return ((ix + pw / 2) / W, (iy + ph / 2) / H, float(ncc[iy, ix]))
+        if not second:
+            return ((ix + pw / 2) / W, (iy + ph / 2) / H, float(ncc[iy, ix]))
+        yy2, xx2 = np.mgrid[0:ncc.shape[0], 0:ncc.shape[1]]
+        far = (np.abs(xx2 - ix) >= 10) | (np.abs(yy2 - iy) >= 10)
+        sim2 = float(ncc[far].max()) if far.any() else -1.0
+        return ((ix + pw / 2) / W, (iy + ph / 2) / H, float(ncc[iy, ix]), sim2)
 
     def _settled(self, prev=None):
         """轉完等畫面停下來再拍（19:28：0.3 秒就拍，遊戲畫面還沒更新 → 誤判「沒轉」又拖一次＝轉兩倍）。"""
@@ -2745,15 +2810,22 @@ class Tools(ExtraTools):
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
                            f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
-                out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）") if lm_used
-                           else "（沒有找到標點，度數是整張位移估的，僅參考）")
+                if getattr(self, "_rep_flag", False):
+                    out.append(f"（{self.REP_NOTE}）")
+                    ok = False
+                else:
+                    out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）") if lm_used
+                               else "（沒有找到標點，度數是整張位移估的，僅參考）")
             else:
                 # 10/25 03:0x 第 7 輪：≤30 度這條路原本只回「整張位移 %」，找不到 56% 局內（基準 62%）幾乎沒改善
                 #   → 跟 轉 一樣用標點量「實際轉了幾度」（使用者：工具要回饋轉了幾度＋物品標點），跟整張位移交叉檢查；一致就算對準
                 lm_deg, lm_txt, scene_deg = self._landmark_verify(before, after, yaw, sh)
                 head = ("轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住"
                         + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + "）")
-                if lm_deg is not None and abs(yaw) >= 3:
+                if lm_deg is not None and abs(yaw) >= 3 and getattr(self, "_rep_flag", False):
+                    ok = False
+                    out.append(head + f"→ 標點量到約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f}），但 {self.REP_NOTE}")
+                elif lm_deg is not None and abs(yaw) >= 3:
                     ok = abs(lm_deg - yaw) <= max(5.0, 0.15 * abs(yaw))
                     out.append(head + f"→ 改用標點量：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）"
                                + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if scene_deg is not None else ""))

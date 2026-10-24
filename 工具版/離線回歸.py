@@ -47,4 +47,13 @@ v, dflt = t.walk_speed(); check("走路速度 預設 3 身高/秒", v == 3.0 and
 t.startup["速度"] = "約 2.5 身高/秒"; v2, d2 = t.walk_speed(); check("走路速度 讀校準值", v2 == 2.5 and not d2, (v2, d2))
 r = t._heights_to_sec("前方：約 5 個身高 牆；場景：門 (0.3,0.5) 約 2.5 個身高遠；自己 1 個身高"); check("身高→秒走路", r == "前方：約 2.0 秒走路 牆；場景：門 (0.3,0.5) 約 1.0 秒走路遠；自己約 0.4 秒走路", r)
 t.startup.pop("速度", None)
+import numpy as _np
+_tile = _np.tile(_np.kron(_np.array([[0, 255], [255, 0]], dtype=_np.uint8), _np.ones((12, 12), dtype=_np.uint8)), (6, 12))
+rep, per = T.Tools._repetitive(Image.fromarray(_tile).convert("RGB")); check("重複花紋 方磚→是", rep, (rep, per))
+_rng = _np.random.default_rng(0); rep2, _ = T.Tools._repetitive(Image.fromarray(_rng.integers(0, 255, (124, 240), dtype=_np.uint8)).convert("RGB")); check("重複花紋 雜訊→否", not rep2)
+if im is not None:
+    rep3, per3 = T.Tools._repetitive(im); check("重複花紋 真截圖→否", not rep3, (rep3, per3))
+n, p = T._parse_call("檢討(轉90要到90；實測只有40；仍看天花板；刻度在磚紋上量的；先修水平再量)", cat); check("parse 「；」分五格", p.get("下次") == "先修水平再量", p)
+_tim = Image.fromarray(_tile).convert("RGB").resize((1920, 991)); _taf = Image.new("RGB", (1920, 991)); _taf.paste(_tim, (-int(1920 * 0.06), 0))
+_g, _txt = t._landmark_turn(_tim, _taf, 1, 20); check("標點 方磚平移→判重複花紋不當標點", _g is None and getattr(t, "_lm_ambiguous", False), _txt)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
