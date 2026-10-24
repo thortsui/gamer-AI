@@ -1,0 +1,19 @@
+10/24 14:35:27 起點已存在（續跑），不重存
+10/24 14:35:27 記憶還原成 _起點
+10/24 14:36:36 重開遊戲完成（60 秒）
+10/24 14:36:36 4_opus標準 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain opus
+10/24 15:36:36 4_opus標準 滿 60.0 分鐘，放 stop.txt
+10/24 15:36:58 4_opus標準 實際 60.4 分鐘
+10/24 15:37:02 4_opus標準：80 輪、記憶有變 26 個檔、stats 寫好
+10/24 15:37:02 記憶還原成 _起點
+10/24 15:38:11 重開遊戲完成（60 秒）
+10/24 15:38:11 5_opus原生 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain opus --brain-native
+10/24 16:38:11 5_opus原生 滿 60.0 分鐘，放 stop.txt
+10/24 16:43:32 5_opus原生 實際 65.3 分鐘
+10/24 16:43:35 5_opus原生：139 輪、記憶有變 30 個檔、stats 寫好
+10/24 16:43:35 記憶還原成 _本地現況_opus
+10/24 16:43:35 結果.md 寫好
+warning: in the working copy of '工具版/實驗_模型比較_1024/進度.log', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '工具版/實驗_模型比較_1024/4_opus標準/記憶有變的檔/小任務.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '工具版/實驗_模型比較_1024/5_opus原生/記憶有變的檔/小任務.md', LF will be replaced by CRLF the next time Git touches it
+10/24 16:43:40 opus 全部完成、已 commit+push
