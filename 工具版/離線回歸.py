@@ -38,7 +38,9 @@ if im is not None:
     got2, txt2, sc = t._landmark_verify(im, after, 20, None); check("標點驗證 20 度（視角移動到用）", got2 is not None and 12 <= got2 <= 26, txt2)
     got3, txt3, sc3 = t._landmark_verify(im, after, 20, -0.9); check("標點驗證 位移 ≥0.45 不換算", got3 is not None and sc3 is None, txt3)
     got4, txt4, sc4 = t._landmark_verify(im, after, 20, -0.3); check("標點驗證 整張位移錯但標點跟送出接近→信標點", got4 is not None and sc4 is not None, txt4)
+    _orig = t._scene_deg; t._scene_deg = lambda b, a: (60.0, "假的")
     got5, txt5, sc5 = t._landmark_verify(im, after, -20, -0.3); check("標點驗證 跟位移、送出都差太多→否決", got5 is None, txt5)
+    t._scene_deg = _orig
     z = T.Tools.zoom_factor(im, im.crop((W // 8, H // 8, W - W // 8, H - H // 8)).resize((W, H))); check("zoom 1.33", z and 1.2 <= z <= 1.5, z)
 check("釘住判斷 小角度跟著景物移→不是釘住", not T.Tools._pin_ok(0.03, 0.02, 0.04, 0.02))
 check("釘住判斷 大角度幾乎沒動→釘住", T.Tools._pin_ok(0.005, 0.0, 0.41, 0.2))
@@ -56,4 +58,18 @@ if im is not None:
 n, p = T._parse_call("檢討(轉90要到90；實測只有40；仍看天花板；刻度在磚紋上量的；先修水平再量)", cat); check("parse 「；」分五格", p.get("下次") == "先修水平再量", p)
 _tim = Image.fromarray(_tile).convert("RGB").resize((1920, 991)); _taf = Image.new("RGB", (1920, 991)); _taf.paste(_tim, (-int(1920 * 0.06), 0))
 _g, _txt = t._landmark_turn(_tim, _taf, 1, 20); check("標點 方磚平移→判重複花紋不當標點", _g is None and getattr(t, "_lm_ambiguous", False), _txt)
+def _rot(img, deg):
+    """合成針孔純左右轉 deg 度（正＝右轉）：每個輸出欄從 tan(a'+θ) 取樣"""
+    import numpy as _np, math as _m
+    a = _np.asarray(img.convert("RGB")); Hh, Ww = a.shape[:2]; th_ = _m.tan(_m.radians(35)) * Ww / Hh
+    xs = (_np.arange(Ww) + 0.5) / Ww
+    src = 0.5 + _np.tan(_np.arctan((xs - 0.5) * 2 * th_) + _m.radians(deg)) / (2 * th_)
+    idx = _np.clip((src * Ww).astype(int), 0, Ww - 1); valid = (src >= 0) & (src < 1)
+    out = a[:, idx]; out[:, ~valid] = 0
+    return Image.fromarray(out)
+if im is not None:
+    for dg in (10, 20, 30):
+        got, note = t._scene_deg(im, _rot(im, dg)); check(f"整張位移兩帶換算 {dg} 度", got is not None and abs(got - dg) <= 3.5, (round(got, 1) if got is not None else None, note))
+    got, note = t._scene_deg(im, _rot(im, -20)); check("整張位移兩帶換算 -20 度", got is not None and abs(got + 20) <= 3.5, (round(got, 1) if got is not None else None, note))
+yw, pt = t._angles_to(0.9, 0.2, 1920, 991); check("_angles_to pitch 修正 (0.9,0.2)≈15.9", abs(pt - 15.9) < 0.6, (round(yw, 1), round(pt, 1)))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

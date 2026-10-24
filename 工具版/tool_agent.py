@@ -773,7 +773,7 @@ class Tools(ExtraTools):
                 z = self._zoom_factor_masked(before, after)          # 10/25 工具迭代：找自己 量到的那塊挖掉再量
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
-            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" + (f"＝中央那個東西還要走約 {d * z / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
+            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
                      ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
             if TOOLFIX and k == "w" and z is None and dd >= 8:
                 # 10/25 工具迭代：走路時畫面在變、中央卻有一大塊完全沒動＝釘在畫面上的東西（照片／面板／提示），不是場景裡擋路的
@@ -838,7 +838,7 @@ class Tools(ExtraTools):
                 out.append(f"{lab}：框高 {h:.2f}，已經在面前（{side}）")
             elif kk and kk > 1.05:
                 secs = math.log(0.5 / h) / math.log(kk)
-                out.append(f"{lab}：框高 {h:.2f}、{side}；照深度比例每秒 {kk} 倍，約再走 {secs:.1f} 秒到面前（先對正、分兩次走、中間看一眼）")
+                out.append(f"{lab}：框高 {h:.2f}、{side}；照深度比例每秒 {kk} 倍，約再走 {secs:.1f} 秒到面前（深度比例是對校準時那個距離量的，近的東西放大得更快、這個秒數偏多、只當上限；先對正、分兩次走、中間看一眼）")
             else:
                 out.append(f"{lab}：框高 {h:.2f}、{side}；深度比例還沒量（量比例），只能用框高估：越小越遠")
         first = next(iter(dets.values()))[0]["h"]
@@ -1040,22 +1040,21 @@ class Tools(ExtraTools):
                 # 10/16 03:3x：他一直把「景物往左移」讀成「鏡頭往左轉」寫進檢討（刻度反）→ 量測後面標鏡頭實際轉向
                 sh_txt = ((f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬"
                            + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) + pinned_note) if sh is not None else ""
-                if sh is not None:
-                    # 10/25 使用者：工具要回饋他轉了幾度，並用一個物品標點確認
-                    import math
-                    Wf, Hf = before.size
-                    th = math.tan(math.radians(self.V_FOV / 2)) * Wf / Hf
-                    deg_scene = -math.degrees(math.atan(sh * 2 * th))
+                if sh is not None or d >= 3:
+                    # 10/25 使用者：工具要回饋他轉了幾度，並用一個物品標點確認（稽核後：標點優先、整張位移改左右兩帶換算、沒標點只寫僅參考不判一致）
                     want = deg * sign
-                    lm_deg, lm_txt = self._landmark_turn(before, after, sign, want)
-                    if lm_deg is not None and abs(lm_deg - deg_scene) > max(10.0, 0.5 * abs(deg_scene)):
-                        # 10/25 02:1x：大廳人多時標點認錯（+19 段量到 -17）→ 跟整張位移對不上就不信標點
-                        lm_txt += f"（跟整張位移 {deg_scene:+.0f} 度差太多，標點可能認錯，改用整張位移）"
-                        lm_deg = None
-                    got = lm_deg if lm_deg is not None else deg_scene
-                    ok = abs(got - want) <= max(5.0, 0.15 * abs(want))
-                    sh_txt += (f"；整張畫面位移換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度；{lm_txt}；**你實際轉了約 {got:+.0f} 度（要轉 {want:+.0f} 度）**；"
-                               + self._cmp("轉了幾度", f"{want:+.0f}", f"{got:+.0f}", ok, "度"))
+                    lm_deg, lm_txt, deg_scene = self._landmark_verify(before, after, want, sh)
+                    scene_txt = f"整張位移（左右兩帶）換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度" if deg_scene is not None else "整張位移換算不出度數"
+                    if getattr(self, "_rep_flag", False):
+                        sh_txt += f"；{scene_txt}；{lm_txt}；（{self.REP_NOTE}）"
+                    elif lm_deg is not None:
+                        ok = abs(lm_deg - want) <= max(5.0, 0.15 * abs(want))
+                        sh_txt += (f"；{scene_txt}；{lm_txt}；**你實際轉了約 {lm_deg:+.0f} 度（要轉 {want:+.0f} 度）**；"
+                                   + self._cmp("轉了幾度", f"{want:+.0f}", f"{lm_deg:+.0f}", ok, "度"))
+                    elif deg_scene is not None:
+                        sh_txt += f"；{lm_txt}；{scene_txt}（沒有標點，{deg_scene:+.0f} 度僅參考、不判一致；要轉 {want:+.0f} 度）"
+                    else:
+                        sh_txt += f"；{lm_txt}；{scene_txt}（這次量不出實際轉了幾度）"
                 try:
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
@@ -1142,11 +1141,14 @@ class Tools(ExtraTools):
         for _, x, y in picked:
             patch = Image.fromarray(g[y:y + ph, x:x + pw].astype(np.uint8))
             x0, y0 = (x + pw / 2) / W, (y + ph / 2) / H
-            loc = self._locate(patch, after, near=(0.5, y0, 0.55), second=True)
+            loc = self._locate(patch, after, near=(0.5, y0, 0.55, 0.08), second=True)   # 10/25 稽核：純左右轉 y 幾乎不變
             if not loc or loc[2] < 0.8:
                 why.append(f"({x0:.2f},{y0:.2f}) 轉後找不到")
                 continue
             x1, y1, sim, sim2 = loc
+            if abs(y1 - y0) > 0.08:
+                why.append(f"({x0:.2f},{y0:.2f}) 轉後上下差太多、找錯")
+                continue
             if sim2 >= max(0.75, sim - 0.08):
                 # 10/25 04:1x：天花板磚／地磚／格線牆上，這塊東西在轉後畫面有好幾個一樣的（第二像 ≥0.75 且跟最像差不到 0.08）
                 #   → 認到隔壁同款、度數會偏小（Claude 原生 轉(90) 三段都量到 12～14）。這塊不能當標點
@@ -1178,10 +1180,7 @@ class Tools(ExtraTools):
         self._rep_flag = bool(self._repetitive(before)[0]) or bool(getattr(self, "_lm_ambiguous", False))
         if self._rep_flag and lm_deg is not None:
             lm_txt += f"（{self.REP_NOTE}）"
-        scene_deg = None
-        if sh is not None and abs(sh) < 0.45:
-            Ws, Hs = before.size
-            scene_deg = -math.degrees(math.atan(sh * 2 * math.tan(math.radians(self.V_FOV / 2)) * Ws / Hs))
+        scene_deg = self._scene_deg(before, after)[0] if (sh is None or abs(sh) < 0.45) else None   # 10/25 稽核：左右兩帶換算
         if lm_deg is not None and scene_deg is not None and abs(lm_deg - scene_deg) > max(10.0, 0.5 * abs(scene_deg)):
             if abs(lm_deg - want) <= max(5.0, 0.3 * abs(want)):
                 # 10/25 03:2x 第 8 輪：大廳人多時整張位移常是錯的（要 -9 量到 +11、要 -15 量到 +42），標點跟送出的角度接近就信標點
@@ -1193,6 +1192,51 @@ class Tools(ExtraTools):
             lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {want:+.0f} 差太多，不信）"
             lm_deg = None
         return lm_deg, lm_txt, scene_deg
+
+    SCENE_BANDS = ((0.10, 0.24), (0.24, 0.38), (0.62, 0.76), (0.76, 0.90))
+
+    def _scene_deg(self, before, after):
+        """整張位移換算鏡頭轉了幾度（10/25 稽核修正）：原本拿整寬的平均位移直接 atan，但針孔模型邊緣位移比中央大 1.4～2 倍，
+        第三人稱中央又釘著自己 → 合成純轉 10/20/30 度量成 20/31/40。
+        改成：避開中央，左右各兩條窄帶 × 上下兩塊（共 8 塊）當 2D 樣板在轉後畫面找（NCC ≥0.7），每塊用它自己的角度換算，
+        只信「往中央移」的塊（轉離那一側的塊會跑出畫面、比對到亂的），取中位數。合成純轉 10 張截圖 ×7 個角度：中位誤差 0.6 度、最大 4.1。
+        → (度 或 None, 說明)；正＝右轉。"""
+        import math
+        import numpy as np
+        if before is None or after is None:
+            return None, "沒畫面"
+        W, H = 240, 124
+        small = before.resize((W, H))
+        Wf, Hf = before.size
+        th = math.tan(math.radians(self.V_FOV / 2)) * Wf / Hf
+        acc = []
+        for x0, x1 in self.SCENE_BANDS:
+            for y0, y1 in ((0.22, 0.48), (0.48, 0.74)):
+                patch = small.crop((int(x0 * W), int(y0 * H), int(x1 * W), int(y1 * H)))
+                if np.asarray(patch.convert("L")).std() < 6:
+                    continue
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                loc = self._locate(patch, after, near=(cx, cy, 0.6, 0.05))
+                if not loc or loc[2] < 0.7:
+                    continue
+                sh = loc[0] - cx
+                if abs(sh) < 0.004:
+                    continue
+                if (cx < 0.5 and sh < 0) or (cx > 0.5 and sh > 0):
+                    continue                              # 往畫面外移＝轉離的那一側，不信
+                a0 = math.atan((cx - 0.5) * 2 * th)
+                a1 = math.atan((loc[0] - 0.5) * 2 * th)
+                acc.append((math.degrees(a0 - a1), loc[2]))
+        if not acc:
+            return None, "左右兩側都找不到能比對的東西（沒紋理或都跑出畫面）"
+        pos = [a for a in acc if a[0] > 0]
+        neg = [a for a in acc if a[0] < 0]
+        wp, wn = sum(sim for _, sim in pos), sum(sim for _, sim in neg)
+        if pos and neg and abs(wp - wn) < 0.3:
+            return None, f"左右兩側各說往一邊轉（{len(pos)} 塊說右、{len(neg)} 塊說左，中間可能有東西在動）"
+        grp = pos if wp > wn else neg
+        vals = sorted(v for v, _ in grp)
+        return vals[len(vals) // 2], f"整張位移（{len(vals)} 塊往中央移的景物，取中位）換算 {vals[len(vals) // 2]:+.0f} 度"
 
     def _shift(self, before, after, d):
         """水平位移（整張比對；被釘著的東西拉成 0% 時改只看有變的像素）→ (比例或 None, 說明)。"""
@@ -1588,8 +1632,8 @@ class Tools(ExtraTools):
             tpl = g0[y0:y0 + ph, x0:x0 + pw]
             if tpl.std() < 6:
                 continue
-            f = self._trk_find(g1, tpl, near=(p["x"], p["y"]), r=0.2, scales=tuple(x / 50 for x in range(50, 81)))
-            if not f or f[2] < 0.7 or f[3] <= 1.01:
+            f = self._trk_find(g1, tpl, near=(p["x"], p["y"]), r=0.3, scales=tuple(x / 50 for x in range(50, 101)))   # 10/25 稽核：1.6 以上找不到
+            if not f or f[2] < 0.7 or f[3] <= 1.01 or f[3] >= 1.98:        # 卡在上限＝不信
                 continue
             r = f[3]
             sec = t * r / (r - 1)
@@ -1655,7 +1699,8 @@ class Tools(ExtraTools):
             # 11:4x：k 是「換算成走 1 秒」（原始放大的 1/秒 次方），短距離的小差距換算後會被放大（0.4 秒 1.36／1.44 → 2.16／2.49）
             #   → 比原始放大（走 used 秒量到的），差 0.1 內算一致
             ok = good(d, k) and good(d2, k2) and abs(k ** used - k2 ** used) <= 0.10
-            v2 = self._v2("量比例 走1秒放大", f"{k:.2f}" if k else "量不出", f"{k2:.2f}" if k2 else "量不出", ok, "倍") + f"（走 {used} 秒量、換算成 1 秒）"
+            v2 = ((f"（二次驗證：兩次都量不出、不計一致率；走 {used} 秒量）") if (k is None and k2 is None) else   # 10/25 稽核：相同結果不算不一致
+                  self._v2("量比例 走1秒放大", f"{k:.2f}" if k else "量不出", f"{k2:.2f}" if k2 else "量不出", ok, "倍") + f"（走 {used} 秒量、換算成 1 秒）")
             if not ok:
                 if k is None and k2 is None and d >= 15 and d2 >= 15:
                     # 10/18 04:4x：兩次都「有走、但放大量不出」他只看到「換空曠處再量」→ 17 輪叫了 12 次量比例。這種是量法本身的限制，要講清楚
@@ -1697,7 +1742,7 @@ class Tools(ExtraTools):
             if sp:
                 self.startup["速度"] = f"約 {sorted(sp)[len(sp) // 2]} 身高/秒"
         return (f"深度比例：換算成走 1 秒放大 {k:.1f} 倍（{'鎖定物品' if lk else '畫面中央'}，走 {used} 秒量、量完退回原地；畫面變化 {d:.0f}）{v2}{lk_txt}。"
-                "相似三角：東西放大 r 倍＝還要走 秒數×r/(r−1) 秒才到；之後估「前方幾步」用這個換算")
+                "相似三角：走 t 秒東西放大 r 倍＝**從走之前的位置**算還要 t×r/(r−1) 秒、**從現在位置**算還要 t/(r−1) 秒（量比例 有退回原地，所以用前者；走 沒退回，用後者）")
 
     def cal_startup(self):
         """開工測試：逐項量、逐項回報（使用者要求的幾個數值）。"""
@@ -2155,7 +2200,7 @@ class Tools(ExtraTools):
         #   再去回推移動了多少像素 先知道極限值在開始量（注意真正在量時 不要靠近極限值」
         #   → 每步 10 像素慢慢往上，看兩側遠景有沒有跟著上下移（不用「畫面有沒有變」：別人在動畫面永遠在變）；連三步沒移＝頂到了。
         #     再每步 10 像素往下數到底＝上下全程幾像素；從底往上拉一半＝水平（不靠累計）。
-        #     度數：全程當 178 度（大多數 3D 遊戲上下卡在約 ±89 度）換每度 dy；之後轉頭／量測都離兩端至少 15% 全程
+        #     度數：全程當 160 度（Roblox 鏡頭上下 ±80 度；10/25 稽核：原本 178 低估每度 dy 約 10%）換每度 dy；之後轉頭／量測都離兩端至少 15% 全程
         self_note = self.find_self() if self.live and not self.image_path else ""
         top_extra, full_dy, full2 = self._find_vlimit(-1)[0], None, None
         self._vl_track = []
@@ -2168,7 +2213,7 @@ class Tools(ExtraTools):
         # 12:0x 使用者：「量測到極限之後記得要先切回水平再量測」→ 一路記住鏡頭離底端幾像素（pos），最後一律拉到全程一半＝水平才做下一項
         #   （11:59 二次驗證從底往上 90 像素就誤判頂到，原本以為在頂、往下拉半程 → 其實拉到底，對著地板做後面的量測）
         pos = 0                                    # 剛往下找到底＝0
-        est = full_dy or int(178 * self.dy_deg)     # 找不到全程時用舊刻度估
+        est = full_dy or int(160 * self.dy_deg)     # 找不到全程時用舊刻度估
         if self.verify2 and dy_ok:                # 二次驗證：從底再慢慢往上數到頂，全程再量一次
             full2, _ = self._find_vlimit(-1)
             pos = self._vl_moved                   # 往上真的動了多少（誤判停下也照實算）
@@ -2192,7 +2237,7 @@ class Tools(ExtraTools):
         first = self.person_hint.startswith("第一人稱")
         mode = "第一人稱" if first else ("第三人稱" if self.person_hint.startswith("第三人稱") else "")
         dy_from_range = dy_ok and not first
-        dy_deg = round(full_dy / 178.0, 2) if dy_from_range else self.dy_deg
+        dy_deg = round(full_dy / 160.0, 2) if dy_from_range else self.dy_deg
         if dy_ok and first:
             v2_note += f"第一人稱全程 {full_dy} 像素（跟第三人稱不同，只拿來當極限與回水平，不換每度 dy）；"
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
@@ -2230,7 +2275,7 @@ class Tools(ExtraTools):
                      "量測每度dx": round(loop_dx / 360.0, 2) if loop_dx else _h.get("量測每度dx")}
         cal["垂直"] = {"全程dy": (full_dy if dy_from_range else _v.get("全程dy")), "每度dy": dy_deg,
                      "方法": "每步 10 像素慢慢找上下極限（工具版 量刻度，10/23；每度 dy 只用第三人稱全程換）", "時間": now,
-                     "量測每度dy": round(full_dy / 178.0, 2) if dy_from_range else _v.get("量測每度dy"),
+                     "量測每度dy": round(full_dy / 160.0, 2) if dy_from_range else _v.get("量測每度dy"),
                      "全程_第一人稱": (full_dy if (dy_ok and mode == "第一人稱") else _v.get("全程_第一人稱")),
                      "全程_第三人稱": (full_dy if (dy_ok and mode == "第三人稱") else _v.get("全程_第三人稱"))}
         cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
@@ -2265,7 +2310,22 @@ class Tools(ExtraTools):
         if total > loop_dx:                      # 轉過頭的部分轉回來，第二次量才從起點開始
             self._drag(loop_dx - total, 0)
             time.sleep(0.2)
-        return loop_dx
+        # 10/25 稽核：60 像素一步解析度太粗（每度 dx 只可能 2.33／2.5／2.67）→ 在 best 附近 ±40 以 10 像素細找最像起點的位置
+        self._drag(-40, 0)
+        time.sleep(0.2)
+        pos = loop_dx - 40
+        fine = (self.diff(start, self.grab()), pos)
+        for _ in range(8):
+            self._drag(10, 0)
+            pos += 10
+            time.sleep(0.15)
+            dfine = self.diff(start, self.grab())
+            if dfine < fine[0]:
+                fine = (dfine, pos)
+        if fine[1] != pos:
+            self._drag(fine[1] - pos, 0)
+            time.sleep(0.2)
+        return fine[1]
 
     def _rule18(self, name, new, ref_measured, ref_current, manual):
         """1.8 倍規則兩個基準：比值都算給他看；任一個在 1.8 倍內就採用，兩個都超過才不採用（字串結尾「不採用；」給呼叫端判斷）。"""
@@ -2344,10 +2404,7 @@ class Tools(ExtraTools):
             lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1, chunk)
             if getattr(self, "_lm_ambiguous", False):
                 self._rep_flag = True
-            scene_deg = None
-            if sh is not None and abs(sh) < 0.45:
-                Ws, Hs = before.size
-                scene_deg = -math.degrees(math.atan(sh * 2 * math.tan(math.radians(self.V_FOV / 2)) * Ws / Hs))
+            scene_deg = self._scene_deg(before, after)[0] if (sh is None or abs(sh) < 0.45) else None   # 10/25 稽核：左右兩帶換算
             if lm_deg is not None and scene_deg is not None and abs(lm_deg - scene_deg) > max(10.0, 0.5 * abs(scene_deg)):
                 if abs(lm_deg - chunk) <= max(5.0, 0.3 * abs(chunk)):     # 10/25 03:2x：跟送出的接近就信標點（人多時整張位移不可靠）
                     lm_txt += f"（整張位移 {scene_deg:+.0f} 跟標點差很多，但標點跟送出的 {chunk:+.0f} 接近、信標點）"
@@ -2357,14 +2414,12 @@ class Tools(ExtraTools):
             if lm_deg is not None and scene_deg is None and abs(lm_deg - chunk) > max(15.0, abs(chunk)):
                 lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {chunk:+.0f} 差太多，不信）"
                 lm_deg = None
-            if lm_deg is None and (sh is None or abs(sh) >= 0.45):
+            if lm_deg is None and scene_deg is None:
                 meas += chunk
                 parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ 這段照送出的算、停在這裡")
                 stopped = True
                 break
-            W, H = before.size
-            th = math.tan(math.radians(self.V_FOV / 2)) * W / H
-            turned = lm_deg if lm_deg is not None else -math.degrees(math.atan(sh * 2 * th))   # 標點優先；景物往左移＝鏡頭往右轉
+            turned = lm_deg if lm_deg is not None else scene_deg   # 標點優先；整張位移用左右兩帶換算
             lm_used += lm_deg is not None
             meas += turned
             parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'標點' if lm_deg is not None else '整張位移，僅參考'}）")
@@ -2620,7 +2675,12 @@ class Tools(ExtraTools):
             bottom, _ = self._find_vlimit(+1)
             down_px = self._vl_moved
             top, _ = self._find_vlimit(-1)
-            full = top if top else (self.vrange_px or int(178 * self.dy_deg))
+            if down_px == 0 and self._vl_moved == 0:
+                # 10/25 稽核：往下、往上都量到 0 像素（不可能同時在頂又在底）→ 原本照樣用記的全程盲拉 240 像素再把水平儀歸零
+                self._depth_log(種類="修水平 找底再找頂", 往下像素=0, 往上全程=0, 用的全程=None, 水平儀原本=round(was, 1), 結果="兩方向都 0、沒拉")
+                return ("修水平：每步 10 像素慢慢往下、往上都量不到鏡頭有在動（0 像素）＝畫面沒紋理（整片天花板／地板／牆）或鏡頭被鎖，"
+                        "**沒有拉、水平儀沒歸零**（原本累計 " + f"{was:+.0f} 度）；先 仰(-30) 或 轉(30) 看畫面會不會變，到看得到牆和地的地方再 修水平")
+            full = top if top else (self.vrange_px or int(160 * self.dy_deg))
             self._drag(0, full // 2)
             time.sleep(0.3)
             if TOOLFIX and not top:
@@ -2645,7 +2705,7 @@ class Tools(ExtraTools):
         tv = math.tan(math.radians(self.V_FOV / 2))
         th = tv * W / H
         yaw = math.degrees(math.atan((fx - 0.5) * 2 * th))        # 正＝往右
-        pitch = math.degrees(math.atan((0.5 - fy) * 2 * tv))      # 正＝往上
+        pitch = math.degrees(math.atan((0.5 - fy) * 2 * tv / math.sqrt(1 + ((fx - 0.5) * 2 * th) ** 2)))      # 正＝往上（10/25 稽核：偏離中央的點要除以 √(1+x²)）
         return yaw, pitch
 
     @staticmethod
@@ -2667,10 +2727,11 @@ class Tools(ExtraTools):
         den = np.sqrt((wm ** 2).sum(axis=(2, 3)) * (pm ** 2).sum()) + 1e-6
         ncc = num / den
         if near is not None:              # 只在預期位置附近找（18:1x～18:4x 整張找：相似度 0.6～0.8 的錯位置被當真，補轉越轉越偏）
-            nx, ny, r = near
+            nx, ny, r = near[:3]
+            ry = near[3] if len(near) > 3 else r          # 10/25 稽核：純左右轉時 y 幾乎不變，標點搜尋 y 要收窄
             cy0, cx0 = ny * H - ph / 2, nx * W - pw / 2
             yy, xx = np.mgrid[0:ncc.shape[0], 0:ncc.shape[1]]
-            ncc = np.where((np.abs(xx - cx0) <= r * W) & (np.abs(yy - cy0) <= r * H), ncc, -1.0)
+            ncc = np.where((np.abs(xx - cx0) <= r * W) & (np.abs(yy - cy0) <= ry * H), ncc, -1.0)
         iy, ix = np.unravel_index(int(np.argmax(ncc)), ncc.shape)
         if not second:
             return ((ix + pw / 2) / W, (iy + ph / 2) / H, float(ncc[iy, ix]))
@@ -2804,7 +2865,6 @@ class Tools(ExtraTools):
             # 17:38～17:43 三次「找不到」：目標轉到正中央剛好被自己的角色（第三人稱）擋住 → 改用整張畫面的左右位移驗證有沒有轉對
             d_all = self.diff(before, after)
             sh, _ = self._shift(before, after, d_all)
-            exp = 0.5 - fx
             if chunk_meas is not None:
                 meas, parts, lm_used = chunk_meas
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
@@ -2831,13 +2891,10 @@ class Tools(ExtraTools):
                                + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if scene_deg is not None else ""))
                     out.append(self._cmp("視角移動到 標點實測", f"{yaw:+.0f}", f"{lm_deg:+.0f}", ok, "度")
                                + ("（目標應該就在正中央、被你自己的角色擋住看不到）" if ok else "（差太多，可能沒轉到、或滑鼠拖到一半被擋）"))
-                elif sh is not None and abs(exp) >= 0.03:
-                    ok_sh = abs(sh - exp) <= 0.05
-                    out.append(head + f"→ 標點量不到（{lm_txt}）、改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
-                               f"實測往{'左' if sh < 0 else '右'}移 {abs(sh) * 100:.0f}%（畫面變化 {d_all:.0f}）"
-                               + (f"≈ 轉了 {scene_deg:+.0f} 度" if scene_deg is not None else ""))
-                    out.append(self._v2("視角移動到 位移", f"{exp * 100:+.0f}", f"{sh * 100:+.0f}", ok_sh, "%") + "（第一次＝應該移、第二次＝實測）")
-                    ok = ok_sh
+                elif scene_deg is not None and abs(yaw) >= 3:
+                    ok = abs(scene_deg - yaw) <= max(5.0, 0.15 * abs(yaw))      # 10/25 稽核：改比度數、用 _cmp（原本「要 vs 實測」混進二次驗證一致率）
+                    out.append(head + f"→ 標點量不到（{lm_txt}）、改用整張位移（左右兩帶）換算：鏡頭轉了約 {scene_deg:+.0f} 度（要轉 {yaw:+.0f} 度；畫面變化 {d_all:.0f}）")
+                    out.append(self._cmp("視角移動到 整張位移", f"{yaw:+.0f}", f"{scene_deg:+.0f}", ok, "度") + "（沒有標點，整張位移沒標點準）")
                 else:
                     out.append(f"轉完找不到原本那一塊，標點（{lm_txt}）和整張畫面的位移也量不出來（畫面變化 {d_all:.0f}），看下一張畫面確認")
         if final and final[2] >= GOOD and loc1 and loc1[2] >= GOOD:
