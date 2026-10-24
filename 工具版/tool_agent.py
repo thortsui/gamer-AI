@@ -732,10 +732,18 @@ class Tools(ExtraTools):
             after = self.grab()
             dd = self.diff(before, after)
             z = self.zoom_factor(before, after) if k == "w" else None
+            if z is None and k == "w" and TOOLFIX and self.self_mask is not None:
+                z = self._zoom_factor_masked(before, after)          # 10/25 工具迭代：找自己 量到的那塊挖掉再量
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else
                      ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
+            if TOOLFIX and k == "w" and z is None and dd >= 8:
+                # 10/25 工具迭代：走路時畫面在變、中央卻有一大塊完全沒動＝釘在畫面上的東西（照片／面板／提示），不是場景裡擋路的
+                fixed = [(x, y) for x, y in self._fixed_blocks(before, after) if 0.3 <= x <= 0.7 and 0.2 <= y <= 0.8]
+                if len(fixed) >= 4:
+                    z_txt += (f"；⚑ 中央有 {len(fixed)} 格走路時完全沒動（約 ({sum(x for x, _ in fixed) / len(fixed):.2f},{sum(y for _, y in fixed) / len(fixed):.2f})）"
+                              "＝釘在畫面上的東西（照片、面板、提示框），不是場景裡擋路的；不確定就 確認是否是UI，要關就 關掉 或 點 它的叉叉")
             if self.verify2:
                 time.sleep(0.3)
                 after2 = self.grab()
@@ -1209,6 +1217,33 @@ class Tools(ExtraTools):
             r = Tools._zoom_factor_center(a, b)
             return r if r is not None else Tools.zoom_factor_ring(a, b)
         return Tools._zoom_factor_center(a, b)
+
+    def _zoom_factor_masked(self, a, b):
+        """挖掉 找自己 量到的自己那塊（self_mask 240×124）再比中央放大；自己佔掉中央 70% 以上就退回比四周。"""
+        import numpy as np
+        from PIL import Image
+        W, H = 320, 180
+        m = np.asarray(Image.fromarray(self.self_mask.astype(np.uint8) * 255).resize((W, H), Image.NEAREST)) > 0
+        x0, y0, x1, y1 = 80, 45, 240, 135
+        valid = ~m[y0:y1, x0:x1]
+        if valid.mean() < 0.3:
+            return Tools.zoom_factor_ring(a, b)
+        ga = a.convert("L").resize((W, H))
+        gb = np.asarray(b.convert("L").resize((W, H)), dtype=np.float32)[y0:y1, x0:x1][valid]
+        best, best_k, v1 = None, 1.0, None
+        for k10 in range(50, 101):
+            k = k10 / 50.0
+            w, h = 160 / k, 90 / k
+            box = (int(160 - w / 2), int(90 - h / 2), int(160 + w / 2), int(90 + h / 2))
+            pa = np.asarray(ga.crop(box).resize((160, 90), Image.BILINEAR), dtype=np.float32)[valid]
+            v = float(np.abs(pa - gb).mean())
+            if k10 == 50:
+                v1 = v
+            if best is None or v < best:
+                best, best_k = v, k
+        if best_k in (1.0, 2.0) or v1 is None or (v1 - best) < 0.08 * v1:
+            return None
+        return best_k
 
     @staticmethod
     def _zoom_factor_center(a, b):
@@ -2073,7 +2108,39 @@ class Tools(ExtraTools):
             return "度數太小（<3 度）沒意義"
         # 11:0x 使用者：「轉幾度要按照他輸入的計算才對」→ 他填幾度就送 幾度×每度dx，不分段、不改值
         # （底層 _drag 自己會把超過 220 像素的拖曳拆成小段，但總量照他的數字）
+        if TOOLFIX and abs(d) > 50 and self.live and not self.image_path:
+            # 10/25 00:4x 工具迭代：轉 ≥50 度前後畫面沒重疊量不出（六個模型 40/40 都還是照轉）→ 總量照他的數字，但分成 ≤45 度一段一段轉、每段實測、合計
+            meas, parts = self._turn_chunks(d)
+            ok = abs(meas - d) <= max(5.0, 0.15 * abs(d))
+            return (f"轉 {d:+.0f} 度：分段轉（每段 ≤45 度、每段實測）{parts}；合計實測鏡頭轉了 {meas:+.0f} 度（要轉 {d:+.0f}）；"
+                    + self._v2("轉頭合計", f"{d:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝要轉、第二次＝實測合計）")
         return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 180, 30)
+
+    def _turn_chunks(self, deg):
+        """把 deg 度拆成 ≤45 度的段，一段一段拖、每段量景物位移換算成實際轉了幾度 → (合計實測度數, 每段說明)。正＝右。"""
+        import math
+        n = max(1, int(math.ceil(abs(deg) / 45.0)))
+        chunk = deg / n
+        meas, parts = 0.0, []
+        for i in range(n):
+            before = self.grab()
+            self._drag(chunk * self.dx_deg, 0)
+            after = self._settled()
+            dd = self.diff(before, after)
+            if dd < 3:                                           # 中央有提示擋住拖不動 → 從上方重拖
+                self._drag(chunk * self.dx_deg, 0, fy=0.25)
+                after = self._settled()
+                dd = self.diff(before, after)
+            sh, _ = self._shift(before, after, dd)
+            if sh is None or abs(sh) >= 0.45:
+                parts.append(f"第{i + 1}段 {chunk:+.0f}→量不出")
+                continue
+            W, H = before.size
+            th = math.tan(math.radians(self.V_FOV / 2)) * W / H
+            turned = -math.degrees(math.atan(sh * 2 * th))         # 景物往左移＝鏡頭往右轉
+            meas += turned
+            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}")
+        return meas, "、".join(parts)
 
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
     PITCH_LIM = 45.0
@@ -2461,7 +2528,12 @@ class Tools(ExtraTools):
         pitch0 = max(-60.0, min(60.0, pitch))
         pitch = self._pitch_room(pitch0)                  # 10/23：上下只能 ±45 度
         lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度）" if abs(pitch - pitch0) >= 1 else "")
-        self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
+        chunk_meas = None
+        if TOOLFIX and abs(yaw) > 50 and self.live and not self.image_path:
+            chunk_meas = self._turn_chunks(yaw)                # 10/25 工具迭代：大角度一次轉量不出 → 分段轉、每段實測
+            self._drag(0, -pitch * self.dy_deg)
+        else:
+            self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
         after = self._settled()
         redrag = ""
@@ -2530,7 +2602,13 @@ class Tools(ExtraTools):
             d_all = self.diff(before, after)
             sh, _ = self._shift(before, after, d_all)
             exp = 0.5 - fx
-            if sh is not None and abs(exp) >= 0.03:
+            if chunk_meas is not None:
+                meas, parts = chunk_meas
+                ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
+                out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
+                           f"合計實測 {meas:+.0f} 度（要轉 {yaw:+.0f}）")
+                out.append(self._v2("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝要轉、第二次＝實測合計）")
+            elif sh is not None and abs(exp) >= 0.03:
                 ok_sh = abs(sh - exp) <= 0.05
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住"
                            + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + f"）→ 改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
