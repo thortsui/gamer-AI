@@ -3497,9 +3497,12 @@ class Tools(ExtraTools):
         if keys and not kw and params:           # 12:5x 他用英文鍵名 {"labels": "door"}：鍵名對不上就照順序塞
             kw = {k: v for k, v in zip(keys, params.values())}
         try:
+            import inspect
+            try:
+                inspect.signature(fn).bind(**kw)
+            except TypeError:                     # 10/25 審查：原本工具裡任何 TypeError 都會無參數再叫一次 → 有副作用的工具做兩次；改成只在參數對不上時才不帶參數
+                kw = {}
             return str(fn(**kw))
-        except TypeError:
-            return str(fn())
         except Exception as e:  # noqa: BLE001
             return f"「{name}」執行失敗：{e}"
 
