@@ -128,11 +128,16 @@ class ExtraTools:
             return f"描述畫面失敗：{e}"
         LAST_REASONING["text"] = ""
         dt = time.time() - t0
-        d = {}
+        d, cur = {}, None
         for line in raw.splitlines():
             m = re.match(r"\s*[-*•]?\s*\**(" + "|".join(self.DESC_KEYS) + r")\**\s*[:：]\s*(.*)", line)
             if m and m.group(1) not in d:
-                d[m.group(1)] = m.group(2).strip()
+                cur = m.group(1)
+                d[cur] = m.group(2).strip()
+            elif cur and line.strip():
+                # 10/24 19:1x：Sonnet 把「場景：」「介面：」的項目寫在下面幾行（- 東西 (x,y)），原本只讀同一行 → 整欄空白（Sonnet 標準組 14/15 次）
+                item = re.sub(r"^\s*[-*•]\s*", "", line).strip()
+                d[cur] = (d[cur] + "；" if d[cur] else "") + item
         if not d:
             return f"描述畫面沒有回答（{dt:.0f} 秒）；OCR 讀到：" + ("、".join(ocr[:15]) or "沒有字")
         items, n = [], 0
