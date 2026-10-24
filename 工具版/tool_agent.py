@@ -2447,7 +2447,9 @@ class Tools(ExtraTools):
         patch = small.crop(box)
         yaw, pitch = self._angles_to(fx, fy, W, H)
         # 10/24 20:2x 工具修正：第三人稱時目標轉到正中央就被自己的角色蓋住（轉完找不到 30～70%）→ 對到中央偏上 0.38（自己頭頂上方），左右還是正中
-        ay = 0.38 if (TOOLFIX and "第三" in str(self.startup.get("人稱", ""))) else 0.5
+        # 10/25 00:0x 實測 41 輪後撤回：每次對準都多低頭 9.5 度，對幾次就把鏡頭壓到 -45 度極限（之後 dy 一律 0、目標到不了 0.38、找不到 15/22 反而更差）
+        #   → 回到對正中央；被自己擋住時靠下面的「整張畫面位移」驗證。第三人稱擋中央的問題留給 走路量距離（已挖掉中央）處理
+        ay = 0.5
         if ay != 0.5:
             pitch -= self._angles_to(0.5, ay, W, H)[1]
         pitch0 = max(-60.0, min(60.0, pitch))
