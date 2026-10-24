@@ -465,6 +465,9 @@ class ExtraTools:
             self.patch_watch = ([w for w in self.patch_watch if w["名稱"] != name] + [{"名稱": name, "tpl": tpl, "h0": tpl.shape[0], "x": x, "y": y}])[-4:]
             return (f"開始每輪追蹤「{name}」（從 ({x:.2f},{y:.2f}) 切一塊圖當它的長相）；面板【追蹤】每輪告訴你它在哪、變大還變小；"
                     "要走過去就 走過去(" + name.split("]")[0].strip("[") + ")")
+        # 10/24 稽核：編號／中文名稱找不到時，原本把錯誤丟掉、改當英文標籤去追（回「開始追蹤：2」）→ 照實回報
+        if isinstance(r, str) and r != "英文標籤" and not re.fullmatch(r"[A-Za-z _,，、]+", q):
+            return r
         labels = [x.strip() for x in re.split(r"[,，、]", q) if x.strip()]
         if not labels:
             return "追蹤 要給 描述畫面的編號、座標，或英文標籤，例：追蹤(2)、追蹤(0.72,0.55)、追蹤(door)"
@@ -574,8 +577,11 @@ class ExtraTools:
         except OSError:
             pass
         m = re.search(r"## 明天開場要做什麼\n(.*?)(?=\n## |\Z)", big, flags=re.S)
-        return ("大檢討寫好了（記憶/工具版/大檢討.md，之後開機會帶進來）。你排的開場：" + NL + (m.group(1).strip() if m else "（沒解析到）")
-                if big else "大檢討失敗：" + (r.stderr or r.stdout)[-300:])
+        out_txt = (r.stdout or "") + (r.stderr or "")
+        if "解析失敗" in out_txt or r.returncode != 0 or not big:
+            # 10/24 稽核：解析失敗時 big_review 不覆蓋，原本照樣讀舊檔回「寫好了」
+            return "大檢討失敗（這次沒寫進去，大檢討.md 還是上一次的）：" + out_txt.strip()[-300:]
+        return "大檢討寫好了（記憶/工具版/大檢討.md，之後開機會帶進來）。你排的開場：" + NL + (m.group(1).strip() if m else "（沒解析到）")
 
     def learn_death_review(self):
         """死亡檢討：剛死掉就叫，回顧死前最近 15 輪。"""
@@ -696,9 +702,11 @@ class ExtraTools:
             return "記按鈕 要給名稱，例如 記按鈕(立即開始,0.62,0.80,進場)"
         if str(x).strip() in ("刪", "刪除", "忘記") or str(效果).strip() in ("刪", "刪除", "忘記"):
             return self.mem_forget_button(名稱)          # 忘記按鈕 併進來
-        last = self.pending_click or {}
+        last = self.pending_click or getattr(self, "last_click", None) or {}   # 10/24 稽核：點完（預約已清）也拿得到剛點的位置
         fx = x if str(x).strip() else last.get("x", "")
         fy = y if str(y).strip() else last.get("y", "")
+        if fx == "" or fy == "":
+            return "記按鈕 沒有座標：x,y 沒寫、也沒有剛預約或剛點過的位置。寫成 記按鈕(名稱,x,y,效果)"
         book[str(名稱)] = {"x": fx, "y": fy, "效果": 效果, "時間": datetime.now().strftime("%m/%d %H:%M")}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(book, f, ensure_ascii=False, indent=1)

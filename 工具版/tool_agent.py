@@ -312,7 +312,10 @@ def _parse_call(item, cat):
                 return name, {k: str(v) for k, v in obj.items()}
         except json.JSONDecodeError:
             pass
-    args = [x.strip() for x in re.split(r"[,，、]", raw)] if raw and raw.strip() else []
+    # 10/24 22:1x 稽核：「、」也當分隔 → 檢討／突發狀況／新工具 內容寫了「、」就錯位 → 只用逗號分；逗號分不夠格數、又有「、」才退回連「、」一起分
+    args = [x.strip() for x in re.split(r"[,，]", raw)] if raw and raw.strip() else []
+    if raw and "、" in raw and len(args) < len(keys) and len(keys) > 1:
+        args = [x.strip() for x in re.split(r"[,，、]", raw)]
     params = {}
     if len(keys) == 1 and args:
         params[keys[0]] = raw.strip()
@@ -490,6 +493,14 @@ class Tools(ExtraTools):
             files += [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".md")]
         key = str(名稱).strip()
         hit = [p for p in files if key and key in os.path.basename(p)]
+        if not hit and key:
+            # 10/24 22:1x 稽核：目錄寫的名稱（卡住就重開、開場三件事…）不是檔名的子字串 → 字有一半以上對得上也算
+            import difflib
+            def score(p):
+                n = re.sub(r"^\d+_|\.md$", "", os.path.basename(p))
+                return max(difflib.SequenceMatcher(None, key, n).ratio(), len(set(key) & set(n)) / max(1, len(set(key))))
+            best = max(files, key=score) if files else None
+            hit = [best] if best and score(best) >= 0.5 else []
         if not hit:
             names = "、".join(re.sub(r"^\d+_|\.md$", "", os.path.basename(p)) for p in files)
             return f"沒有叫「{key}」的文件。有的：{names}"
@@ -499,7 +510,7 @@ class Tools(ExtraTools):
 
     def doc_memory(self, 類別=""):
         m = os.path.join(self.gdir, "記憶")
-        table = {"玩法摘要": "玩法摘要.md", "成功做法": "成功檢討.md", "卡住檢討": "卡住檢討.md", "死亡檢討": "死亡檢討.md",
+        table = {"玩法摘要": "玩法摘要.md", "成功做法": "成功檢討.md", "卡住檢討": os.path.join("工具版", "檢討.md"), "死亡檢討": os.path.join("工具版", "死亡檢討.md"),
                  "操作手冊": "操作手冊.md", "遇到的問題": "遇到的問題.md", "因果": "因果.md", "學到的": "學到的.md",
                  "地圖": "研究筆記.md", "筆記": os.path.join("工具版", "筆記.md"),
                  "大檢討": os.path.join("工具版", "大檢討.md"), "卡法": os.path.join("工具版", "卡法.md"),
@@ -507,7 +518,8 @@ class Tools(ExtraTools):
                  "流程": os.path.join("工具版", "流程.md"), "成功做法": os.path.join("工具版", "成功做法.md"),
                  "死亡": os.path.join("工具版", "死亡檢討.md"), "學習整理": os.path.join("工具版", "學習整理.md"),
                  "慢想": os.path.join("工具版", "慢想.md"), "互動物": os.path.join("工具版", "互動物.md"),
-                 "標點": os.path.join("工具版", "標點.md"), "地點": os.path.join("工具版", "地點.md")}
+                 "標點": os.path.join("工具版", "標點.md"), "地點": os.path.join("工具版", "地點.md"),
+                 "觸碰物": os.path.join("工具版", "觸碰物.md"), "檢討": os.path.join("工具版", "檢討.md")}   # 10/24 稽核：工具版的檔叫得出來
         key = str(類別).strip()
         f = next((v for k, v in table.items() if key and key in k), None)
         if not f:
@@ -587,8 +599,18 @@ class Tools(ExtraTools):
             im = self.grab()
             if im is not None:
                 shots.append((f"右轉 {90 * (i + 1)} 度", im))
-        self.extra_images = shots
-        return "拍了 4 張（右轉 90／180／270／360 度），下一輪附給你；方向已轉回原點"
+        self.extra_images = list(getattr(self, "extra_images", None) or []) + shots
+        # 10/24 稽核：目錄說每張附 OCR 到的字，原本沒做 → 每張讀字（讀不到就略過）
+        words = []
+        for lab, im in shots:
+            try:
+                ws = list(self._words(im).keys())[:8]
+            except Exception:  # noqa: BLE001
+                ws = []
+            if ws:
+                words.append(f"{lab}：" + "、".join(ws))
+        return ("拍了 4 張（右轉 90／180／270／360 度），下一輪附給你；方向已轉回原點"
+                + (("。每張讀到的字：" + "｜".join(words)) if words else "。四張都沒讀到字"))
 
     # ---- 10/20 12:1x：12:06～12:08 Roblox Studio（使用者自己的專案）跑到前景，程式照樣按 a、拖右鍵、esc→l→enter，
     #      按鍵全送進 Studio → 送任何輸入前先確認前景是遊戲視窗。使用者 60 秒內有動滑鼠鍵盤＝有人在用電腦，不搶前景、不按；
@@ -2715,7 +2737,8 @@ class Tools(ExtraTools):
         if im is not None:
             W, H = im.size
             box = (max(0, int(fx * W) - 220), max(0, int(fy * H) - 90), min(W, int(fx * W) + 220), min(H, int(fy * H) + 90))
-            self.extra_images = [(f"預約要點的位置 ({fx:.2f},{fy:.2f}) 放大圖", im.crop(box))]
+            # 10/24 稽核：同一輪先 看四周 再 點，原本會把四張環視圖蓋掉 → 接在後面
+            self.extra_images = list(getattr(self, "extra_images", None) or []) + [(f"預約要點的位置 ({fx:.2f},{fy:.2f}) 放大圖", im.crop(box))]
         self.pending_click = {"x": fx, "y": fy, "字": str(字 or ""), "附近的字": near, "時間": time.time()}
         return (f"已預約點 ({fx:.2f},{fy:.2f}){'「' + str(字) + '」' if 字 else ''}；附近的字：{near or '無'}。"
                 "**還沒點**。下一輪看放大圖，逐條審核絕對限制（不花錢／不換職業／不離開），確定才送 確認點(審核)，不對就 取消點")
@@ -2733,6 +2756,7 @@ class Tools(ExtraTools):
             self.pending_click = None
             return "預約超過 3 分鐘，畫面可能變了，取消；要點就重新預約"
         self._append("點擊審核.md", f"點({p['x']:.2f},{p['y']:.2f}){p['字']}｜附近:{p['附近的字']}｜審核:{審核}")
+        self.last_click = p                # 10/24 稽核：點完再 記按鈕(名稱,,,效果) 要拿得到剛點的位置
         self.pending_click = None
         return "確認通過 → " + self._do_click(p["x"], p["y"])
 
@@ -3355,6 +3379,8 @@ def repair_json(raw):
     except json.JSONDecodeError:
         pass
     s = re.sub(r'結果應該是"\s*:\s*"', "結果應該是:", s)
+    # 10/24 21:0x：Sonnet 寫成 {"做":"…","結果應該是:鏡頭…"}（冒號跑進字串、少了值）→ 補回 "結果應該是":"…"
+    s = s.replace(',"結果應該是:', ',"結果應該是":"')   # 只有鍵前面才會是 ,"（想 欄裡的「｜結果應該是:」不會被改）
     objs = re.findall(r"\{.*?\}(?=\s*\{|\s*$)", s, flags=re.S)
     if len(objs) > 1:
         for cand in reversed(objs):
