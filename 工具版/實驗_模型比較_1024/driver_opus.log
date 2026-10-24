@@ -1,0 +1,5 @@
+10/24 14:20:15 起點已存在（續跑），不重存
+10/24 14:20:16 本地現在的記憶存到 _本地現況_opus
+10/24 14:20:16 記憶還原成 _起點
+10/24 14:21:25 重開遊戲完成（60 秒）
+10/24 14:21:25 4_opus標準 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain opus

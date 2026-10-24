@@ -80,6 +80,7 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
     rec = {"時間": time.strftime("%H:%M:%S"), "實驗": CFG["label"], "模型": CFG["model"], "思考": EFFORT.get(effort, "medium"),
            "session": CFG["session"]}
     raw, trunc, ttft, usage, thinking, searches = "", False, None, None, [], []
+    texts = []
     try:
         p = subprocess.run(cmd, input=json.dumps(msg, ensure_ascii=False) + "\n", capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=remaining, cwd=CWD, env=env)
@@ -94,8 +95,10 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
                         thinking.append(b["thinking"])
                     elif b.get("type") in ("tool_use", "server_tool_use"):
                         searches.append(f"{b.get('name')}:{json.dumps(b.get('input'), ensure_ascii=False)[:200]}")
-                    elif b.get("type") == "text" and ttft is None:
-                        ttft = time.time() - t0
+                    elif b.get("type") == "text":
+                        texts.append(b.get("text") or "")      # 10/24：result 只給最後一段文字（Haiku 4 輪 JSON 前半掉了）→ 全部接起來
+                        if ttft is None:
+                            ttft = time.time() - t0
             elif o.get("type") == "result":
                 if CFG["native"] and o.get("session_id"):
                     CFG["session"] = o["session_id"]
@@ -107,6 +110,10 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
                     cost, CFG["cost_total"] = max(0.0, cost - CFG["cost_total"]), cost
                 rec.update(API秒=round((o.get("duration_api_ms") or 0) / 1000, 1), 費用=round(cost, 6),
                            結果=o.get("subtype"), 輪數=o.get("num_turns"))
+        if CFG["native"] and texts:
+            raw = texts[-1] if (texts[-1] or "").lstrip().startswith(("{", "`")) else "".join(texts)   # 原生會先講話再呼叫工具，取最後的 JSON
+        elif texts and len("".join(texts)) > len(raw):
+            raw = "".join(texts)
         if not raw and p.returncode:
             rec["錯誤"] = (p.stderr or p.stdout)[-400:]
     except subprocess.TimeoutExpired:

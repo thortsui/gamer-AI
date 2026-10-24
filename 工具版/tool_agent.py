@@ -3297,6 +3297,8 @@ def repair_json(raw):
     3. 10/16 01:0x（3/42 輪）：整個物件寫完只少最後的 } 或 ] → 數括號（略過字串內）補上。
     4. 10/16 02:2x：結尾多一個 }（Extra data）→ 取第一個完整物件；結尾多了 "（]"}）→ 從尾巴退幾個字再補括號。"""
     s = str(raw or "")
+    # 10/24 14:3x：Claude 常把 JSON 包在 ```json … ``` 裡 → 先拿掉，不然合法 JSON 會被下面的改寫弄壞（Haiku、Sonnet、Opus 都有輪因此 無法解析）
+    s = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", s)
     try:                                   # 10/16 12:0x：本來就合法的 JSON 不動（他把「結果應該是」寫成獨立欄位時，下面的改寫會把它弄壞）
         if isinstance(json.loads(s.strip()), dict):
             return s
