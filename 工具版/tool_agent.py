@@ -2508,6 +2508,8 @@ class Tools(ExtraTools):
                     f"水平儀原本以為{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度（累計會跟真的差：開選單時拖、轉到極限都還在算），已歸零")
         # 10/25 審查：原本下面還有「看自己對照表」「照水平儀拉回」兩段，上面的 if True 已經 return，永遠到不了 → 刪掉
 
+    V_FOV = 70.0          # Roblox 預設垂直視角；10/18 刻度樣本：轉 10／20／30 度實測位移 6／12／19%，照這個針孔模型算 6.5／13／21%
+
     def _angles_to(self, fx, fy, W, H):
         import math
         tv = math.tan(math.radians(self.V_FOV / 2))
