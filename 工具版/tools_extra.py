@@ -175,7 +175,8 @@ class ExtraTools:
                     md = re.search(r"約?\s*(\d+(?:\.\d+)?)\s*個?\s*身高", part)
                     name = re.sub(r"[｜|]?\s*約?\s*[\d.]+\s*個?\s*身高\s*遠?", "", name).strip(" ，,、｜") or "東西"   # 10/25 審查：空名稱補字
                     items.append({"編號": n, "名稱": name, "x": float(m.group(1)), "y": float(m.group(2)), "種類": k,
-                                  "身高": (float(md.group(1)) if md else None)})
+                                  "身高": (float(md.group(1)) if md else None),
+                                  "秒": (round(float(md.group(1)) / self.walk_speed()[0], 1) if md else None)})
                     parts.append(f"[{n}]" + part.strip())
                 elif part.strip():
                     parts.append(part.strip())
@@ -189,7 +190,11 @@ class ExtraTools:
         self.last_desc = {"類型": kind, "時間": datetime.now().strftime("%H:%M")}      # 10/25 審查：原本的「總結」鍵永遠是空的
         lines = [f"【畫面描述】（描述員只看這張圖、不懂遊戲規則；{dt:.0f} 秒{'，時間到只收到前面幾行' if trunc else ''}）"]
         self.desc_timing = (round(t_ocr, 1), round(dt, 1), len(raw))
-        lines += [f"{k}：{d[k]}" for k in self.DESC_KEYS if k in d]
+        # 10/25 使用者：距離單位一律改成移動時間 → 描述員用身高當尺（圖上看得出來），回給他之前換成「約幾秒走路」
+        lines += [f"{k}：{self._heights_to_sec(d[k])}" for k in self.DESC_KEYS if k in d]
+        v, is_default = self.walk_speed()
+        if any("身高" in d[k] for k in self.DESC_KEYS if k in d):
+            lines.append("（距離已換算成走路秒數" + (f"；走路速度還沒校準、用預設 {v:g} 身高/秒，量比例 鎖到描述畫面有給距離的東西就會校準" if is_default else f"；走路速度實測 {v:g} 身高/秒") + "）")
         if items:
             lines.append("→ 要走去其中一個：走過去(編號)；要每輪盯著：追蹤(編號)")
         if self.desc_changed:

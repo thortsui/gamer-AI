@@ -43,4 +43,8 @@ if im is not None:
 check("釘住判斷 小角度跟著景物移→不是釘住", not T.Tools._pin_ok(0.03, 0.02, 0.04, 0.02))
 check("釘住判斷 大角度幾乎沒動→釘住", T.Tools._pin_ok(0.005, 0.0, 0.41, 0.2))
 check("釘住判斷 OCR 抖 0.01 仍算釘住", T.Tools._pin_ok(0.01, 0.008, 0.3, 0.0))
+v, dflt = t.walk_speed(); check("走路速度 預設 3 身高/秒", v == 3.0 and dflt, (v, dflt))
+t.startup["速度"] = "約 2.5 身高/秒"; v2, d2 = t.walk_speed(); check("走路速度 讀校準值", v2 == 2.5 and not d2, (v2, d2))
+r = t._heights_to_sec("前方：約 5 個身高 牆；場景：門 (0.3,0.5) 約 2.5 個身高遠；自己 1 個身高"); check("身高→秒走路", r == "前方：約 2.0 秒走路 牆；場景：門 (0.3,0.5) 約 1.0 秒走路遠；自己約 0.4 秒走路", r)
+t.startup.pop("速度", None)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

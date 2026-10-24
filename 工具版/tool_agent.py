@@ -715,6 +715,29 @@ class Tools(ExtraTools):
         time.sleep(d)
         pydirectinput.keyUp(k)
 
+    DEFAULT_WALK_SPEED = 3.0        # 身高/秒（還沒校準時的預設；量比例 鎖到描述畫面給了距離的東西後換成實測）
+
+    def walk_speed(self):
+        """走路速度（每秒幾個自己的身高）→ (值, 是不是預設)。10/25 使用者：距離單位一律改成移動時間，描述畫面估的「幾個身高」要用它換算成秒。"""
+        m = re.search(r"([\d.]+)", str(self.startup.get("速度", "")))
+        try:
+            v = float(m.group(1)) if m else 0.0
+        except ValueError:
+            v = 0.0
+        return (v, False) if v > 0 else (self.DEFAULT_WALK_SPEED, True)
+
+    def _heights_to_sec(self, text):
+        """把字串裡的「約 N 個身高（遠）」換成「約 X 秒走路（遠）」（10/25 使用者：所有距離單位不要用公尺、改成移動時間）。"""
+        v, _ = self.walk_speed()
+
+        def rep(m):
+            try:
+                h = float(m.group(1))
+            except ValueError:
+                return m.group(0)
+            return f"約 {h / v:.1f} 秒走路" + ("遠" if m.group(2) else "")
+        return re.sub(r"約?\s*(\d+(?:\.\d+)?)\s*個?\s*身高(\s*遠)?", rep, str(text))
+
     def depth_k(self):
         """走 1 秒畫面中央放大幾倍（開工測試／量比例量的）；沒有就讀校準檔；都沒有回 None。"""
         s = str(self.startup.get("深度比例", ""))
@@ -748,7 +771,7 @@ class Tools(ExtraTools):
                 z = self._zoom_factor_masked(before, after)          # 10/25 工具迭代：找自己 量到的那塊挖掉再量
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
-            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" if z else
+            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" + (f"＝中央那個東西還要走約 {d * z / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
                      ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
             if TOOLFIX and k == "w" and z is None and dd >= 8:
                 # 10/25 工具迭代：走路時畫面在變、中央卻有一大塊完全沒動＝釘在畫面上的東西（照片／面板／提示），不是場景裡擋路的
@@ -1207,7 +1230,8 @@ class Tools(ExtraTools):
         zoom = ("⚠ 量完之後捲過鏡頭（" + self.zoomed_at + "）：②③④ 是捲之前量的、已經不準——要重新 開工測試＋驗開工（使用者交代：縮放過就要重新測量）｜"
                 if getattr(self, "zoomed_at", "") else "")
         return (zoom + f"①畫面 {s.get('畫面', '?')}｜②每度 dx {s.get('每度dx', '?')}｜③每度 dy {s.get('每度dy', '?')}"
-                f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜{v_txt}｜量於 {s.get('時間', '?')}")
+                f"｜④深度比例 {s.get('深度比例', '?')}｜⑤人稱 {s.get('人稱', '（你還沒回報，用 回報人稱(第幾人稱)）')}｜{v_txt}"
+                f"｜走路速度 {s.get('速度', '還沒校準（描述畫面的距離先用預設 ' + format(self.DEFAULT_WALK_SPEED, 'g') + ' 身高/秒 換成秒；量比例 時鎖到描述畫面有給距離的東西就會校準）')}｜量於 {s.get('時間', '?')}")
 
     def cal_verify(self):
         y0 = self.yaw_acc
@@ -1617,7 +1641,7 @@ class Tools(ExtraTools):
         lk_txt = ""
         if lk:
             lk_txt = "；鎖定 " + "、".join(
-                f"{x['名稱']}（放大 {x['r']} 倍＝還要走約 {x['秒到']} 秒" + (f"，描述說約 {x['身高']:g} 個身高遠 → 速度約 {x['速度']} 身高/秒" if x.get("速度") else "") + "）"
+                f"{x['名稱']}（放大 {x['r']} 倍＝還要走約 {x['秒到']} 秒" + (f"，描述畫面估它的距離換算後 → 走路速度校準 每秒 {x['速度']} 個身高（之後描述畫面的距離都用它換成秒）" if x.get("速度") else "") + "）"
                 for x in lk)
             sp = [x["速度"] for x in lk if x.get("速度")]
             if sp:
