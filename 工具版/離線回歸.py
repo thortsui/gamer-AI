@@ -85,4 +85,7 @@ if im is not None:
     pm, pm_txt = t._pitch_from_vshift(im, _up); check("上下位移換算 抬頭 10 度", pm is not None and 7 <= pm <= 13, (round(pm, 1) if pm is not None else None, pm_txt))
     _dn = Image.new("RGB", im.size); _dn.paste(im, (0, -_dy10))
     pm2, _ = t._pitch_from_vshift(im, _dn); check("上下位移換算 低頭 10 度", pm2 is not None and -13 <= pm2 <= -7, pm2)
+if im is not None:
+    _zm = im.crop((W // 8, H // 8, W - W // 8, H - H // 8)).resize((W, H))
+    _pz = t._patch_zoom(im, _zm, 0.5); check("走 旁邊東西放大（_patch_zoom 1.33）", bool(_pz) and all(1.15 <= x["r"] <= 1.55 for x in _pz), [(x["名稱"][:6], x["r"]) for x in _pz])
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

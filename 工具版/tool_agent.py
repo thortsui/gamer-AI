@@ -771,9 +771,20 @@ class Tools(ExtraTools):
             z = self.zoom_factor(before, after) if k == "w" else None
             if z is None and k == "w" and TOOLFIX and self.self_mask is not None:
                 z = self._zoom_factor_masked(before, after)          # 10/25 工具迭代：找自己 量到的那塊挖掉再量
+            z_note = ""
+            if z is None and k == "w" and TOOLFIX and dd >= 8:
+                # 10/25 07:2x 第 14 輪：第一人稱貼近櫃檯／電腦時中央一片平、放大量不出（這版 4/5）→ 改看中央以外鎖定的東西放大幾倍（量比例 同一套），取中位
+                try:
+                    pz = self._patch_zoom(before, after, d)
+                except Exception:  # noqa: BLE001
+                    pz = []
+                if pz:
+                    rs = sorted(x["r"] for x in pz)
+                    z = rs[len(rs) // 2]
+                    z_note = f"（中央量不出，改看旁邊 {len(pz)} 個東西的放大取中位）"
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
-            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
+            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{z_note}{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
                      ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
             if TOOLFIX and k == "w" and z is None and dd >= 8:
                 # 10/25 工具迭代：走路時畫面在變、中央卻有一大塊完全沒動＝釘在畫面上的東西（照片／面板／提示），不是場景裡擋路的
