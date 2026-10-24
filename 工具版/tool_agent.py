@@ -1093,6 +1093,14 @@ class Tools(ExtraTools):
             return deg, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後在 ({x1:.2f},{y1:.2f})（相似度 {sim:.2f}）→ 鏡頭實際轉了 {deg:+.0f} 度"
         return None, "標點：" + "、".join(why[:3]) + "，都不能當標點"
 
+    @staticmethod
+    def _pin_ok(dx_found, dy_found, exp_dx, exp_dy):
+        """那塊東西／那個字轉完算不算「釘在畫面上」：移動量不到預期位移（目標到中央要移多少）的四成才算。
+        門檻最少 0.012（找位置／OCR 會抖）、最多 0.03（搜尋半徑）。小角度時預期位移本來就小，跟著景物移了就不是 UI。"""
+        thr_x = min(0.03, max(0.012, 0.4 * abs(exp_dx) + 0.005))
+        thr_y = min(0.03, max(0.012, 0.4 * abs(exp_dy) + 0.005))
+        return abs(dx_found) < thr_x and abs(dy_found) < thr_y
+
     def _landmark_verify(self, before, after, want, sh=None):
         """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""
         import math
@@ -1102,8 +1110,12 @@ class Tools(ExtraTools):
             Ws, Hs = before.size
             scene_deg = -math.degrees(math.atan(sh * 2 * math.tan(math.radians(self.V_FOV / 2)) * Ws / Hs))
         if lm_deg is not None and scene_deg is not None and abs(lm_deg - scene_deg) > max(10.0, 0.5 * abs(scene_deg)):
-            lm_txt += f"（跟整張位移 {scene_deg:+.0f} 差太多，標點可能認錯，不用）"
-            lm_deg = None
+            if abs(lm_deg - want) <= max(5.0, 0.3 * abs(want)):
+                # 10/25 03:2x 第 8 輪：大廳人多時整張位移常是錯的（要 -9 量到 +11、要 -15 量到 +42），標點跟送出的角度接近就信標點
+                lm_txt += f"（整張位移 {scene_deg:+.0f} 跟標點差很多，但標點跟送出的 {want:+.0f} 接近、信標點；人多時整張位移不可靠）"
+            else:
+                lm_txt += f"（跟整張位移 {scene_deg:+.0f} 差太多、跟送出的 {want:+.0f} 也差太多，標點可能認錯，不用）"
+                lm_deg = None
         if lm_deg is not None and scene_deg is None and abs(lm_deg - want) > max(15.0, abs(want)):
             lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {want:+.0f} 差太多，不信）"
             lm_deg = None
@@ -2254,8 +2266,11 @@ class Tools(ExtraTools):
                 Ws, Hs = before.size
                 scene_deg = -math.degrees(math.atan(sh * 2 * math.tan(math.radians(self.V_FOV / 2)) * Ws / Hs))
             if lm_deg is not None and scene_deg is not None and abs(lm_deg - scene_deg) > max(10.0, 0.5 * abs(scene_deg)):
-                lm_txt += f"（跟整張位移 {scene_deg:+.0f} 差太多，標點可能認錯，改用整張位移）"   # 10/25 02:1x
-                lm_deg = None
+                if abs(lm_deg - chunk) <= max(5.0, 0.3 * abs(chunk)):     # 10/25 03:2x：跟送出的接近就信標點（人多時整張位移不可靠）
+                    lm_txt += f"（整張位移 {scene_deg:+.0f} 跟標點差很多，但標點跟送出的 {chunk:+.0f} 接近、信標點）"
+                else:
+                    lm_txt += f"（跟整張位移 {scene_deg:+.0f} 差太多、跟送出的也差太多，標點可能認錯，改用整張位移）"   # 10/25 02:1x
+                    lm_deg = None
             if lm_deg is not None and scene_deg is None and abs(lm_deg - chunk) > max(15.0, abs(chunk)):
                 lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {chunk:+.0f} 差太多，不信）"
                 lm_deg = None
@@ -2643,6 +2658,11 @@ class Tools(ExtraTools):
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
         pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and self.diff(before, after) >= 8) else None
+        exp_dx, exp_dy = 0.5 - fx, ay - fy
+        if pinned and not self._pin_ok(pinned[0] - fx, pinned[1] - fy, exp_dx, exp_dy):
+            # 10/25 03:2x 第 8 輪：對 (0.54,0.52) 只轉 6 度、預期位移才 4%，那塊東西移到 (0.51,0.50)（跟著景物動）卻被當「釘住」轉回去
+            #   → E 框明明到了中央還被轉回。釘住＝幾乎沒動（不到預期位移的四成）才算
+            pinned = None
         # 10/20 11:3x：對右上任務字「在電腦上註冊」(0.91,0.21) 連叫 12 輪：第一次影像比對抓到「釘在畫面上」，之後任務框是半透明、
         # 背後的場景變了，相似度掉到 0.5～0.6 → 回「沒對準、再微調」，每次又往上轉 22 度，最後鏡頭對著天花板
         # → 影像比不出來時，再用字比：目標附近的字轉完還在原位＝釘在畫面上；釘住就把鏡頭轉回原方向
@@ -2662,6 +2682,7 @@ class Tools(ExtraTools):
                 wa = words2(after)
                 pin_word = next((w for w, xy in near for w2, (x2, y2) in wa.items()
                                  if abs(x2 - xy[0]) < 0.03 and abs(y2 - xy[1]) < 0.03
+                                 and self._pin_ok(x2 - xy[0], y2 - xy[1], exp_dx, exp_dy)
                                  and (w2 == w or difflib.SequenceMatcher(None, w, w2).ratio() >= 0.6)), "")
         if (pinned and pinned[2] >= 0.95) or pin_word:
             try:
