@@ -1205,7 +1205,13 @@ class Tools(ExtraTools):
         if a is None or b is None:
             return None
         if TOOLFIX:
-            return Tools.zoom_factor_ring(a, b)
+            # 10/25 00:3x 實測：只比四周一圈 6/6 量不出（走路時兩側景物是視差、不是單純放大）→ 先照舊比中央，量不出才退回比四周
+            r = Tools._zoom_factor_center(a, b)
+            return r if r is not None else Tools.zoom_factor_ring(a, b)
+        return Tools._zoom_factor_center(a, b)
+
+    @staticmethod
+    def _zoom_factor_center(a, b):
         from PIL import Image
         ga = a.convert("L").resize((320, 180))
         gb = b.convert("L").resize((320, 180))
