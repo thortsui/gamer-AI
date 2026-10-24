@@ -72,4 +72,11 @@ if im is not None:
         got, note = t._scene_deg(im, _rot(im, dg)); check(f"整張位移兩帶換算 {dg} 度", got is not None and abs(got - dg) <= 3.5, (round(got, 1) if got is not None else None, note))
     got, note = t._scene_deg(im, _rot(im, -20)); check("整張位移兩帶換算 -20 度", got is not None and abs(got + 20) <= 3.5, (round(got, 1) if got is not None else None, note))
 yw, pt = t._angles_to(0.9, 0.2, 1920, 991); check("_angles_to pitch 修正 (0.9,0.2)≈15.9", abs(pt - 15.9) < 0.6, (round(yw, 1), round(pt, 1)))
+if im is not None:
+    import math as _m2
+    _dy = int(im.size[1] * _m2.tan(_m2.radians(10)) / (2 * _m2.tan(_m2.radians(35))))   # 抬頭 10 度：景物往下移（用截圖自己的高）
+    _af = Image.new("RGB", im.size); _af.paste(_rot(im, 15), (0, _dy))
+    g_np, _ = t._landmark_turn(im, _af, 1, 15, pitch=0); g_p, txt_p = t._landmark_turn(im, _af, 1, 15, pitch=10)
+    check("標點 轉15＋抬頭10：帶 pitch 找得到", g_p is not None and 11 <= g_p <= 19, (g_np, g_p, txt_p[:80]))
+r0 = t.look_at(0.5, 0.5); check("視角移動到(0.5,0.5) 不轉", "已經在畫面正中央" in r0, r0)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
