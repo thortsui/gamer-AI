@@ -2221,7 +2221,8 @@ class Tools(ExtraTools):
         #     再每步 10 像素往下數到底＝上下全程幾像素；從底往上拉一半＝水平（不靠累計）。
         #     度數：全程當 160 度（Roblox 鏡頭上下 ±80 度；10/25 稽核：原本 178 低估每度 dy 約 10%）換每度 dy；之後轉頭／量測都離兩端至少 15% 全程
         self_note = self.find_self() if self.live and not self.image_path else ""
-        top_extra, full_dy, full2 = self._find_vlimit(-1)[0], None, None
+        acc0 = self.pitch_acc
+        (top_extra, steps0), full_dy, full2, steps2 = self._find_vlimit(-1), None, None, 0
         self._vl_track = []
         full_dy, steps1 = self._find_vlimit(+1)
         if full_dy and self.self_mask is not None:  # 從頂往下掃的每一步：離底＝全程−從頂往下走了多少
@@ -2234,23 +2235,32 @@ class Tools(ExtraTools):
         pos = 0                                    # 剛往下找到底＝0
         est = full_dy or int(160 * self.dy_deg)     # 找不到全程時用舊刻度估
         if self.verify2 and dy_ok:                # 二次驗證：從底再慢慢往上數到頂，全程再量一次
-            full2, _ = self._find_vlimit(-1)
+            full2, steps2 = self._find_vlimit(-1)
             pos = self._vl_moved                   # 往上真的動了多少（誤判停下也照實算）
             dy_ok = full2 is not None and abs(full_dy - full2) <= 0.10 * (full_dy + full2) / 2
             v2_note += (self._v2("量刻度 上下全程（10 像素慢慢找極限）", full_dy, full2 if full2 is not None else "量不出", dy_ok, "像素")
                         + ("（相差 10% 內，用平均）" if dy_ok else "（相差超過 10%，垂直這次不採用）") + "；")
             if dy_ok:
                 full_dy = est = int(round((full_dy + full2) / 2))
-        self._drag(0, pos - est // 2)                # 正＝往下：從離底 pos 拉到離底 est/2＝水平
-        time.sleep(0.3)
-        self._depth_log(種類="回水平", 離底像素=pos, 全程=est, 拉=pos - est // 2)
-        self.pitch_acc = 0.0
+        if dy_ok:
+            self._drag(0, pos - est // 2)                # 正＝往下：從離底 pos 拉到離底 est/2＝水平
+            time.sleep(0.3)
+            self._depth_log(種類="回水平", 離底像素=pos, 全程=est, 拉=pos - est // 2)
+            self.pitch_acc = 0.0
+        else:
+            # 10/25 07:0x：找不到極限時的「頂到」多半是誤判（沒紋理、動 0 像素就停在離頂 40 像素）→ 原本當成在底、往上拉半程＝拉到天花板，
+            #   之後水平儀還歸零、他接下來每次低頭都被 ±45 限制擋住。改成把掃過的像素原路拉回、水平儀維持量之前的值
+            undo = self.VSTEP * (steps0 - steps1 + steps2)
+            self._drag(0, undo)
+            time.sleep(0.3)
+            self._depth_log(種類="回水平", 離底像素=None, 全程=est, 拉=undo, 結果="垂直量不出、原路拉回")
+            self.pitch_acc = acc0
         if dy_ok:
             self.vrange_px = full_dy
         v2_note += ((self_note + "；轉到底沒：看兩側遠景整片位移（遠景看不清才看自己那塊），自己的樣子每步記成對照表（" + (f"{len(self.self_table)} 步" if self.self_table else "沒記到") + "）；")
                     if self.self_mask is not None else (self_note + "；看不到自己，改看兩側遠景；" if self_note else ""))
         v2_note += (f"垂直：每步 10 像素慢慢找上下極限（往上先多走了 {top_extra} 像素才頂到），全程 {full_dy} 像素，回到中間＝水平；"
-                    if full_dy else "垂直：慢慢找極限沒找到（兩側遠景看不出上下移），")
+                    if full_dy else "垂直：慢慢找極限沒找到（兩側遠景看不出上下移；鏡頭已原路拉回量之前的位置、不保證水平），")
         # 12:3x 使用者「目前的更動繼續執行到完成」→ 待決 1 照建議 ①：第一人稱全程 240、第三人稱 520，「全程＝178 度」只對第三人稱成立
         #   → 兩種人稱分開存全程（離極限 15%、回水平都用像素，不靠度數）；每度 dy 只用第三人稱的全程換（第一人稱不改每度 dy）
         first = self.person_hint.startswith("第一人稱")
@@ -2305,7 +2315,7 @@ class Tools(ExtraTools):
         self.startup.pop("驗證", None)
         return (note + f"量好了：水平一圈 dx {loop_dx or '（不採用）'} → 每度 dx {dx_deg}；垂直 " + (f"量到每度 dy {dy_deg}" if dy_ok else f"這次沒量準、沿用每度 dy {dy_deg}") + "；"
                 f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點"
-                + ("、上下回到中間。" if dy_ok else "；上下：這次沒找到極限、**上下沒有調整、不保證水平**（看下一張畫面：滿是天花板／地板就用 仰 自己拉，或到有牆有地的地方 修水平）。")
+                + ("、上下回到中間。" if dy_ok else "；上下：這次沒找到極限、**鏡頭已原路拉回量之前的位置、不保證水平**（看下一張畫面：滿是天花板／地板就用 仰 自己拉，或到有牆有地的地方 修水平）。")
                 + "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
     def _loop_once(self):
@@ -2468,6 +2478,8 @@ class Tools(ExtraTools):
             lim = min(lim, (self.vrange_px * 0.5 - self.vrange_px * 0.15) / self.dy_deg)
         return lim
 
+    LEVEL_HINT = "（水平儀是程式累計、常跟真的差：量刻度／修水平 量不出時不會歸零、轉到極限也照算；畫面其實是水平的就先 水平歸零 再轉）"
+
     def _pitch_room(self, d):
         """想轉 d 度（正＝抬頭）→ 限制內實際能轉幾度"""
         L = self._pitch_lim()
@@ -2482,10 +2494,10 @@ class Tools(ExtraTools):
         lim_note = ""
         if abs(d - want) >= 1:
             lim_note = (f"｜上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制）：你要{'抬' if want > 0 else '低'} {abs(want):.0f} 度，"
-                        f"現在已經{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度，只轉了 {abs(d):.0f} 度")
+                        f"現在已經{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度，只轉了 {abs(d):.0f} 度" + self.LEVEL_HINT)
         if abs(d) < 3:
             return (f"上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制），現在已經{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度，"
-                    f"再往{'上' if want > 0 else '下'}就超過了，這次沒轉" if abs(want) >= 3 else "度數太小（<3 度）沒意義")
+                    f"再往{'上' if want > 0 else '下'}就超過了，這次沒轉" + self.LEVEL_HINT if abs(want) >= 3 else "度數太小（<3 度）沒意義")
         r = self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15) + lim_note
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + d))
         lv = ("水平" if abs(self.pitch_acc) < 3 else f"{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度")
@@ -2817,7 +2829,7 @@ class Tools(ExtraTools):
             pitch -= self._angles_to(0.5, ay, W, H)[1]
         pitch0 = max(-60.0, min(60.0, pitch))
         pitch = self._pitch_room(pitch0)                  # 10/23：上下只能 ±45 度
-        lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度）" if abs(pitch - pitch0) >= 1 else "")
+        lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度" + self.LEVEL_HINT + "）" if abs(pitch - pitch0) >= 1 else "")
         chunk_meas = None
         yaw_calc = yaw
         if abs(yaw) > 30 and self.live and not self.image_path:
