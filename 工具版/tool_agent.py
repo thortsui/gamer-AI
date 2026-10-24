@@ -314,7 +314,7 @@ def _parse_call(item, cat):
             pass
     # 10/24 22:1x 稽核：「、」也當分隔 → 檢討／突發狀況／新工具 內容寫了「、」就錯位 → 只用逗號分；逗號分不夠格數、又有「、」才退回連「、」一起分
     args = [x.strip() for x in re.split(r"[,，]", raw)] if raw and raw.strip() else []
-    if raw and "、" in raw and len(args) < len(keys) and len(keys) > 1:
+    if raw and "、" in raw and len(args) == 1 and len(keys) > 1:      # 10/25 審查：有逗號但格數不夠（選填沒寫）不能再用「、」切
         args = [x.strip() for x in re.split(r"[,，、]", raw)]
     params = {}
     if len(keys) == 1 and args:
@@ -460,7 +460,7 @@ class Tools(ExtraTools):
             # 10/16 03:0x：死亡面板點「再玩一次」立刻量 1、下一輪已在大廳 → 介面換頁要幾秒，沒變就等 1.2 秒再量一次
             time.sleep(1.2)
             d2 = self.diff(before, self.grab())
-            if d2 >= th and d2 >= d + 3:
+            if d2 >= th:                                  # 10/25 審查：原本還要 d2 ≥ d+3，畫面真的變了卻回「沒變」
                 return (f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢{bg}）"
                         + ("；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", False) + "（第一次沒反應、第二次有＝反應慢，以第二次為準）" if self.verify2 else ""))
             if self.verify2:
@@ -510,7 +510,7 @@ class Tools(ExtraTools):
 
     def doc_memory(self, 類別=""):
         m = os.path.join(self.gdir, "記憶")
-        table = {"玩法摘要": "玩法摘要.md", "成功做法": "成功檢討.md", "卡住檢討": os.path.join("工具版", "檢討.md"), "死亡檢討": os.path.join("工具版", "死亡檢討.md"),
+        table = {"玩法摘要": "玩法摘要.md", "成功檢討": "成功檢討.md", "卡住檢討": os.path.join("工具版", "檢討.md"), "死亡檢討": os.path.join("工具版", "死亡檢討.md"),
                  "操作手冊": "操作手冊.md", "遇到的問題": "遇到的問題.md", "因果": "因果.md", "學到的": "學到的.md",
                  "地圖": "研究筆記.md", "筆記": os.path.join("工具版", "筆記.md"),
                  "大檢討": os.path.join("工具版", "大檢討.md"), "卡法": os.path.join("工具版", "卡法.md"),
@@ -594,7 +594,7 @@ class Tools(ExtraTools):
             return "離線模式，看四周沒有新畫面"
         shots = []
         for i in range(4):
-            self.look_turn(90)
+            self._drag(90 * self.dx_deg, 0)              # 10/25 審查：不走 轉 的分段停住邏輯，四張才真的是 90／180／270／360
             time.sleep(0.4)
             im = self.grab()
             if im is not None:
@@ -740,7 +740,10 @@ class Tools(ExtraTools):
                      ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
             if TOOLFIX and k == "w" and z is None and dd >= 8:
                 # 10/25 工具迭代：走路時畫面在變、中央卻有一大塊完全沒動＝釘在畫面上的東西（照片／面板／提示），不是場景裡擋路的
-                fixed = [(x, y) for x, y in self._fixed_blocks(before, after) if 0.3 <= x <= 0.7 and 0.2 <= y <= 0.8]
+                sb = self.self_box
+                fixed = [(x, y) for x, y in self._fixed_blocks(before, after)
+                         if 0.3 <= x <= 0.7 and 0.2 <= y <= 0.8 and not (0.40 <= x <= 0.60 and y >= 0.35)      # 10/25 審查：第三人稱自己那一欄不算
+                         and not (sb and sb[0] <= x <= sb[2] and sb[1] <= y <= sb[3])]
                 if len(fixed) >= 4:
                     z_txt += (f"；⚑ 中央有 {len(fixed)} 格走路時完全沒動（約 ({sum(x for x, _ in fixed) / len(fixed):.2f},{sum(y for _, y in fixed) / len(fixed):.2f})）"
                               "＝釘在畫面上的東西（照片、面板、提示框），不是場景裡擋路的；不確定就 確認是否是UI，要關就 關掉 或 點 它的叉叉")
@@ -830,7 +833,7 @@ class Tools(ExtraTools):
         bbox = self.win.client_bbox() if self.win else None
         cx = (bbox["left"] + bbox["width"] // 2) if bbox else 960
         cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
-        rest_x, rest_y = int(dx), int(dy)
+        rest_x, rest_y = int(round(dx)), int(round(dy))   # 10/25 審查：int() 截斷 → 慢慢轉 120 步少轉 24 度
         while rest_x or rest_y:
             sx = max(-220, min(220, rest_x))
             sy = max(-120, min(120, rest_y))
@@ -993,7 +996,7 @@ class Tools(ExtraTools):
                 v2_txt = "；" + self._v2("轉頭位移", f"{(sh or 0) * 100:+.0f}" if sh is not None else "量不出",
                                          f"{(sh2 or 0) * 100:+.0f}" if sh2 is not None else "量不出", ok, "%")
             # 10/16 07:0x：10/15～16 回測：|dx|>130（約 50 度以上）方向對 81、相反 70、卡搜尋上限(≥45%) 95 → 前後畫面沒重疊、量不出來
-            unmeasurable = sh is not None and (abs(px) > 130 or abs(sh) >= 0.45)
+            unmeasurable = sh is not None and (deg > 45 or abs(sh) >= 0.45)   # 10/25 審查：用度數判，不用像素（刻度不同時 45 度就被判量不出）
             if unmeasurable:
                 sh_txt = ("轉太大，前後畫面幾乎沒有重疊，量不出景物位移和實際轉向（這次的位移不算數）；"
                           "要知道實際轉多少就分成 50 度以內一次一次轉")
@@ -1029,7 +1032,7 @@ class Tools(ExtraTools):
                 + f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + v2_txt + "。對不上就 量刻度 重量")
 
-    def _landmark_turn(self, before, after, sign):
+    def _landmark_turn(self, before, after, sign, want=None):
         """10/25 01:0x 使用者：「為了讓他理解自己是轉了幾度，工具也要回饋說他轉了幾度，並且也要有一個物品類的標點來確認轉動是否正確」
         轉前在畫面「轉向那一側」挑一塊最有紋理的東西當標點（右轉挑右邊、左轉挑左邊，轉完它還會在畫面裡），
         轉後找它跑到哪 → 用針孔模型換算鏡頭實際轉了幾度。回 (度數或 None, 說明)。正＝右轉。"""
@@ -1040,28 +1043,40 @@ class Tools(ExtraTools):
         g = np.asarray(before.convert("L").resize((W, H)), dtype=np.float32)
         pw, ph = 24, 16
         xs = range(int(0.62 * W), int(0.92 * W) - pw, 4) if sign > 0 else range(int(0.08 * W), int(0.38 * W) - pw, 4)
-        best = None
+        cands = []
         for y in range(int(0.25 * H), int(0.65 * H) - ph, 4):
             for x in xs:
                 sd = float(g[y:y + ph, x:x + pw].std())
-                if best is None or sd > best[0]:
-                    best = (sd, x, y)
-        if best is None or best[0] < 12:
+                if sd >= 12:
+                    cands.append((sd, x, y))
+        cands.sort(reverse=True)
+        picked = []
+        for sd, x, y in cands:                       # 10/25 審查：只挑最有紋理的一塊常是 HUD → 取前幾名、彼此不重疊，釘住的就換下一個
+            if all(abs(x - px_) >= 8 or abs(y - py_) >= 8 for _, px_, py_ in picked):
+                picked.append((sd, x, y))
+            if len(picked) >= 6:
+                break
+        if not picked:
             return None, "標點：畫面那一側挑不到有紋理的東西"
-        _, x, y = best
-        patch = Image.fromarray(g[y:y + ph, x:x + pw].astype(np.uint8))
-        x0, y0 = (x + pw / 2) / W, (y + ph / 2) / H
-        loc = self._locate(patch, after, near=(0.5, y0, 0.55))
-        if not loc or loc[2] < 0.8:
-            return None, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後找不到（相似度 {loc[2] if loc else 0:.2f}）"
-        x1, y1, sim = loc
-        if abs(x1 - x0) < 0.02:
-            return None, f"標點：({x0:.2f},{y0:.2f}) 轉後還在原位＝釘在畫面上的字／面板，不能當標點"
         Wf, Hf = before.size
         th = math.tan(math.radians(self.V_FOV / 2)) * Wf / Hf
         ang = lambda v: math.degrees(math.atan((v - 0.5) * 2 * th))   # noqa: E731
-        deg = ang(x0) - ang(x1)
-        return deg, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後在 ({x1:.2f},{y1:.2f})（相似度 {sim:.2f}）→ 鏡頭實際轉了 {deg:+.0f} 度"
+        pin_thr = max(0.02, 0.3 * abs(want) * 0.0065) if want else 0.02   # 小角度時釘住的門檻跟預期位移（約 0.65%/度）成比例
+        why = []
+        for _, x, y in picked:
+            patch = Image.fromarray(g[y:y + ph, x:x + pw].astype(np.uint8))
+            x0, y0 = (x + pw / 2) / W, (y + ph / 2) / H
+            loc = self._locate(patch, after, near=(0.5, y0, 0.55))
+            if not loc or loc[2] < 0.8:
+                why.append(f"({x0:.2f},{y0:.2f}) 轉後找不到")
+                continue
+            x1, y1, sim = loc
+            if abs(x1 - x0) < pin_thr:
+                why.append(f"({x0:.2f},{y0:.2f}) 轉後沒動＝釘在畫面上的字／面板")
+                continue
+            deg = ang(x0) - ang(x1)
+            return deg, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後在 ({x1:.2f},{y1:.2f})（相似度 {sim:.2f}）→ 鏡頭實際轉了 {deg:+.0f} 度"
+        return None, "標點：" + "、".join(why[:3]) + "，都不能當標點"
 
     def _shift(self, before, after, d):
         """水平位移（整張比對；被釘著的東西拉成 0% 時改只看有變的像素）→ (比例或 None, 說明)。"""
@@ -1533,7 +1548,7 @@ class Tools(ExtraTools):
         if d < 2:
             return f"走 {used} 秒畫面沒變＝前方被擋，換個有空間的地方再量比例"
         if k is None:
-            return (f"走 1 秒畫面變化 {d:.0f}，但中央放大量不出來" + self._center_note(d) + "，這次不算，校準檔沒改；"
+            return (f"走 {used} 秒畫面變化 {d:.0f}，但中央放大量不出來" + self._center_note(d) + "，這次不算，校準檔沒改；"
                     "深度比例目前量不準，估距離用 找東西／估距 的框高")
         if k <= 1.05 or d < 15:
             # 10/16 03:1x：貼牆走畫面變化 6～7、放大 1.0～1.1 倍也被寫進校準檔 → 這種不算量到
@@ -1960,6 +1975,7 @@ class Tools(ExtraTools):
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
         self.startup["每度dx"] = self.dx_deg
+        self.startup.pop("驗證", None)                   # 10/25 審查：刻度改了，之前的驗證不算
         return f"每度 dx 改成 {self.dx_deg}（一圈 {int(round(v * 360))}），已寫進校準檔；之後 轉(90) 會送 dx {90 * self.dx_deg:.0f}"
 
     def cal_screen(self):
@@ -2096,6 +2112,8 @@ class Tools(ExtraTools):
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=1)
         self._append("大任務.md", f"量刻度：一圈 dx {loop_dx}（每度 {dx_deg}）、全程 dy {full_dy}（每度 {dy_deg}）")
+        self.startup["每度dx"], self.startup["每度dy"] = self.dx_deg, self.dy_deg   # 10/25 審查：單獨叫 量刻度 時面板的開工數值要跟著換、驗證要重做
+        self.startup.pop("驗證", None)
         return (note + f"量好了：水平一圈 dx {loop_dx or '（不採用）'} → 每度 dx {dx_deg}；垂直 " + (f"量到每度 dy {dy_deg}" if dy_ok else f"這次沒量準、沿用每度 dy {dy_deg}") + "；"
                 f"已寫進 視角校準.json，之後 視角左(90) 會送 dx {90 * dx_deg:.0f}。鏡頭已轉回起點、上下回到中間。"
                 "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
@@ -2156,25 +2174,32 @@ class Tools(ExtraTools):
             return "度數太小（<3 度）沒意義"
         # 11:0x 使用者：「轉幾度要按照他輸入的計算才對」→ 他填幾度就送 幾度×每度dx，不分段、不改值
         # （底層 _drag 自己會把超過 220 像素的拖曳拆成小段，但總量照他的數字）
-        if abs(d) > 45 and self.live and not self.image_path:
-            # 10/25 工具迭代：超過 45 度前後畫面沒重疊量不出 → 分成 ≤45 度一段一段轉、每段實測、合計；
-            # 使用者：「確保至少還有一個東西維持相同的畫面」→ 哪一段量不出（前後畫面找不到同一個東西）就停在那裡、照實說
-            meas, parts, done = self._turn_chunks(d)
+        if abs(d) > 30 and self.live and not self.image_path:
+            # 10/25 工具迭代：超過 30 度就分段轉、每段實測、合計（審查：45 度一段只剩 55% 重疊、整張位移不穩 → 改 30）；
+            # 使用者：「確保至少還有一個東西維持相同的畫面」→ 哪一段量不出就停在那裡、照實說（那段已送出，照送出的算）
+            meas, parts, done, stopped, lm_used = self._turn_chunks(d)
             ok = abs(meas - done) <= max(5.0, 0.15 * abs(done))
-            stop_note = f"；**第 {parts.count('→') }段起量不出，停在 {done:+.0f} 度沒再轉**" if abs(done - d) >= 1 else ""
-            return (f"轉 {d:+.0f} 度：分段轉（每段 ≤45 度、每段實測）{parts}；合計實測鏡頭轉了 {meas:+.0f} 度（要轉 {d:+.0f}）{stop_note}；"
-                    + self._v2("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝送出的、第二次＝實測合計）" + cap_note)
+            stop_note = f"；**中途量不出，停在 {done:+.0f} 度沒再轉（要轉 {d:+.0f}，剩下的下一輪再轉）**" if stopped else ""
+            v2 = (self._v2("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝送出的、第二次＝標點實測合計）" if lm_used
+                  else f"（沒有找到標點，{meas:+.0f} 度是整張位移估的，僅參考、不算一致／不一致）")
+            return (f"轉 {d:+.0f} 度：分段轉（每段 ≤30 度、每段實測）{parts}；**你實際轉了約 {meas:+.0f} 度（送出 {done:+.0f}）**{stop_note}；" + v2 + cap_note)
         return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 90, 30) + cap_note
 
     def _turn_chunks(self, deg):
-        """把 deg 度拆成 ≤45 度的段，一段一段拖、每段量景物位移換算成實際轉了幾度 → (合計實測度數, 每段說明, 實際送出的度數)。正＝右。
-        哪一段量不出（前後畫面找不到同一個東西）就停，不再往下轉（使用者：確保至少還有一個東西維持相同的畫面）。"""
+        """把 deg 度拆成 ≤30 度的段，一段一段拖、每段用標點（優先）／整張位移量實際轉了幾度
+        → (合計實測度數, 每段說明, 實際送出的度數, 有沒有中途停, 用到標點的段數)。正＝右。
+        哪一段前後畫面找不到同一個東西就停、不再往下轉（使用者：確保至少還有一個東西維持相同的畫面）；
+        那一段鏡頭已經轉出去了，合計照送出的度數算進去（10/25 審查：原本沒算進去，他會以為少轉、再轉一次就過頭）。"""
         import math
-        n = max(1, int(math.ceil(abs(deg) / 45.0)))
+        n = max(1, int(math.ceil(abs(deg) / 30.0)))
         chunk = deg / n
-        meas, parts, done = 0.0, [], 0.0
+        meas, parts, done, stopped, lm_used = 0.0, [], 0.0, False, 0
         for i in range(n):
             before = self.grab()
+            if before is None:
+                parts.append(f"第{i + 1}段 抓不到畫面，沒轉")
+                stopped = True
+                break
             self._drag(chunk * self.dx_deg, 0)
             after = self._settled()
             dd = self.diff(before, after)
@@ -2184,16 +2209,19 @@ class Tools(ExtraTools):
                 dd = self.diff(before, after)
             sh, _ = self._shift(before, after, dd)
             done += chunk
-            lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1)
+            lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1, chunk)
             if lm_deg is None and (sh is None or abs(sh) >= 0.45):
-                parts.append(f"第{i + 1}段 {chunk:+.0f}→量不出（前後畫面找不到同一個東西；{lm_txt}）")
+                meas += chunk
+                parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ 這段照送出的算、停在這裡")
+                stopped = True
                 break
             W, H = before.size
             th = math.tan(math.radians(self.V_FOV / 2)) * W / H
             turned = lm_deg if lm_deg is not None else -math.degrees(math.atan(sh * 2 * th))   # 標點優先；景物往左移＝鏡頭往右轉
+            lm_used += lm_deg is not None
             meas += turned
-            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'標點' if lm_deg is not None else '整張位移'}）")
-        return meas, "、".join(parts), done
+            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'標點' if lm_deg is not None else '整張位移，僅參考'}）")
+        return meas, "、".join(parts), done, stopped, lm_used
 
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
     PITCH_LIM = 45.0
@@ -2582,9 +2610,10 @@ class Tools(ExtraTools):
         pitch = self._pitch_room(pitch0)                  # 10/23：上下只能 ±45 度
         lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度）" if abs(pitch - pitch0) >= 1 else "")
         chunk_meas = None
-        if abs(yaw) > 45 and self.live and not self.image_path:
-            meas_, parts_, done_ = self._turn_chunks(yaw)      # 10/25：超過 45 度分段轉、每段實測（使用者：確保前後畫面還有同一個東西）
-            chunk_meas = (meas_, parts_ + (f"；量不出就停在 {done_:+.0f} 度" if abs(done_ - yaw) >= 1 else ""))
+        yaw_calc = yaw
+        if abs(yaw) > 30 and self.live and not self.image_path:
+            meas_, parts_, done_, stopped_, lm_used_ = self._turn_chunks(yaw)   # 10/25：超過 30 度分段轉、每段實測（使用者：確保前後畫面還有同一個東西）
+            chunk_meas = (meas_, parts_ + (f"；中途量不出，停在 {done_:+.0f} 度" if stopped_ else ""), lm_used_)
             yaw = done_
             self._drag(0, -pitch * self.dy_deg)
         else:
@@ -2601,7 +2630,8 @@ class Tools(ExtraTools):
                 # 10/18 21:56：中央、上方都拖不動（整張畫面沒變）又補轉 → 直接回報，不補轉
                 return (f"視角移動到：算好要轉 左右 {yaw:+.0f}、上下 {pitch:+.0f} 度，但從畫面中央、上方拖兩次畫面都沒變——"
                         "鏡頭現在轉不動（可能有面板／選單擋住滑鼠，或游標被鎖）；沒有補轉。先 關掉 面板或看看畫面上有什麼擋著")
-        out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}" + lim_note]
+        out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw_calc:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"
+               + (f"（分段後實際送出左右 {yaw:+.0f} 度）" if abs(yaw - yaw_calc) >= 1 else "") + lim_note]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
         pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and self.diff(before, after) >= 8) else None
@@ -2658,11 +2688,12 @@ class Tools(ExtraTools):
             sh, _ = self._shift(before, after, d_all)
             exp = 0.5 - fx
             if chunk_meas is not None:
-                meas, parts = chunk_meas
+                meas, parts, lm_used = chunk_meas
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
-                           f"合計實測 {meas:+.0f} 度（要轉 {yaw:+.0f}）")
-                out.append(self._v2("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝要轉、第二次＝實測合計）")
+                           f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
+                out.append((self._v2("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝送出、第二次＝標點實測合計）") if lm_used
+                           else "（沒有找到標點，度數是整張位移估的，僅參考）")
             elif sh is not None and abs(exp) >= 0.03:
                 ok_sh = abs(sh - exp) <= 0.05
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住"
@@ -2957,6 +2988,8 @@ class Tools(ExtraTools):
                 + self.click_xy(x, y, 字=t))
 
     def scroll(self, 格=""):
+        if not str(格).strip():
+            return "捲 要給格數（-5～5，負＝拉遠）；捲過之後刻度／深度會失效，要重新 開工測試"
         n = int(num(格, -3))
         n = max(-5, min(5, n))
         if self.live:
@@ -3001,8 +3034,8 @@ class Tools(ExtraTools):
             return "關掉面板：按了 esc（離線看不出有沒有關掉）"
         after = self.grab()
         if self.diff(before, after) < 2:
-            self.scroll(-3)
-            return "按 esc 畫面沒變，已捲 -3 拉遠；面板還在就用 點字 點它的叉叉或「關閉」"
+            # 10/25 審查：原本自動 捲(-3) 會把刻度／深度／人稱整套作廢（使用者 10/18 也說少用中鍵縮放）
+            return "按 esc 畫面沒變（可能本來就沒有面板）；面板還在就用 點字 點它的叉叉或「關閉」"
         # 10/20 07:1x：購買視窗按 esc 沒關到，反而打開 Roblox 平台選單（帳號／邀請好友／ESC 繼續），他花兩輪才關回
         # → 按完看一下，是平台選單就再按一次 esc 關回，回傳講清楚
         menu = ("帳號", "邀請好友", "在此伺服器中", "協助")
@@ -3153,7 +3186,7 @@ class Tools(ExtraTools):
 
     def flow_review(self, 原因="", 預期="", 實際="", 錯在哪="", 下次=""):
         vals = {"原因": 原因, "預期": 預期, "實際": 實際, "錯在哪": 錯在哪, "下次": 下次}
-        bad = [k for k, v in vals.items() if not str(v).strip() or str(v).strip() == k or len(str(v).strip()) < 3]
+        bad = [k for k, v in vals.items() if not str(v).strip() or str(v).strip() == k or len(str(v).strip()) < 2]   # 10/25 審查：「沒動」兩個字也算有寫
         if bad:          # 12:1x 他把五格填成「原因、預期…」字面（跟早上審核照抄一樣）→ 退回
             # 10/19 03:1x：他只給 3～4 格被退回，連送 6 次同樣格式 → 回傳列出每格收到什麼，讓他看到少哪格
             got = "、".join(f"{k}=「{str(v).strip()[:30] or '空'}」" for k, v in vals.items())
@@ -3522,7 +3555,7 @@ def repair_json(raw):
             return s
     except json.JSONDecodeError:
         pass
-    s = re.sub(r'結果應該是"\s*:\s*"', "結果應該是:", s)
+    s = re.sub(r'｜結果應該是"\s*:\s*"', "｜結果應該是:", s)   # 10/25 審查：只管「想」欄裡的，別把當鍵用的 "結果應該是":"…" 改壞
     # 10/24 21:0x：Sonnet 寫成 {"做":"…","結果應該是:鏡頭…"}（冒號跑進字串、少了值）→ 補回 "結果應該是":"…"
     s = s.replace(',"結果應該是:', ',"結果應該是":"')   # 只有鍵前面才會是 ,"（想 欄裡的「｜結果應該是:」不會被改）
     objs = re.findall(r"\{.*?\}(?=\s*\{|\s*$)", s, flags=re.S)
