@@ -31,7 +31,9 @@ ARGS = ["--game", "動物醫院", "--live", "--rounds", "5000", "--deadline", "6
 # 10/24 04:1x 使用者「從早上8:00開始執行 第三次就使用原生的Claude 不要洗掉 試試看」→ 第三個改 sonnet 原生（同一個 session、原本 system＋原生工具）
 RUNS = [("haiku", "", "1_haiku"), ("sonnet", "", "2_sonnet"), ("sonnet", "--brain-native", "3_sonnet原生")]
 # 10/24 14:2x 使用者「請opus 的 原生 和 用我本地的 標準的 各一個小時 也記錄 每次跑必須重開」→ --runs opus --reset
-RUN_SETS = {"claude": RUNS, "opus": [("opus", "", "4_opus標準"), ("opus", "--brain-native", "5_opus原生")]}
+RUN_SETS = {"claude": RUNS, "opus": [("opus", "", "4_opus標準"), ("opus", "--brain-native", "5_opus原生")],
+            # 10/24 18:4x 使用者「234這三個 現在開始重跑 和App用一樣的標準」→ 跟 Opus 一樣每次重開遊戲、JSON bug 已修
+            "claude2": [("haiku", "", "2b_haiku重跑"), ("sonnet", "", "3b_sonnet重跑"), ("sonnet", "--brain-native", "4b_sonnet原生重跑")]}
 LOBBY_PLACE = 78515283254292          # 專案/動物醫院/遊戲.json 大廳place
 ENV = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
 TEXT = (".md", ".json", ".jsonl", ".txt", ".log")
