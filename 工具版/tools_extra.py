@@ -41,10 +41,14 @@ class ExtraTools:
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
         o = parse_json_loose(T.repair_json(raw)) or {}
+        if isinstance(o, dict) and set(o) <= {"s", "r", "a"}:       # 10/25 審查：解析失敗回的哨兵，不是真的結果（死亡檢討／慢想／成功回推都曾把它當成功）
+            o = {}
         if not o and reason:                        # 10/19 05:2x：JSON 寫在推理、輸出空 → 從推理取；13:2x 挑欄位最多的那份
             best = {}
             for m in re.finditer(r"\{\s*\"", reason):
                 cand = parse_json_loose(T.repair_json(reason[m.start():])) or {}
+                if isinstance(cand, dict) and set(cand) <= {"s", "r", "a"}:
+                    cand = {}
                 if isinstance(cand, dict) and len(cand) >= max(2, len(best)):
                     best = cand
             o = best
@@ -130,10 +134,12 @@ class ExtraTools:
         dt = time.time() - t0
         d, cur = {}, None
         for line in raw.splitlines():
-            m = re.match(r"\s*[-*•]?\s*\**(" + "|".join(self.DESC_KEYS) + r")\**\s*[:：]\s*(.*)", line)
+            m = re.match(r"\s*(?:[-*•]|\d+[.、)])?\s*\**(" + "|".join(self.DESC_KEYS) + r")\**\s*[:：]\s*(.*)", line)   # 10/25 審查：允許「1. 類型：」
             if m and m.group(1) not in d:
                 cur = m.group(1)
                 d[cur] = m.group(2).strip()
+            elif m:
+                cur = None                                   # 10/25 審查：結尾重複的鍵不要接到前一欄
             elif cur and line.strip():
                 # 10/24 19:1x：Sonnet 把「場景：」「介面：」的項目寫在下面幾行（- 東西 (x,y)），原本只讀同一行 → 整欄空白（Sonnet 標準組 14/15 次）
                 item = re.sub(r"^\s*[-*•]\s*", "", line).strip()
@@ -143,17 +149,31 @@ class ExtraTools:
         items, n = [], 0
         for k in ("互動提示", "場景"):
             parts = []
-            for part in re.split(r"[；;／]", d.get(k, "")):
+            segs = []
+            for seg0 in re.split(r"[；;／]", d.get(k, "")):
+                coords = list(re.finditer(r"\(?\s*(?:[01](?:\.\d+)?|\.\d+)\s*[,，]\s*(?:[01](?:\.\d+)?|\.\d+)\s*\)?", seg0))
+                if len(coords) >= 2:                         # 10/25 審查：一段用「、」接了好幾個東西 → 在兩個座標之間最後一個頓號切開
+                    cuts = [0]
+                    for j in range(len(coords) - 1):
+                        between = seg0[coords[j].end():coords[j + 1].start()]
+                        k2 = max(between.rfind("、"), between.rfind("，"), between.rfind(","))
+                        cuts.append(coords[j].end() + (k2 + 1 if k2 >= 0 else len(between) // 2))
+                    cuts.append(len(seg0))
+                    segs += [seg0[cuts[j]:cuts[j + 1]].strip(" ，,、") for j in range(len(cuts) - 1)]
+                else:
+                    segs.append(seg0)
+            for part in segs:
                 m = re.search(r"\(?\s*([01](?:\.\d+)?|\.\d+)\s*[,，]\s*([01](?:\.\d+)?|\.\d+)\s*\)?", part)
                 if m and part.strip():
                     n += 1
                     name = re.sub(r"\(.*?\)|\[.*?\]|[01]?\.\d+\s*[,，]\s*[01]?\.\d+", "", part)
                     if "｜" in name:                         # 互動提示：用「在什麼東西上」當名字，前面的字附上
                         pre, on = name.split("｜", 1)
+                        on = re.sub(r"[｜|]?\s*約?\s*[\d.]+\s*個?\s*身高\s*遠?", "", on).strip(" ，,、｜")   # 10/25 審查：先去距離字，再去「在…上」
                         name = re.sub(r"^在|上$", "", on.strip()) + "（" + pre.strip() + "）"
                     name = re.sub(r"\s+", " ", name).strip(" ，,、")[:30]
-                    md = re.search(r"約?\s*([\d.]+)\s*個?\s*身高", part)
-                    name = re.sub(r"[｜|]?\s*約?\s*[\d.]+\s*個?\s*身高\s*遠?", "", name).strip(" ，,、｜")
+                    md = re.search(r"約?\s*(\d+(?:\.\d+)?)\s*個?\s*身高", part)
+                    name = re.sub(r"[｜|]?\s*約?\s*[\d.]+\s*個?\s*身高\s*遠?", "", name).strip(" ，,、｜") or "東西"   # 10/25 審查：空名稱補字
                     items.append({"編號": n, "名稱": name, "x": float(m.group(1)), "y": float(m.group(2)), "種類": k,
                                   "身高": (float(md.group(1)) if md else None)})
                     parts.append(f"[{n}]" + part.strip())
@@ -240,7 +260,7 @@ class ExtraTools:
                 return f"描述畫面是 {age:.0f} 秒前的，畫面可能已經變了；先重新 描述畫面 再用編號"
             it = next((i for i in fresh if i["編號"] == int(mn.group(1))), None)
         elif q and not self._look_name(q):
-            it = next((i for i in fresh if q in i["名稱"] or i["名稱"].split("（")[0].split(" ")[0] in q), None)
+            it = next((i for i in fresh if i["名稱"] and (q in i["名稱"] or i["名稱"].split("（")[0].split(" ")[0] in q)), None)   # 10/25 審查：空名稱不比
         if it:
             return it["x"], it["y"], f"[{it['編號']}]{it['名稱']}"
         if q and not mn:                                 # 20:xx 記過長相的東西：直接拿照片在現在的畫面找
@@ -295,6 +315,8 @@ class ExtraTools:
             return []
 
     def _look_name(self, q):
+        if not str(q).strip():
+            return None
         names = self._look_names()
         hit = next((n for n in names if n == q), None) or next((n for n in names if q in n or n in q), None)
         if hit or not q:
@@ -380,7 +402,7 @@ class ExtraTools:
             finally:
                 LAST_REASONING["text"] = ""
             last = ([ln for ln in str(raw).strip().splitlines() if ln.strip()] or [""])[-1]
-            v = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", last)[:4]]
+            v = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", re.sub(r"[xy]\d", "", last))[-4:]]   # 10/25 審查：x1,y1 的 1 不是座標
             if len(v) == 4 and v[0] < v[2] and v[1] < v[3] and v[0] <= x <= v[2] and v[1] <= y <= v[3]:
                 return tuple(v) + ("想過再框" if effort == "中想" else "不思考框",)
         return None
@@ -454,6 +476,9 @@ class ExtraTools:
         q = str(標籤).strip()
         if q in ("停", "停止", "不用", "關"):
             return self.see_unwatch()                   # 停止追蹤 併進來
+        if q and not self.desc_items and not self._look_name(q) and not re.search(r"\d?\.\d", q) and not re.fullmatch(r"[A-Za-z _,，、]+", q):
+            # 10/25 審查：沒有描述畫面的點時，編號／中文名原本被當 YOLO 標籤去追
+            return f"還沒有描述畫面給的點、也沒有記過「{q}」的長相：先叫 描述畫面 再用 編號／名稱；或直接給座標 追蹤(x,y)；英文標籤才直接寫名字"
         r = self._resolve_target(q) if (self.desc_items or re.search(r"\d?\.\d", q) or self._look_name(q)) else "英文標籤"
         if not isinstance(r, str):                      # 描述畫面的編號／名稱／座標 → 用圖塊追蹤
             im = self.grab()
@@ -464,7 +489,7 @@ class ExtraTools:
             tpl = self._trk_crop(g, x, y, int(0.09 * g.shape[1]), int(0.12 * g.shape[0]))
             self.patch_watch = ([w for w in self.patch_watch if w["名稱"] != name] + [{"名稱": name, "tpl": tpl, "h0": tpl.shape[0], "x": x, "y": y}])[-4:]
             return (f"開始每輪追蹤「{name}」（從 ({x:.2f},{y:.2f}) 切一塊圖當它的長相）；面板【追蹤】每輪告訴你它在哪、變大還變小；"
-                    "要走過去就 走過去(" + name.split("]")[0].strip("[") + ")")
+                    "要走過去就 " + (f"走過去({x:.2f},{y:.2f})" if name.startswith("(") else "走過去(" + name.split("]")[0].strip("[") + ")"))
         # 10/24 稽核：編號／中文名稱找不到時，原本把錯誤丟掉、改當英文標籤去追（回「開始追蹤：2」）→ 照實回報
         if isinstance(r, str) and r != "英文標籤" and not re.fullmatch(r"[A-Za-z _,，、]+", q):
             return r
@@ -494,7 +519,7 @@ class ExtraTools:
             out.append(f"{w['名稱']}：在 ({x:.2f},{y:.2f})（{'左邊' if x < 0.45 else '右邊' if x > 0.55 else '正前方'}），"
                        f"大小是剛開始的 {size:.1f} 倍，相似度 {sc:.2f}")
             if sc >= 0.75 and k != 1.0:                 # 長相跟著變大變小更新
-                w["tpl"] = self._trk_crop(g, x, y, int(w["tpl"].shape[1] * k), int(w["tpl"].shape[0] * k))
+                w["tpl"] = self._trk_crop(g, x, y, min(int(0.4 * g.shape[1]), int(w["tpl"].shape[1] * k)), min(int(0.4 * g.shape[0]), int(w["tpl"].shape[0] * k)))
             w["x"], w["y"] = x, y
         return "；".join(out)
 
@@ -566,11 +591,22 @@ class ExtraTools:
                 + ("；到了就試 長按(e,1.5) 或 讀字" if "面前" in reason or "字" in reason else ""))
 
     # ---------------- 學習
+    def _log_date(self):
+        """10/25 審查：代理跨午夜還是寫啟動那天的 .jsonl → 大檢討／進步日誌用最新那個紀錄檔的日期，不用「現在」的日期。"""
+        try:
+            files = sorted(f for f in os.listdir(self.mdir) if re.fullmatch(r"\d{4}-\d\d-\d\d\.jsonl", f))
+            if files:
+                return files[-1][:-6]
+        except OSError:
+            pass
+        return datetime.now().strftime("%Y-%m-%d")
+
     def learn_big_review(self):
         """大檢討：把今天整天的紀錄給你自己回顧（會花 3～6 分鐘，遊戲這段沒人操作）。"""
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = self._log_date()
         r = subprocess.run([sys.executable, os.path.join(HERE, "big_review.py"), "--game", self.game, "--date", date,
-                            "--endpoint", self.endpoint], capture_output=True, text=True, encoding="utf-8")
+                            "--endpoint", self.endpoint], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         big = ""
         try:
             big = open(os.path.join(self.mdir, "大檢討.md"), encoding="utf-8").read()
@@ -624,7 +660,10 @@ class ExtraTools:
         o, raw = self._ask(self._identity(),
                            "以下是你自己寫的筆記、卡法、因果、檢討（很多重複）。濃縮成最多 12 條確定的規則，每條 <=30 字、表格式、能照做。" + NL + raw_notes[:9000] + NL
                            + '只輸出 JSON：{"規則":["…"]}', effort="慢想", max_tokens=8000, deadline=300)
-        rules = [str(x) for x in (o.get("規則") or []) if str(x).strip()]
+        rl = o.get("規則") or []
+        if isinstance(rl, (str, dict)):                              # 10/25 審查：字串會被逐字拆成一個字一條
+            rl = [rl]
+        rules = [str(x) for x in rl if str(x).strip()]
         if not rules:
             return "學習整理沒整理出東西"
         with open(os.path.join(self.mdir, "學習整理.md"), "w", encoding="utf-8") as f:
@@ -642,16 +681,20 @@ class ExtraTools:
                            effort="慢想", max_tokens=8000, deadline=300)
         if not o:
             return "慢想沒解析出來"
-        self.plan = {"序列": [str(x) for x in (o.get("大動作序列") or [])], "細步驟": [str(x) for x in (o.get("第一步細步驟") or [])],
+        seq, steps = o.get("大動作序列") or [], o.get("第一步細步驟") or []
+        seq = [seq] if isinstance(seq, (str, dict)) else seq
+        steps = [steps] if isinstance(steps, (str, dict)) else steps
+        self.plan = {"序列": [str(x) for x in seq], "細步驟": [str(x) for x in steps],
                      "為什麼": str(o.get("為什麼這樣排", "")), "時間": datetime.now().strftime("%H:%M")}
         self._append("慢想.md", "序列:" + "→".join(self.plan["序列"]) + "｜第一步:" + "→".join(self.plan["細步驟"]) + "｜" + self.plan["為什麼"])
         return "慢想排好了（之後面板【慢想排的】會一直顯示）：" + "→".join(self.plan["序列"]) + "；第一步：" + "→".join(self.plan["細步驟"])
 
     def learn_daily_report(self):
         """進步日誌：程式把今天的數字＋大檢討摘要寫成一份（不叫模型）。"""
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = self._log_date()
         stats = subprocess.run([sys.executable, os.path.join(HERE, "stats.py"), "--game", self.game, "--date", date],
-                               capture_output=True, text=True, encoding="utf-8").stdout
+                               capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}).stdout or ""
         big = ""
         try:
             big = open(os.path.join(self.mdir, "大檢討.md"), encoding="utf-8").read()[:2500]
@@ -690,7 +733,7 @@ class ExtraTools:
         d = {"名稱": 名稱, "作者": 作者, "封面特徵": 封面特徵, "進入步驟": 進入步驟, "時間": datetime.now().strftime("%m/%d %H:%M")}
         with open(p, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=1)
-        return "記住這隻遊戲的身分：" + json.dumps(d, ensure_ascii=False) + "（回到遊戲／退出重進會對照）"
+        return "記住這隻遊戲的身分：" + json.dumps(d, ensure_ascii=False) + "（存在 記憶/工具版/遊戲身分.json；目前只存檔，程式不會自動對照）"
 
     def mem_button(self, 名稱="", x="", y="", 效果=""):
         p = os.path.join(self.mdir, "按鈕簿.json")
@@ -702,6 +745,8 @@ class ExtraTools:
             return "記按鈕 要給名稱，例如 記按鈕(立即開始,0.62,0.80,進場)"
         if str(x).strip() in ("刪", "刪除", "忘記") or str(效果).strip() in ("刪", "刪除", "忘記"):
             return self.mem_forget_button(名稱)          # 忘記按鈕 併進來
+        if bool(str(x).strip()) != bool(str(y).strip()):
+            return "記按鈕 的 x,y 要一起寫（只寫一個不行）；都不寫＝剛預約或剛點過的位置"
         last = self.pending_click or getattr(self, "last_click", None) or {}   # 10/24 稽核：點完（預約已清）也拿得到剛點的位置
         fx = x if str(x).strip() else last.get("x", "")
         fy = y if str(y).strip() else last.get("y", "")
@@ -950,7 +995,10 @@ class ExtraTools:
         fix = what.startswith("更正")
         what = re.sub(r"^更正\s*[:：]?\s*", "", what)
         can = str(能不能互動).strip()
-        can = "能" if re.match(r"^(能|可|可以|是|會|yes)", can, re.I) else "不能" if re.match(r"^(不|否|沒|no)", can, re.I) else (can[:20] or "")
+        if re.match(r"^(不知道|不確定|未知|沒試|沒有試|不清楚|還不)", can):      # 10/25 審查：原本「不知道」被當成「不能」
+            can = can[:20]
+        else:
+            can = "能" if re.match(r"^(能|可|可以|是|會|yes)", can, re.I) else "不能" if re.match(r"^(不|否|沒|no)", can, re.I) else (can[:20] or "")
         alias = [a.strip() for a in re.split(r"[／/、,，;；]", str(別名)) if a.strip() and a.strip() != name][:6]
         items = self._items_load()
         now = datetime.now().strftime("%m/%d %H:%M")
@@ -1073,6 +1121,9 @@ class ExtraTools:
         ok = o.get("合理")
         if isinstance(ok, str):
             ok = ok.strip().lower() in ("true", "是", "合理", "yes")
+        if not isinstance(ok, bool):                                  # 10/25 審查：沒回答「合理」原本被當成「不合理」
+            self._append("突發狀況.md", f"{what}｜（沒回答合不合理）")
+            return "突發狀況想了但沒回答合不合理；先用 檢討 記下這次的意外"
         line = (f"{what}｜是什麼:{o.get('是什麼', '')}｜在哪一步:{o.get('在哪一步', '')}｜合理:{'是' if ok else '否'}"
                 f"｜為什麼:{o.get('為什麼', '')}｜可能事項:{o.get('可能事項', '')}｜下一步:{o.get('下一步', '')}")
         self._append("突發狀況.md", line)
@@ -1210,6 +1261,9 @@ class ExtraTools:
             k = a["id"]
             if k not in seen:
                 seen[k] = {"輪": self.ask_round, "時間": datetime.now().strftime("%m/%d %H:%M:%S")}
+                changed = True
+            if seen[k]["輪"] > self.ask_round:                 # 10/25 審查：重啟後輪數從 0 起，舊紀錄的輪數比現在大 → 當作已過期
+                seen[k]["輪"] = self.ask_round - self.ASK_SHOW
                 changed = True
             age = self.ask_round - seen[k]["輪"]
             if age >= self.ASK_SHOW:

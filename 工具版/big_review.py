@@ -50,6 +50,12 @@ def main():
     m = os.path.join(ROOT, "專案", a.game, "記憶", "工具版")
     cat = T.load_catalog(a.game)
     tools = T.Tools(a.game, cat, live=False)
+    if not os.path.exists(os.path.join(m, a.date + ".jsonl")):        # 10/25 審查：代理跨午夜仍寫前一天的檔
+        files = sorted(f for f in os.listdir(m) if re.fullmatch(r"\d{4}-\d\d-\d\d\.jsonl", f))
+        if not files:
+            sys.exit("[大檢討] 沒有任何紀錄檔")
+        print(f"[大檢討] 沒有 {a.date}.jsonl，改用最新的 {files[-1]}")
+        a.date = files[-1][:-6]
     stats = subprocess.run([sys.executable, os.path.join(HERE, "stats.py"), "--game", a.game, "--date", a.date],
                            capture_output=True, text=True, encoding="utf-8").stdout
     # 工具使用率
