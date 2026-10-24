@@ -1001,6 +1001,18 @@ class Tools(ExtraTools):
                 # 10/16 03:3x：他一直把「景物往左移」讀成「鏡頭往左轉」寫進檢討（刻度反）→ 量測後面標鏡頭實際轉向
                 sh_txt = ((f"畫面景物實測往{'左' if (sh or 0) < 0 else '右'}移了 {abs(sh or 0) * 100:.0f}% 畫面寬"
                            + (f"（景物往{'左' if sh < 0 else '右'}移＝鏡頭往{'右' if sh < 0 else '左'}轉了）" if abs(sh) >= 0.03 else "")) + pinned_note) if sh is not None else ""
+                if sh is not None:
+                    # 10/25 使用者：工具要回饋他轉了幾度，並用一個物品標點確認
+                    import math
+                    Wf, Hf = before.size
+                    th = math.tan(math.radians(self.V_FOV / 2)) * Wf / Hf
+                    deg_scene = -math.degrees(math.atan(sh * 2 * th))
+                    lm_deg, lm_txt = self._landmark_turn(before, after, sign)
+                    got = lm_deg if lm_deg is not None else deg_scene
+                    want = deg * sign
+                    ok = abs(got - want) <= max(5.0, 0.15 * abs(want))
+                    sh_txt += (f"；整張畫面位移換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度；{lm_txt}；**你實際轉了約 {got:+.0f} 度（要轉 {want:+.0f} 度）**；"
+                               + self._v2("轉了幾度", f"{want:+.0f}", f"{got:+.0f}", ok, "度") + "（第一次＝要轉、第二次＝實測）")
                 try:
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
@@ -1016,6 +1028,40 @@ class Tools(ExtraTools):
         return ((f"⚠ 刻度是捲鏡頭之前量的（{self.zoomed_at}），還沒重量；" if getattr(self, "zoomed_at", "") else "")
                 + f"預期：轉 {deg:.0f} 度（dy {px:.0f}，照刻度每度 {self.dy_deg}）→ 實測：畫面變化 {d:.0f}{retry_note}"
                 + ("（幾乎沒變＝可能已經頂到上下限）" if d < 2 else "") + v2_txt + "。對不上就 量刻度 重量")
+
+    def _landmark_turn(self, before, after, sign):
+        """10/25 01:0x 使用者：「為了讓他理解自己是轉了幾度，工具也要回饋說他轉了幾度，並且也要有一個物品類的標點來確認轉動是否正確」
+        轉前在畫面「轉向那一側」挑一塊最有紋理的東西當標點（右轉挑右邊、左轉挑左邊，轉完它還會在畫面裡），
+        轉後找它跑到哪 → 用針孔模型換算鏡頭實際轉了幾度。回 (度數或 None, 說明)。正＝右轉。"""
+        import math
+        import numpy as np
+        from PIL import Image
+        W, H = 240, 124
+        g = np.asarray(before.convert("L").resize((W, H)), dtype=np.float32)
+        pw, ph = 24, 16
+        xs = range(int(0.62 * W), int(0.92 * W) - pw, 4) if sign > 0 else range(int(0.08 * W), int(0.38 * W) - pw, 4)
+        best = None
+        for y in range(int(0.25 * H), int(0.65 * H) - ph, 4):
+            for x in xs:
+                sd = float(g[y:y + ph, x:x + pw].std())
+                if best is None or sd > best[0]:
+                    best = (sd, x, y)
+        if best is None or best[0] < 12:
+            return None, "標點：畫面那一側挑不到有紋理的東西"
+        _, x, y = best
+        patch = Image.fromarray(g[y:y + ph, x:x + pw].astype(np.uint8))
+        x0, y0 = (x + pw / 2) / W, (y + ph / 2) / H
+        loc = self._locate(patch, after, near=(0.5, y0, 0.55))
+        if not loc or loc[2] < 0.8:
+            return None, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後找不到（相似度 {loc[2] if loc else 0:.2f}）"
+        x1, y1, sim = loc
+        if abs(x1 - x0) < 0.02:
+            return None, f"標點：({x0:.2f},{y0:.2f}) 轉後還在原位＝釘在畫面上的字／面板，不能當標點"
+        Wf, Hf = before.size
+        th = math.tan(math.radians(self.V_FOV / 2)) * Wf / Hf
+        ang = lambda v: math.degrees(math.atan((v - 0.5) * 2 * th))   # noqa: E731
+        deg = ang(x0) - ang(x1)
+        return deg, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後在 ({x1:.2f},{y1:.2f})（相似度 {sim:.2f}）→ 鏡頭實際轉了 {deg:+.0f} 度"
 
     def _shift(self, before, after, d):
         """水平位移（整張比對；被釘著的東西拉成 0% 時改只看有變的像素）→ (比例或 None, 說明)。"""
@@ -2138,14 +2184,15 @@ class Tools(ExtraTools):
                 dd = self.diff(before, after)
             sh, _ = self._shift(before, after, dd)
             done += chunk
-            if sh is None or abs(sh) >= 0.45:
-                parts.append(f"第{i + 1}段 {chunk:+.0f}→量不出（前後畫面找不到同一個東西）")
+            lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1)
+            if lm_deg is None and (sh is None or abs(sh) >= 0.45):
+                parts.append(f"第{i + 1}段 {chunk:+.0f}→量不出（前後畫面找不到同一個東西；{lm_txt}）")
                 break
             W, H = before.size
             th = math.tan(math.radians(self.V_FOV / 2)) * W / H
-            turned = -math.degrees(math.atan(sh * 2 * th))         # 景物往左移＝鏡頭往右轉
+            turned = lm_deg if lm_deg is not None else -math.degrees(math.atan(sh * 2 * th))   # 標點優先；景物往左移＝鏡頭往右轉
             meas += turned
-            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}")
+            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'標點' if lm_deg is not None else '整張位移'}）")
         return meas, "、".join(parts), done
 
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
