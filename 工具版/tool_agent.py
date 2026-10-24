@@ -265,8 +265,11 @@ ALIAS = {
     "視角下": ("仰", lambda p: {"度": str(-num(p.get("度"), 15))}),
     "180度轉頭": ("轉", lambda p: {"度": "180"}),
     "關掉面板": ("關掉", lambda p: {}), "付費視窗": ("關掉", lambda p: {}),
-    "look": ("轉", lambda p: {"度": str(num(p.get("dx"), 0) / 2.5)}),
+    "look": ("轉", lambda p: {"度": str(num(p.get("dx"), 0) / (CUR_DX[0] or 2.5))}),   # 10/25 審查：不寫死 2.5
 }
+
+
+CUR_DX = [2.5]        # 現在的每度 dx（_look／定刻度／量刻度 會更新；給舊名 look(dx) 換算用）
 
 
 def parse_call(item, cat):
@@ -377,6 +380,15 @@ class Tools(ExtraTools):
         except Exception:  # noqa: BLE001
             pass
         return f"【二次驗證 {tag}】{name} 第一次 {v1}{unit}、第二次 {v2}{unit}"
+
+    def _cmp(self, name, want, got, ok, unit=""):
+        """10/25 審查：「要轉 vs 實測」不是同一量測做兩次，另起標籤、記進 對照.md，不混進 二次驗證 的一致率。"""
+        tag = "一致" if ok else "不一致"
+        try:
+            self._append("對照.md", f"{name}｜要 {want}{unit}｜實測 {got}{unit}｜{tag}")
+        except Exception:  # noqa: BLE001
+            pass
+        return f"【對照 {tag}】{name} 要 {want}{unit}、實測 {got}{unit}"
 
     # ---- 畫面
     def grab(self):
@@ -956,6 +968,7 @@ class Tools(ExtraTools):
         return (best_s / W, len(moving) / (len(rows) * W)) if best is not None else None
 
     def _look(self, deg, axis, sign, lo, hi, default):
+        CUR_DX[0] = self.dx_deg or 2.5
         deg = max(lo, min(hi, num(deg, default)))
         px = deg * (self.dx_deg if axis == "x" else self.dy_deg) * sign
         before = self.grab()
@@ -1015,7 +1028,7 @@ class Tools(ExtraTools):
                     want = deg * sign
                     ok = abs(got - want) <= max(5.0, 0.15 * abs(want))
                     sh_txt += (f"；整張畫面位移換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度；{lm_txt}；**你實際轉了約 {got:+.0f} 度（要轉 {want:+.0f} 度）**；"
-                               + self._v2("轉了幾度", f"{want:+.0f}", f"{got:+.0f}", ok, "度") + "（第一次＝要轉、第二次＝實測）")
+                               + self._cmp("轉了幾度", f"{want:+.0f}", f"{got:+.0f}", ok, "度"))
                 try:
                     self._append("刻度樣本.md", f"dx {px:.0f}｜預期 {deg:.0f} 度｜實測位移 {abs(sh or 0) * 100:.0f}%｜變化 {d:.0f}")
                 except Exception:  # noqa: BLE001
@@ -1283,6 +1296,8 @@ class Tools(ExtraTools):
         """挖掉 找自己 量到的自己那塊（self_mask 240×124）再比中央放大；自己佔掉中央 70% 以上就退回比四周。"""
         import numpy as np
         from PIL import Image
+        if a is None or b is None or self.self_mask is None:
+            return None
         W, H = 320, 180
         m = np.asarray(Image.fromarray(self.self_mask.astype(np.uint8) * 255).resize((W, H), Image.NEAREST)) > 0
         x0, y0, x1, y1 = 80, 45, 240, 135
@@ -1413,8 +1428,9 @@ class Tools(ExtraTools):
             self._drag(90 * self.dx_deg, 0)
             time.sleep(0.4)
             turned += 90
-        self._drag(-turned * self.dx_deg, 0)
-        time.sleep(0.4)
+        if turned % 360:                               # 10/25 審查：四面都擋時 turned=360，不用再轉一整圈回來
+            self._drag(-(turned % 360) * self.dx_deg, 0)
+            time.sleep(0.4)
         return None, "四個方向往前都被擋（" + "、".join(tried) + "）"
 
     def _turn_back(self, turned):
@@ -1976,6 +1992,7 @@ class Tools(ExtraTools):
             json.dump(cal, f, ensure_ascii=False, indent=1)
         self.startup["每度dx"] = self.dx_deg
         self.startup.pop("驗證", None)                   # 10/25 審查：刻度改了，之前的驗證不算
+        CUR_DX[0] = self.dx_deg
         return f"每度 dx 改成 {self.dx_deg}（一圈 {int(round(v * 360))}），已寫進校準檔；之後 轉(90) 會送 dx {90 * self.dx_deg:.0f}"
 
     def cal_screen(self):
@@ -2180,7 +2197,7 @@ class Tools(ExtraTools):
             meas, parts, done, stopped, lm_used = self._turn_chunks(d)
             ok = abs(meas - done) <= max(5.0, 0.15 * abs(done))
             stop_note = f"；**中途量不出，停在 {done:+.0f} 度沒再轉（要轉 {d:+.0f}，剩下的下一輪再轉）**" if stopped else ""
-            v2 = (self._v2("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝送出的、第二次＝標點實測合計）" if lm_used
+            v2 = (self._cmp("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）" if lm_used
                   else f"（沒有找到標點，{meas:+.0f} 度是整張位移估的，僅參考、不算一致／不一致）")
             return (f"轉 {d:+.0f} 度：分段轉（每段 ≤30 度、每段實測）{parts}；**你實際轉了約 {meas:+.0f} 度（送出 {done:+.0f}）**{stop_note}；" + v2 + cap_note)
         return self._look(abs(d), "x", 1 if d > 0 else -1, 3, 90, 30) + cap_note
@@ -2470,7 +2487,7 @@ class Tools(ExtraTools):
         # 18:1x 實測：他在醫院裡（第一人稱，全程 240）卻回報第三人稱 → 用了第三人稱全程 520 的一半 260 往上拉 → 拉過頭看天花板。
         #   → 全程不靠回報、當場量：慢慢往下到底 → 慢慢往上數到頂＝這次的全程 → 往下拉一半
         if True:
-            self._find_vlimit(+1)
+            bottom, _ = self._find_vlimit(+1)
             down_px = self._vl_moved
             top, _ = self._find_vlimit(-1)
             full = top if top else (self.vrange_px or int(178 * self.dy_deg))
@@ -2487,52 +2504,9 @@ class Tools(ExtraTools):
                       f"往上沒找到頂（畫面看不出停），照記的全程 {full} 的一半拉，可能不準")
             self.level_meas = (datetime.now().strftime("%H:%M"), lv)
             self._depth_log(種類="修水平 找底再找頂", 往下像素=down_px, 往上全程=top, 用的全程=full, 水平儀原本=round(was, 1))
-            return (f"修水平：每步 10 像素慢慢往下到底（往下動了 {down_px} 像素）→ 再慢慢往上數到頂 → 往下拉一半＝{lv}。"
+            return (f"修水平：每步 10 像素慢慢往下{'到底' if bottom else '（沒找到底，量不出）'}（往下動了 {down_px} 像素）→ 再慢慢往上數到頂 → 往下拉一半＝{lv}。"
                     f"水平儀原本以為{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度（累計會跟真的差：開選單時拖、轉到極限都還在算），已歸零")
-        if self.self_table and self.self_mask is not None and self.vrange_px:
-            # 12:1x：拿現在自己的樣子對 量刻度 時記的表 → 鏡頭相對角色現在在離底幾像素 → 跟水平（全程一半）差多少
-            import numpy as np
-            cur = self._self_vec(self.grab())
-            errs = [(self._self_diff(cur, v), pos) for pos, v in self.self_table]
-            err, pos = min(errs)
-            if err < max(6.0, self.self_noise * 3):
-                was = (self.vrange_px / 2 - pos) / self.dy_deg * -1    # 離底比一半多＝抬頭（正）
-                if abs(was) >= 2:                   # 照自己的樣子拉回，再對一次表驗證
-                    self._drag(0, int(round(was * self.dy_deg)))
-                    time.sleep(0.3)
-                    cur2 = self._self_vec(self.grab())
-                    err2, pos2 = min((self._self_diff(cur2, v), p2) for p2, v in self.self_table)
-                    now = (pos2 - self.vrange_px / 2) / self.dy_deg
-                    ok = abs(now) <= 4
-                    lv = "約水平" if ok else f"{'抬頭' if now > 0 else '低頭'}約 {abs(now):.0f} 度"
-                    self.pitch_acc = 0.0
-                    self.level_meas = (datetime.now().strftime("%H:%M"), lv + "（看自己）")
-                    self._depth_log(種類="修水平 看自己 驗證", 拉回後離底像素=pos2, 推算角度=round(now, 1), 對照誤差=round(err2, 1))
-                    return (f"修水平（看自己的樣子對照 量刻度 記的表）：鏡頭相對角色原本{'抬頭' if was > 0 else '低頭'}約 {abs(was):.0f} 度"
-                            f"（水平儀以為 {self.pitch_acc:+.0f} 度）→ 拉回 → 再對一次表：{lv}。上下只能 ±{self.PITCH_LIM:.0f} 度，不掃到頂／底。水平儀已歸零")
-                self._depth_log(種類="修水平 看自己", 離底像素=pos, 全程=self.vrange_px, 推算角度=round(was, 1), 對照誤差=round(err, 1),
-                                水平儀原本=round(self.pitch_acc, 1))
-        if abs(was) < 2:
-            self.level_meas = (datetime.now().strftime("%H:%M"), "約水平（水平儀本來就是 0）")
-            return "水平儀顯示已經約水平（累計 0 度），沒拉；畫面看起來歪就是刻度不準，量刻度 重量"
-        b0 = self.grab()
-        self._drag(0, int(round(was * self.dy_deg)))     # 抬頭 was 度 → 往下拉回
-        time.sleep(0.3)
-        b1 = self.grab()
-        self.pitch_acc = 0.0
-        sy = self.shift_y(b0, b1)
-        import math
-        got = (math.degrees(math.atan(abs(sy) * 2 * math.tan(math.radians(self.V_FOV / 2)))) if sy is not None else None)
-        ok = got is not None and abs(got - abs(was)) <= max(6, 0.3 * abs(was))
-        lv = ("約水平" if ok else ("驗不出（畫面一直在變）" if got is None or got < 1 else f"拉了約 {got:.0f} 度、跟水平儀的 {abs(was):.0f} 度對不上"))
-        self.level_meas = (datetime.now().strftime("%H:%M"), lv)
-        self._append("刻度樣本.md", f"修水平（±45 版）：水平儀 {was:+.0f} 度 → 反向拉回｜實測轉了 {got if got is None else round(got)} 度｜{lv}")
-        return (f"修水平：水平儀原本{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度 → 反向拉 {abs(was):.0f} 度（dy {int(round(was * self.dy_deg)):+d}）；"
-                f"實測畫面上下移了約 {got:.0f} 度 → {lv}" if got is not None else
-                f"修水平：水平儀原本{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度 → 反向拉回；實測量不出")             + f"。上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制），不再掃到頂／底。水平儀已歸零"
-
-    # ---- 視角移動到（10/18 16:5x 使用者）：給畫面上的點，程式算角度、一次轉過去讓它到正中央
-    V_FOV = 70.0          # Roblox 預設垂直視角；10/18 刻度樣本：轉 10／20／30 度實測位移 6／12／19%，照這個針孔模型算 6.5／13／21%
+        # 10/25 審查：原本下面還有「看自己對照表」「照水平儀拉回」兩段，上面的 if True 已經 return，永遠到不了 → 刪掉
 
     def _angles_to(self, fx, fy, W, H):
         import math
@@ -2692,7 +2666,7 @@ class Tools(ExtraTools):
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
                            f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
-                out.append((self._v2("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（第一次＝送出、第二次＝標點實測合計）") if lm_used
+                out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）") if lm_used
                            else "（沒有找到標點，度數是整張位移估的，僅參考）")
             elif sh is not None and abs(exp) >= 0.03:
                 ok_sh = abs(sh - exp) <= 0.05

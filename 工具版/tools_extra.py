@@ -186,7 +186,7 @@ class ExtraTools:
         prev = self.last_desc
         if prev and prev.get("類型") and kind != "？" and prev["類型"] != kind:
             self.desc_changed = f"畫面類型從「{prev['類型']}」變成「{kind}」"
-        self.last_desc = {"類型": kind, "總結": d.get("總結", ""), "時間": datetime.now().strftime("%H:%M")}
+        self.last_desc = {"類型": kind, "時間": datetime.now().strftime("%H:%M")}      # 10/25 審查：原本的「總結」鍵永遠是空的
         lines = [f"【畫面描述】（描述員只看這張圖、不懂遊戲規則；{dt:.0f} 秒{'，時間到只收到前面幾行' if trunc else ''}）"]
         self.desc_timing = (round(t_ocr, 1), round(dt, 1), len(raw))
         lines += [f"{k}：{d[k]}" for k in self.DESC_KEYS if k in d]
@@ -277,6 +277,8 @@ class ExtraTools:
         known_txt = ("；記過的長相有：" + "、".join(known) + "（用這些名字）") if known else ""
         if not self.desc_items:
             return f"還沒有描述畫面給的點、也沒有記過「{q}」的長相" + known_txt + "：先叫 描述畫面，再用 編號／名稱；或直接給座標，例：走過去(0.72,0.55)"
+        if self.desc_items and not fresh:                  # 10/25 審查：過期的點不要再列出來讓他用
+            return f"描述畫面是 {age:.0f} 秒前的（過期），裡面的點不能用；先重新 描述畫面" + known_txt
         return "描述畫面的點裡沒有「" + q + "」；有：" + "、".join(f"[{i['編號']}]{i['名稱']}" for i in self.desc_items) + known_txt
 
     # ---------------- 長相照片（20:xx 使用者：「他需要可以對東西進行截圖後，直接訓練他自己去對這個東西更認識——
@@ -307,6 +309,13 @@ class ExtraTools:
             return []
 
     look_alias_note = ""
+    look_how = ""
+
+    def _pop_look_how(self):
+        """10/25 審查：_resolve_target 用照片找到東西時寫的說明（含「你寫的 X 當成記過的 Y」）原本沒人讀 → 走過去 的回傳帶上、用過就清。"""
+        t = self.look_how
+        self.look_how = ""
+        return f"（{t}）" if t else ""
 
     def _look_names(self):
         try:
@@ -429,7 +438,7 @@ class ExtraTools:
             if isinstance(r, str):
                 return r
             x, y, src = r
-            hint = re.sub(r"^\[\d+\]|（.*", "", src).strip() or name
+            hint = (name if src.startswith("(") else re.sub(r"^\[\d+\]|（.*", "", src).strip()) or name   # 10/25 審查：座標目標不要把座標當名字問眼睛
             box = self._look_box(big, x, y, hint)
             if not box:                                  # 眼睛沒框好：用點附近一塊
                 box = (max(0.0, x - 0.08), max(0.0, y - 0.11), min(1.0, x + 0.08), min(1.0, y + 0.11))
@@ -587,7 +596,7 @@ class ExtraTools:
         else:
             reason = "走滿 8 步"
         self._append("刻度樣本.md", f"走過去 {name}｜{len(log)} 步｜停：{reason[:50]}")
-        return (f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}。現在的畫面下一輪給你"
+        return (self._pop_look_how() + f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}。現在的畫面下一輪給你"
                 + ("；到了就試 長按(e,1.5) 或 讀字" if "面前" in reason or "字" in reason else ""))
 
     # ---------------- 學習
@@ -632,7 +641,7 @@ class ExtraTools:
         self._append("死亡檢討.md", line)
         self.reviews.append(datetime.now().strftime("%H:%M") + " 死亡檢討：" + line)
         if o.get("要記的規則"):
-            self.mem_note(str(o["要記的規則"]))
+            self.mem_rule(str(o.get("死因") or "死亡")[:20], str(o["要記的規則"]))   # 10/25 審查：進 準則 機制（查準則 的 ✓／✗ 統計），不是筆記
         return "死亡檢討記下了：" + line
 
     def learn_success(self, 做成了什麼=""):
