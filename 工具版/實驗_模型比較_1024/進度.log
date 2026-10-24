@@ -46,3 +46,9 @@
 10/24 18:53:52 記憶還原成 _起點
 10/24 18:55:01 重開遊戲完成（60 秒）
 10/24 18:55:01 2b_haiku重跑 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain haiku
+10/24 19:55:01 2b_haiku重跑 滿 60.0 分鐘，放 stop.txt
+10/24 19:55:05 2b_haiku重跑 實際 60.1 分鐘
+10/24 19:55:08 2b_haiku重跑：40 輪、記憶有變 16 個檔、stats 寫好
+10/24 19:55:08 記憶還原成 _起點
+10/24 19:56:17 重開遊戲完成（60 秒）
+10/24 19:56:17 3b_sonnet重跑 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain sonnet
