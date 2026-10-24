@@ -26,6 +26,8 @@ import time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# 10/24 20:2x 使用者「工具你去修復好」：量測修正都用這個開關（模型比較重跑期間保持舊版，條件才一致；本地代理用 GAMER_TOOLFIX=1 開）
+TOOLFIX = os.environ.get("GAMER_TOOLFIX") == "1"
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 NL = "\n"
@@ -415,7 +417,12 @@ class Tools(ExtraTools):
     def _changed(self, before, noise=None):
         out = self._changed_px(before, noise)
         if self.live and not self.image_path:
-            out += self._task_note(before)
+            tn = self._task_note(before)
+            if TOOLFIX and tn and ("看不出" in out or "沒變" in out):
+                # 10/24 20:2x 工具修正：任務完成時常常只有右上字換，像素差很小 → 原本寫「看不出有反應」誤導他
+                out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（畫面變化小，但右上任務字變了＝**有反應**）", out)
+                out = out.replace("（兩次都看不出反應）", "（像素看不出，但任務字變了，以任務字為準＝有反應）")
+            out += tn
         return out
 
     def _task_note(self, before):
@@ -1175,6 +1182,8 @@ class Tools(ExtraTools):
         """走一步之後畫面中央放大了幾倍（深度比例）：拿 a 的中央區放大 k 倍跟 b 比，挑最像的 k。"""
         if a is None or b is None:
             return None
+        if TOOLFIX:
+            return Tools.zoom_factor_ring(a, b)
         from PIL import Image
         ga = a.convert("L").resize((320, 180))
         gb = b.convert("L").resize((320, 180))
@@ -1194,6 +1203,35 @@ class Tools(ExtraTools):
         # 10/16 09:0x：今天 232 次走路，結果擠在 1.0（86）和 2.0（56）兩端、走 0.5 秒和 1.5 秒分佈一樣＝量不出來
         # （第三人稱角色擋在中央、鏡頭跟著走）→ 卡在搜尋兩端、或比「不放大」好不到 8% 就回 None
         if best_k in (1.0, 2.0) or v1 is None or (v1 - best) < 0.08 * v1:
+            return None
+        return best_k
+
+    @staticmethod
+    def zoom_factor_ring(a, b):
+        """10/24 20:2x 工具修正：原本只比畫面正中央那塊（第三人稱時正好是自己的角色）→ 走路量距離 30～70% 量不出。
+        改成比「中央四周一圈」：畫面 15%～85% 寬、10%～90% 高，挖掉自己角色常站的中間（x 0.40～0.60、y 0.35～0.95）。"""
+        import numpy as np
+        from PIL import Image
+        W, H = 320, 180
+        ga = a.convert("L").resize((W, H))
+        gb = np.asarray(b.convert("L").resize((W, H)), dtype=np.float32)
+        x0, x1, y0, y1 = int(.15 * W), int(.85 * W), int(.10 * H), int(.90 * H)
+        rw, rh = x1 - x0, y1 - y0
+        mask = np.ones((rh, rw), bool)
+        mask[int(.35 * H) - y0:int(.95 * H) - y0, int(.40 * W) - x0:int(.60 * W) - x0] = False
+        pb = gb[y0:y1, x0:x1][mask]
+        best, best_k, v1 = None, 1.0, None
+        for k10 in range(50, 101):
+            k = k10 / 50.0
+            w, h = rw / k, rh / k
+            box = (int(W / 2 - w / 2), int(H / 2 - h / 2), int(W / 2 + w / 2), int(H / 2 + h / 2))
+            pa = np.asarray(ga.crop(box).resize((rw, rh), Image.BILINEAR), dtype=np.float32)[mask]
+            v = float(np.abs(pa - pb).mean())
+            if k10 == 50:
+                v1 = v
+            if best is None or v < best:
+                best, best_k = v, k
+        if best_k in (1.0, 2.0) or v1 is None or (v1 - best) < 0.05 * v1:
             return None
         return best_k
 
@@ -2262,9 +2300,15 @@ class Tools(ExtraTools):
             full = top if top else (self.vrange_px or int(178 * self.dy_deg))
             self._drag(0, full // 2)
             time.sleep(0.3)
-            self.pitch_acc = 0.0
-            lv = (f"回到水平（當場量到全程 {full} 像素，從頂端往下拉一半）" if top else
-                  f"往上沒找到頂（畫面看不出停），照記的全程 {full} 的一半拉，可能不準")
+            if TOOLFIX and not top:
+                # 10/24 20:2x 工具修正：整片重複花紋（地磚、地毯）時量不出鏡頭在動 → 原本照樣寫「已歸零」，他以為修好了
+                self.pitch_acc = 0.0
+                lv = (f"**沒修好**：往上找不到頂（畫面是重複花紋或被擋，量不出鏡頭有沒有在動），只照記的全程 {full} 的一半拉，"
+                      "**現在不一定是水平**——看下一張畫面：看得到地平線／牆和天花板各一半才算水平；還是滿地板就用 仰(30) 自己抬")
+            else:
+                self.pitch_acc = 0.0
+                lv = (f"回到水平（當場量到全程 {full} 像素，從頂端往下拉一半）" if top else
+                      f"往上沒找到頂（畫面看不出停），照記的全程 {full} 的一半拉，可能不準")
             self.level_meas = (datetime.now().strftime("%H:%M"), lv)
             self._depth_log(種類="修水平 找底再找頂", 往下像素=down_px, 往上全程=top, 用的全程=full, 水平儀原本=round(was, 1))
             return (f"修水平：每步 10 像素慢慢往下到底（往下動了 {down_px} 像素）→ 再慢慢往上數到頂 → 往下拉一半＝{lv}。"
@@ -2380,6 +2424,10 @@ class Tools(ExtraTools):
         box = (max(0, cx - pw // 2), max(0, cy - ph // 2), min(SW, cx + pw // 2), min(SH, cy + ph // 2))
         patch = small.crop(box)
         yaw, pitch = self._angles_to(fx, fy, W, H)
+        # 10/24 20:2x 工具修正：第三人稱時目標轉到正中央就被自己的角色蓋住（轉完找不到 30～70%）→ 對到中央偏上 0.38（自己頭頂上方），左右還是正中
+        ay = 0.38 if (TOOLFIX and "第三" in str(self.startup.get("人稱", ""))) else 0.5
+        if ay != 0.5:
+            pitch -= self._angles_to(0.5, ay, W, H)[1]
         pitch0 = max(-60.0, min(60.0, pitch))
         pitch = self._pitch_room(pitch0)                  # 10/23：上下只能 ±45 度
         lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度）" if abs(pitch - pitch0) >= 1 else "")
@@ -2431,21 +2479,22 @@ class Tools(ExtraTools):
                    else f"那裡的字「{pin_word}」轉完還在原位")
             return ("；".join(out) + f"；轉完{how}＝它是釘在畫面上的東西（面板、海報、HUD、任務框、提示框），不是場景，"
                     "轉頭不會讓它移到中央；**已把鏡頭轉回原本的方向**，沒有補轉。要對準場景裡的東西；不確定哪裡是 UI 就叫 確認是否是UI")
-        loc1 = self._locate(patch, after, near=(0.5, 0.5, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
+        loc1 = self._locate(patch, after, near=(0.5, ay, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
         if loc1 and loc1[2] >= GOOD:
             out.append(f"轉完找目標：在 ({loc1[0]:.2f},{loc1[1]:.2f})（相似度 {loc1[2]:.2f}）")
-            if abs(loc1[0] - 0.5) > 0.04 or abs(loc1[1] - 0.5) > 0.06:      # 偏了補一次
+            if abs(loc1[0] - 0.5) > 0.04 or abs(loc1[1] - ay) > 0.06:      # 偏了補一次
                 y2, p2 = self._angles_to(loc1[0], loc1[1], W, H)
+                p2 -= self._angles_to(0.5, ay, W, H)[1] if ay != 0.5 else 0
                 p2 = self._pitch_room(p2)
                 self._drag(y2 * self.dx_deg, -p2 * self.dy_deg)
                 self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + p2))
                 after = self._settled()
-                final = self._locate(patch, after, near=(0.5, 0.5, 0.3))
+                final = self._locate(patch, after, near=(0.5, ay, 0.3))
                 out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
         else:
             final = None
-        ok = bool(final and final[2] >= GOOD and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - 0.5) <= 0.08)
+        ok = bool(final and final[2] >= GOOD and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - ay) <= 0.08)
         if not (loc1 and loc1[2] >= GOOD):
             # 17:38～17:43 三次「找不到」：目標轉到正中央剛好被自己的角色（第三人稱）擋住 → 改用整張畫面的左右位移驗證有沒有轉對
             d_all = self.diff(before, after)
@@ -2462,10 +2511,11 @@ class Tools(ExtraTools):
                 out.append(f"轉完找不到原本那一塊，整張畫面的位移也量不出來（畫面變化 {d_all:.0f}），看下一張畫面確認")
         if final and final[2] >= GOOD and loc1 and loc1[2] >= GOOD:
             out.append(self._v2("視角移動到", f"({loc1[0]:.2f},{loc1[1]:.2f})",
-                                f"({final[0]:.2f},{final[1]:.2f})", ok) + "（第一次＝轉完、第二次＝補轉後；目標應在 0.50,0.50 附近）")
+                                f"({final[0]:.2f},{final[1]:.2f})", ok) + f"（第一次＝轉完、第二次＝補轉後；目標應在 0.50,{ay:.2f} 附近）")
         if redrag:
             out.insert(1, redrag)
-        out.append("**已對準正中央**" if ok else "沒有完全對準；看下一張畫面，再用 視角移動到 或 轉 微調")
+        out.append(("**已對準正中央**" if ay == 0.5 else f"**已對準：左右正中、上下在 {ay:.2f}（第三人稱對到自己頭頂上方，免得被自己擋；往前走一樣會走向它）**")
+                   if ok else "沒有完全對準；看下一張畫面，再用 視角移動到 或 轉 微調")
         try:
             self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜算 左右{yaw:+.0f} 上下{pitch:+.0f}｜結果 "
                          + (f"({final[0]:.2f},{final[1]:.2f}) 相似{final[2]:.2f}" if (final and final[2] >= GOOD) else "找不到") + f"｜{'對準' if ok else '沒對準'}")
