@@ -1093,6 +1093,22 @@ class Tools(ExtraTools):
             return deg, f"標點：轉前 ({x0:.2f},{y0:.2f}) 的那塊東西轉後在 ({x1:.2f},{y1:.2f})（相似度 {sim:.2f}）→ 鏡頭實際轉了 {deg:+.0f} 度"
         return None, "標點：" + "、".join(why[:3]) + "，都不能當標點"
 
+    def _landmark_verify(self, before, after, want, sh=None):
+        """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""
+        import math
+        lm_deg, lm_txt = self._landmark_turn(before, after, 1 if want > 0 else -1, want)
+        scene_deg = None
+        if sh is not None and abs(sh) < 0.45:
+            Ws, Hs = before.size
+            scene_deg = -math.degrees(math.atan(sh * 2 * math.tan(math.radians(self.V_FOV / 2)) * Ws / Hs))
+        if lm_deg is not None and scene_deg is not None and abs(lm_deg - scene_deg) > max(10.0, 0.5 * abs(scene_deg)):
+            lm_txt += f"（跟整張位移 {scene_deg:+.0f} 差太多，標點可能認錯，不用）"
+            lm_deg = None
+        if lm_deg is not None and scene_deg is None and abs(lm_deg - want) > max(15.0, abs(want)):
+            lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {want:+.0f} 差太多，不信）"
+            lm_deg = None
+        return lm_deg, lm_txt, scene_deg
+
     def _shift(self, before, after, d):
         """水平位移（整張比對；被釘著的東西拉成 0% 時改只看有變的像素）→ (比例或 None, 說明)。"""
         sh = self.shift_x(before, after)
@@ -2686,15 +2702,27 @@ class Tools(ExtraTools):
                            f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
                 out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）") if lm_used
                            else "（沒有找到標點，度數是整張位移估的，僅參考）")
-            elif sh is not None and abs(exp) >= 0.03:
-                ok_sh = abs(sh - exp) <= 0.05
-                out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住"
-                           + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + f"）→ 改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
-                           f"實測往{'左' if sh < 0 else '右'}移 {abs(sh) * 100:.0f}%（畫面變化 {d_all:.0f}）")
-                out.append(self._v2("視角移動到 位移", f"{exp * 100:+.0f}", f"{sh * 100:+.0f}", ok_sh, "%") + "（第一次＝應該移、第二次＝實測）")
-                ok = ok_sh
             else:
-                out.append(f"轉完找不到原本那一塊，整張畫面的位移也量不出來（畫面變化 {d_all:.0f}），看下一張畫面確認")
+                # 10/25 03:0x 第 7 輪：≤30 度這條路原本只回「整張位移 %」，找不到 56% 局內（基準 62%）幾乎沒改善
+                #   → 跟 轉 一樣用標點量「實際轉了幾度」（使用者：工具要回饋轉了幾度＋物品標點），跟整張位移交叉檢查；一致就算對準
+                lm_deg, lm_txt, scene_deg = self._landmark_verify(before, after, yaw, sh)
+                head = ("轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住"
+                        + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + "）")
+                if lm_deg is not None and abs(yaw) >= 3:
+                    ok = abs(lm_deg - yaw) <= max(5.0, 0.15 * abs(yaw))
+                    out.append(head + f"→ 改用標點量：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）"
+                               + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if scene_deg is not None else ""))
+                    out.append(self._cmp("視角移動到 標點實測", f"{yaw:+.0f}", f"{lm_deg:+.0f}", ok, "度")
+                               + ("（目標應該就在正中央、被你自己的角色擋住看不到）" if ok else "（差太多，可能沒轉到、或滑鼠拖到一半被擋）"))
+                elif sh is not None and abs(exp) >= 0.03:
+                    ok_sh = abs(sh - exp) <= 0.05
+                    out.append(head + f"→ 標點量不到（{lm_txt}）、改量整張畫面：景物應該往{'左' if exp < 0 else '右'}移 {abs(exp) * 100:.0f}%、"
+                               f"實測往{'左' if sh < 0 else '右'}移 {abs(sh) * 100:.0f}%（畫面變化 {d_all:.0f}）"
+                               + (f"≈ 轉了 {scene_deg:+.0f} 度" if scene_deg is not None else ""))
+                    out.append(self._v2("視角移動到 位移", f"{exp * 100:+.0f}", f"{sh * 100:+.0f}", ok_sh, "%") + "（第一次＝應該移、第二次＝實測）")
+                    ok = ok_sh
+                else:
+                    out.append(f"轉完找不到原本那一塊，標點（{lm_txt}）和整張畫面的位移也量不出來（畫面變化 {d_all:.0f}），看下一張畫面確認")
         if final and final[2] >= GOOD and loc1 and loc1[2] >= GOOD:
             out.append(self._v2("視角移動到", f"({loc1[0]:.2f},{loc1[1]:.2f})",
                                 f"({final[0]:.2f},{final[1]:.2f})", ok) + f"（第一次＝轉完、第二次＝補轉後；目標應在 0.50,{ay:.2f} 附近）")
