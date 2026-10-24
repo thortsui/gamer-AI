@@ -65,7 +65,7 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
            "--verbose", "--setting-sources", "", "--strict-mcp-config", "--effort", EFFORT.get(effort, "medium")]
     if CFG["native"]:
         cmd += ["--append-system-prompt-file", sp, "--allowedTools", "WebSearch", "WebFetch", "Read", "Glob", "Grep",
-                "--max-turns", "12"] + (["--resume", CFG["session"]] if CFG["session"] else [])
+                "--max-turns", "12"] + (["--resume", CFG["session"]] if CFG["session"] and not os.environ.get("CLAUDE_BRAIN_FRESH") else [])   # 10/24 研究：CLAUDE_BRAIN_FRESH＝原生 system 但每次新 session
     else:
         cmd += ["--system-prompt-file", sp, "--no-session-persistence"]
     if CFG["native"]:
