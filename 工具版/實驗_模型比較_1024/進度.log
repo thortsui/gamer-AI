@@ -1,0 +1,19 @@
+10/24 08:00:51 起點存好
+10/24 08:00:51 本地對照：131 輪
+10/24 08:00:51 記憶還原成起點
+10/24 08:00:51 1_haiku 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain haiku
+10/24 09:00:52 1_haiku 滿 60.0 分鐘，放 stop.txt
+10/24 09:00:57 1_haiku 實際 60.1 分鐘
+10/24 09:01:02 1_haiku：43 輪、記憶有變 16 個檔、stats 寫好
+10/24 09:01:03 記憶還原成起點
+10/24 09:01:03 2_sonnet 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain sonnet
+10/24 10:01:03 2_sonnet 滿 60.0 分鐘，放 stop.txt
+10/24 10:01:23 2_sonnet 實際 60.3 分鐘
+10/24 10:01:29 2_sonnet：68 輪、記憶有變 20 個檔、stats 寫好
+10/24 10:01:29 記憶還原成起點
+10/24 10:01:29 3_sonnet原生 開始：--game 動物醫院 --live --rounds 5000 --deadline 600 --max-tokens 8000 --effort 慢想 --lock-effort --verify2 --steps 2 --no-small-update --brain sonnet --brain-native
+10/24 11:01:29 3_sonnet原生 滿 60.0 分鐘，放 stop.txt
+10/24 11:01:31 3_sonnet原生 實際 60.0 分鐘
+10/24 11:01:34 3_sonnet原生：138 輪、記憶有變 22 個檔、stats 寫好
+10/24 11:01:34 記憶還原成起點
+10/24 11:01:34 結果.md 寫好
