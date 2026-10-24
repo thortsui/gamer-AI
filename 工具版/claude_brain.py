@@ -15,6 +15,7 @@
 """
 import base64
 import json
+import re
 import os
 import subprocess
 import tempfile
@@ -112,8 +113,15 @@ def stream_json(endpoint, model, system_text, content, max_tokens, deadline_at,
                            結果=o.get("subtype"), 輪數=o.get("num_turns"))
         if CFG["native"] and texts:
             raw = texts[-1] if (texts[-1] or "").lstrip().startswith(("{", "`")) else "".join(texts)   # 原生會先講話再呼叫工具，取最後的 JSON
-        elif texts and len("".join(texts)) > len(raw):
-            raw = "".join(texts)
+        elif texts:
+            # 10/24 19:4x：只接起來會出事（Haiku 先寫半段放棄、再寫一段完整的 → 接起來變壞）→ 依序試：result、每一段、全部接起來，取第一個能解析成物件的
+            def _ok(t):
+                t = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", t or "").strip()
+                try:
+                    return isinstance(json.loads(t), dict)
+                except ValueError:
+                    return False
+            raw = next((c for c in [raw] + texts[::-1] + ["".join(texts)] if _ok(c)), raw if len(raw) >= len("".join(texts)) else "".join(texts))
         if not raw and p.returncode:
             rec["錯誤"] = (p.stderr or p.stdout)[-400:]
     except subprocess.TimeoutExpired:
