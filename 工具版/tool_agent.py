@@ -976,16 +976,14 @@ class Tools(ExtraTools):
         self._drag(px if axis == "x" else 0, px if axis == "y" else 0)
         if self.image_path or not self.live:
             return f"轉了 {deg:.0f} 度（{'dx' if axis == 'x' else 'dy'} {px:.0f}）"
-        time.sleep(0.25)
-        after = self.grab()
+        after = self._settled()                   # 10/25 02:1x：原本固定等 0.25 秒就拍，鏡頭還在滑（第一次量 6%、0.3 秒後 21%）
         d = self.diff(before, after)
         retry_note = ""
         if d < 3:
             # 10/16 19:0x：中央剛好有 E 提示（註冊／蓋印表格）時，從中央壓右鍵會按在提示上、鏡頭不轉（變化 0～4、位移 0%）
             # → 幾乎沒轉就改從畫面上方 25% 的地方重拖一次（第一次沒轉，重拖不會轉兩倍）
             self._drag(px if axis == "x" else 0, px if axis == "y" else 0, fy=0.25)
-            time.sleep(0.25)
-            after2 = self.grab()
+            after2 = self._settled()
             d2 = self.diff(before, after2)
             retry_note = (f"（第一次從畫面中央拖，畫面變化 {d:.0f} 幾乎沒轉——中央可能有提示擋住；改從畫面上方重拖一次，"
                           + ("這次轉了）" if d2 >= 3 else "還是沒轉）"))
@@ -1023,9 +1021,13 @@ class Tools(ExtraTools):
                     Wf, Hf = before.size
                     th = math.tan(math.radians(self.V_FOV / 2)) * Wf / Hf
                     deg_scene = -math.degrees(math.atan(sh * 2 * th))
-                    lm_deg, lm_txt = self._landmark_turn(before, after, sign)
-                    got = lm_deg if lm_deg is not None else deg_scene
                     want = deg * sign
+                    lm_deg, lm_txt = self._landmark_turn(before, after, sign, want)
+                    if lm_deg is not None and abs(lm_deg - deg_scene) > max(10.0, 0.5 * abs(deg_scene)):
+                        # 10/25 02:1x：大廳人多時標點認錯（+19 段量到 -17）→ 跟整張位移對不上就不信標點
+                        lm_txt += f"（跟整張位移 {deg_scene:+.0f} 度差太多，標點可能認錯，改用整張位移）"
+                        lm_deg = None
+                    got = lm_deg if lm_deg is not None else deg_scene
                     ok = abs(got - want) <= max(5.0, 0.15 * abs(want))
                     sh_txt += (f"；整張畫面位移換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度；{lm_txt}；**你實際轉了約 {got:+.0f} 度（要轉 {want:+.0f} 度）**；"
                                + self._cmp("轉了幾度", f"{want:+.0f}", f"{got:+.0f}", ok, "度"))
@@ -1570,6 +1572,10 @@ class Tools(ExtraTools):
             # 10/16 03:1x：貼牆走畫面變化 6～7、放大 1.0～1.1 倍也被寫進校準檔 → 這種不算量到
             return (f"走 1 秒中央只放大 {k:.2f} 倍、畫面變化 {d:.0f}＝幾乎沒往前（貼牆／被擋／原地），這次不算，校準檔沒改；"
                     "換前方有空間的地方再量比例")
+        if k > 2.5:
+            # 10/25 02:1x：大廳人群讓放大比對卡在上限 1.96（0.4 秒）→ 換算 1 秒 5.4 倍寫進校準檔，之後每次走路都「預期 2.3 倍、實測 1.1」
+            return (f"走 {used} 秒換算 1 秒放大 {k:.2f} 倍——不合理（走 1 秒不可能超過 2.5 倍；多半是中央有角色／人群讓比對卡在上限），"
+                    "這次不算，校準檔沒改；換前方開闊、沒有人的地方再 量比例")
         self.startup["深度比例"] = f"走1秒中央放大{k:.1f}倍"
         p = os.path.join(self.gdir, "記憶", "視角校準.json")
         try:
@@ -2227,6 +2233,16 @@ class Tools(ExtraTools):
             sh, _ = self._shift(before, after, dd)
             done += chunk
             lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1, chunk)
+            scene_deg = None
+            if sh is not None and abs(sh) < 0.45:
+                Ws, Hs = before.size
+                scene_deg = -math.degrees(math.atan(sh * 2 * math.tan(math.radians(self.V_FOV / 2)) * Ws / Hs))
+            if lm_deg is not None and scene_deg is not None and abs(lm_deg - scene_deg) > max(10.0, 0.5 * abs(scene_deg)):
+                lm_txt += f"（跟整張位移 {scene_deg:+.0f} 差太多，標點可能認錯，改用整張位移）"   # 10/25 02:1x
+                lm_deg = None
+            if lm_deg is not None and scene_deg is None and abs(lm_deg - chunk) > max(15.0, abs(chunk)):
+                lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {chunk:+.0f} 差太多，不信）"
+                lm_deg = None
             if lm_deg is None and (sh is None or abs(sh) >= 0.45):
                 meas += chunk
                 parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ 這段照送出的算、停在這裡")
