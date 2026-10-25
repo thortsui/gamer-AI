@@ -1274,8 +1274,17 @@ class Tools(ExtraTools):
             yaw, pitch, n, conf, _diag = self._feat_mod.estimate_yaw_pitch(before, after, sweep=False)
         except Exception as e:  # noqa: BLE001
             return None, None, 0, 0.0, f"特徵點法失敗：{str(e)[:60]}"
+        self._feat_how = "ORB"
         if yaw is None or conf < 0.5 or n < 15:
-            return None, None, n, conf, f"特徵點法量不出（{n} 點、可信 {conf:.2f}）"
+            # 10/26 02:5x 轉角基準（工具版/轉角基準.py、轉角估計_模型比較_1026.md）：ORB 量不出的 9 對 LoFTR 救回 4 對；合成 45 度 ORB 2/28 量不出、LoFTR 0/28 → 退路
+            try:
+                y2, p2, n2, c2, _d2 = self._feat_mod.estimate_yaw_pitch_loftr(before, after)
+            except Exception:  # noqa: BLE001
+                y2, n2, c2 = None, 0, 0.0
+            if y2 is not None and c2 >= 0.5 and n2 >= 15:
+                self._feat_how = "LoFTR"
+                return y2, p2, n2, c2, f"特徵點比對（ORB 量不出、改用 LoFTR：{n2} 個點、可信 {c2:.2f}）量到 鏡頭轉了 {y2:+.0f} 度"
+            return None, None, n, conf, f"特徵點法量不出（ORB {n} 點、可信 {conf:.2f}；LoFTR 也量不出）"
         return yaw, pitch, n, conf, f"特徵點比對（整張畫面 {n} 個點、可信 {conf:.2f}）量到 鏡頭轉了 {yaw:+.0f} 度"
 
     def _landmark_verify(self, before, after, want, sh=None, pitch=0.0):

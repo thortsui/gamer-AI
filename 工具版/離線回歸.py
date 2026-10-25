@@ -151,4 +151,8 @@ except Exception as _e:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+if im is not None:
+    _rot45 = Image.fromarray(_V.synth_rotate(_np3.array(im.convert("L")), 45.0, 0.0))
+    _ly, _lp, _ln, _lc, _ld = _V.estimate_yaw_pitch_loftr(im.convert("L"), _rot45)
+    check("LoFTR 退路 合成右轉 45 度", _ly is not None and 43 <= _ly <= 47 and _lc >= 0.5, (_ly, _ln, _lc, _ld))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

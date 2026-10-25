@@ -366,6 +366,61 @@ def estimate_yaw_pitch(before, after, third_person=None, sweep: bool = True):
     return round(yaw, 2), round(pitch, 2), n, conf, diag
 
 
+# ---------- 1b. LoFTR 退路（10/26 02:5x 轉角基準：ORB 量不出的對 LoFTR 能救回約一半；合成 45 度 ORB 2/28 量不出、LoFTR 0/28） ----------
+_LOFTR = {}
+
+
+def estimate_yaw_pitch_loftr(before, after, third_person=None):
+    """kornia LoFTR（outdoor 權重，Apache-2.0）配對 → 同一套 RANSAC 針孔擬合。回 (yaw, pitch, n, conf, diag)；沒裝 kornia／torch 時 yaw None。"""
+    try:
+        import torch
+        import kornia.feature as KF
+    except Exception as e:  # noqa: BLE001
+        return None, None, 0, 0.0, {"error": f"沒有 kornia/torch：{e}"}
+    g1, g2 = load_gray(before), load_gray(after)
+    if g1.shape != g2.shape:
+        g2 = cv2.resize(g2, (g1.shape[1], g1.shape[0]))
+    H, W = g1.shape
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    if "m" not in _LOFTR:
+        _LOFTR["m"] = KF.LoFTR(pretrained="outdoor").eval().to(dev)
+    s = 640.0 / W
+    a = cv2.resize(g1, (640, int(H * s)))
+    b = cv2.resize(g2, (640, int(H * s)))
+    tp = _is_third_person(g1, g2, third_person)
+    base = make_mask(W, H, exclude_self=tp)
+    m1, m2 = base & black_mask(g1), base & black_mask(g2)
+    with torch.no_grad():
+        o = _LOFTR["m"]({"image0": torch.from_numpy(a).float().div(255)[None, None].to(dev),
+                         "image1": torch.from_numpy(b).float().div(255)[None, None].to(dev)})
+    conf = o["confidence"].cpu().numpy()
+    p1 = o["keypoints0"].cpu().numpy() / s
+    p2 = o["keypoints1"].cpu().numpy() / s
+    k = conf > 0.5
+    p1, p2 = p1[k], p2[k]
+    diag = {"第三人稱": tp, "matches": int(len(p1)), "method": "loftr"}
+    if len(p1) == 0:
+        return None, None, 0, 0.0, diag
+    ok1 = m1[np.clip(p1[:, 1].astype(int), 0, H - 1), np.clip(p1[:, 0].astype(int), 0, W - 1)] > 0
+    ok2 = m2[np.clip(p2[:, 1].astype(int), 0, H - 1), np.clip(p2[:, 0].astype(int), 0, W - 1)] > 0
+    p1, p2 = p1[ok1 & ok2], p2[ok1 & ok2]
+    if len(p1) < MIN_INLIERS:
+        return None, None, int(len(p1)), 0.0, diag
+    disp = np.linalg.norm(p2 - p1, axis=1)
+    static = disp < STATIC_PX
+    n_static = int(static.sum())
+    r = _fit_rotation(p1[~static], p2[~static], W, H) if (~static).sum() >= MIN_INLIERS else None
+    if r is None:
+        if n_static >= 20:
+            return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
+        return None, None, int((~static).sum()), 0.0, diag
+    yaw, pitch, n, conf_, iqr_y, iqr_p, total = r
+    diag.update({"moving_inliers": n, "iqr_yaw": iqr_y, "static": n_static})
+    if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3:
+        return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
+    return round(yaw, 2), round(pitch, 2), n, conf_, diag
+
+
 # ---------- 2. 放大倍數 ----------
 def _ncc_zoom(g1: np.ndarray, g2: np.ndarray, tmask: np.ndarray, tp: bool = False):
     """多尺度 NCC（走路主要靠這個）：before 中央塊放大成各種倍數，在 after 中央附近找最像的。
