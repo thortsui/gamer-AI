@@ -95,4 +95,7 @@ _rs = '我想一下……先走。 {"看到":"門在中央","想":"因為x｜所
 _o = T.json_from_reason(_rs); check("JSON 寫在推理裡→撈出", _o.get("看到") == "門在中央" and len(_o.get("下兩步", [])) == 1, _o)
 check("推理沒 JSON→空", T.json_from_reason("只有文字沒有物件") == {})
 _ui = T.Tools._ui_words(["辦理入住", "出口", "輪班 4", "$ 271", "理智", "保安", "557", ") 561", "（辦理入住）", "E"]); check("面板按鈕字（非 HUD、去 OCR 雜訊）", _ui == ["辦理入住", "出口"], _ui)
+check("上一輪有互動", T._acted_last([{"用": ["走(0.5)", "長按(e,1.5)"]}]) is True)
+check("上一輪沒互動", T._acted_last([{"用": ["走(0.5)", "視角移動到(0.7,0.4)"]}]) is False)
+check("第一輪不提醒", T._acted_last([]) is True)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
