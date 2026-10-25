@@ -1031,7 +1031,8 @@ class Tools(ExtraTools):
             after, d = after2, d2
         if d < 3 and self.live and not self.image_path:
             # 10/25 09:3x 第 18 輪：開著「辦理入住／出口」面板時滑鼠拖曳被面板吃掉、鏡頭完全不動，原本還去量標點／整張位移 → 寫成「重複花紋、僅參考」誤導他 8 輪
-            ui = self._ui_words([w for w, _ in self._fixed_words(words_before, self._words(after))])
+            wa = self._words(after)
+            ui = self._ui_words([w for w, _ in self._fixed_words(words_before, wa)] + [w for w, (x, y) in wa.items() if y >= 0.6])
             return (f"**鏡頭沒轉**（從畫面中央、上方各拖一次，畫面變化都只有 {d:.0f}）＝鏡頭現在轉不動"
                     + (f"：畫面上釘著這些不是 HUD 的字，多半是開著的面板／選單按鈕：" + "、".join(f"「{w}」" for w in ui[:5]) + "；先 關掉 或 點字 把它處理掉" if ui
                        else "：可能有面板／選單擋住或游標被鎖；先 關掉，或看畫面上有沒有按鈕要點")
@@ -1297,10 +1298,14 @@ class Tools(ExtraTools):
         """釘在畫面上的字裡，不是常駐 HUD（輪班／理智／$…）的那些 → 多半是面板／選單的按鈕字。"""
         out = []
         for w in words:
-            w = str(w).strip()
-            if not w or any(h in w for h in TASK_HUD) or re.fullmatch(r"[\d\s$%:.,/+\-]+", w):
+            w = re.sub(r"^[\s)(\]\[）（｜|、,，.:：]+|[\s)(\]\[）（｜|、,，.:：]+$", "", str(w))
+            if not w or any(h in w for h in TASK_HUD):
                 continue
-            out.append(w)
+            cjk = len(re.findall(r"[一-鿿]", w))
+            if cjk < 2 and len(re.findall(r"[A-Za-z]", w)) < 3:      # 10/25 09:5x：OCR 雜訊「) 561」被當成面板字
+                continue
+            if w not in out:
+                out.append(w)
         return out
 
     def _words(self, im):

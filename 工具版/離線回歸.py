@@ -94,5 +94,5 @@ if im is not None:
 _rs = '我想一下……先走。 {"看到":"門在中央","想":"因為x｜所以要y｜兩步:z","先記":[],"下兩步":[{"做":"走(1.0)","結果應該是":"到門前"}]} {"做":"視角移動到(0.85,0.55)","結果應該是":"對正"}'
 _o = T.json_from_reason(_rs); check("JSON 寫在推理裡→撈出", _o.get("看到") == "門在中央" and len(_o.get("下兩步", [])) == 1, _o)
 check("推理沒 JSON→空", T.json_from_reason("只有文字沒有物件") == {})
-_ui = T.Tools._ui_words(["辦理入住", "出口", "輪班 4", "$ 271", "理智", "保安", "557"]); check("面板按鈕字（非 HUD）", _ui == ["辦理入住", "出口"], _ui)
+_ui = T.Tools._ui_words(["辦理入住", "出口", "輪班 4", "$ 271", "理智", "保安", "557", ") 561", "（辦理入住）", "E"]); check("面板按鈕字（非 HUD、去 OCR 雜訊）", _ui == ["辦理入住", "出口"], _ui)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
