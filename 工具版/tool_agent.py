@@ -1437,6 +1437,9 @@ class Tools(ExtraTools):
         self._feat_used = False
         f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after, want=want)
         self._feat_last = f_yaw
+        if f_yaw is None and lm_deg is not None and abs(lm_deg) >= 5 and abs(want) >= 5 and (lm_deg > 0) != (want > 0):
+            lm_txt += f"（標點 {lm_deg:+.0f} 跟送出的 {want:+.0f} 反方向、特徵點又量不出＝畫面沒紋理認錯了，不信）"   # 10/26 第 36 輪
+            lm_deg = None
         if f_yaw is not None:
             # 10/26 第 28 輪：特徵點法可信就以它為準（大廳第三人稱時標點常只量到一半）；標點／整張留著當參考
             ref = []
@@ -2742,6 +2745,17 @@ class Tools(ExtraTools):
             feat_here = f_yaw is not None
             if not feat_here and getattr(self, "_feat_bad", ""):
                 lm_txt += f"（{self._feat_bad}）"
+            if not feat_here and lm_deg is not None and abs(lm_deg) >= 5 and (lm_deg > 0) != (chunk > 0):
+                # 10/26 05:3x 第 36 輪：05:27 轉(90) 第 2 段送 +30、標點 −26、整張 −46（紅牆沒紋理、特徵點也量不出）→ 合計 +29「不一致」。
+                #   拖 30 度不可能反方向；特徵點量不出時標點／整張反方向就不信、這段照送出算（僅參考）
+                lm_txt += f"（標點 {lm_deg:+.0f} 跟送出的 {chunk:+.0f} 反方向、特徵點又量不出＝畫面沒紋理認錯了，不信）"
+                lm_deg = None
+                scene_deg = None
+                self._chunk_unsure = True
+                meas += chunk
+                parts.append(f"第{i + 1}段 {chunk:+.0f}→量到反方向不信、照送出算（僅參考；{lm_txt[-60:]}）")
+                self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 特徵度=None, 反方向不信=True)
+                continue
             if feat_here:                                        # 10/26 第 28 輪：特徵點優先（見 _feat_deg）
                 lm_deg, lm_txt = f_yaw, f_txt
                 if getattr(self, "_lm_ambiguous", False):

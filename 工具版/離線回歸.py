@@ -182,4 +182,19 @@ if im is not None:
         _y3, _p3, _n3, _c3, _t3 = t._feat_deg(im.convert("L"), _rot18, want=-30.0); check("特徵點 跟送出差太多且 LoFTR 不一致→不信", _y3 is None and "都不信" in _t3, _t3)
     finally:
         T.Tools._feat_mod.estimate_yaw_pitch_loftr = _bakL
+# 第 36 輪：特徵點量不出、標點反方向 → 不信、照送出算
+_bak3 = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump")}
+try:
+    t.live, t.image_path = True, None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=None, fx=None: None
+    t._landmark_turn = lambda *a, **k: (-26.0, "標點"); t._scene_deg = lambda a, b: (-46.0, ""); t._repetitive = lambda a: (False, "")
+    t._feat_deg = lambda a, b, want=None: (None, None, 5, 0.1, "量不出"); t._verify_dump = lambda *a, **k: None
+    _m, _p, _d, _st, _lu = t._turn_chunks(30.0)
+    check("標點反方向且特徵點量不出→照送出算", "反方向不信" in _p and abs(_m - 30.0) < 0.1, (_p[:160], _m))
+    _lm, _lt, _sc = t._landmark_verify(im, im, 30.0)
+    check("_landmark_verify 反方向不信", _lm is None and "反方向" in _lt, _lt[-120:])
+finally:
+    for k, v in _bak3.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
