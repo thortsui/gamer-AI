@@ -566,7 +566,7 @@ class Tools(ExtraTools):
         t = next((t for t in self.cat["工具"] if t["名稱"] == key), None)
         if not t:
             return "沒有這個工具。叫 工具說明(類別名) 看那一類有哪些：" + "、".join(sorted(groups))
-        return json.dumps({k: t[k] for k in ("名稱", "用途", "用法", "例", "參數", "回傳") if k in t}, ensure_ascii=False)
+        return json.dumps({k: t[k] for k in ("名稱", "用途", "用法", "例", "例子", "參數", "回傳") if k in t}, ensure_ascii=False)   # 10/26 00:0x 使用者實驗：每個工具多 3～5 個範例（例子）
 
     def doc_list(self, 類別=""):
         return NL.join(catalog_lines(self.cat, str(類別).strip() or None)) or "沒有這一類"
