@@ -2937,6 +2937,7 @@ class Tools(ExtraTools):
                     "轉頭不會讓它移到中央；**已把鏡頭轉回原本的方向**，沒有補轉。要對準場景裡的東西；不確定哪裡是 UI 就叫 確認是否是UI")
         loc1 = self._locate(patch, after, near=(0.5, ay, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
+        bad_comp = False
         if loc1 and loc1[2] >= GOOD:
             out.append(f"轉完找目標：在 ({loc1[0]:.2f},{loc1[1]:.2f})（相似度 {loc1[2]:.2f}）")
             if abs(loc1[0] - 0.5) > 0.04 or abs(loc1[1] - ay) > 0.06:      # 偏了補一次
@@ -2948,10 +2949,23 @@ class Tools(ExtraTools):
                 after = self._settled()
                 final = self._locate(patch, after, near=(0.5, ay, 0.3))
                 out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
+                d1 = abs(loc1[0] - 0.5) + abs(loc1[1] - ay)
+                d2 = (abs(final[0] - 0.5) + abs(final[1] - ay)) if (final and final[2] >= GOOD) else None
+                if d2 is not None and d2 > d1 + 0.08:
+                    # 10/25 13:0x 第 20 輪：第一次「找到目標」在 (0.41,0.77) 其實認錯（相似 0.88），照它補轉 -14/-20 後目標跑到 (0.77,0.27) 更偏
+                    #   → 補轉後比補轉前更偏＝第一次認錯，轉回補轉前、不算對準
+                    self._drag(-y2 * self.dx_deg, p2 * self.dy_deg)
+                    self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc - p2))
+                    after = self._settled()
+                    final = None
+                    bad_comp = True
+                    out.append(f"補轉後反而更偏（離中央 {d1:.2f}→{d2:.2f}）＝第一次找到的那塊可能認錯；**已轉回補轉前**，這次沒對準，看下一張畫面再對")
         else:
             final = None
-        ok = bool(final and final[2] >= GOOD and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - ay) <= 0.08)
-        if not (loc1 and loc1[2] >= GOOD):
+        ok = bool(final and final[2] >= GOOD and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - ay) <= 0.08) and not bad_comp
+        if bad_comp:
+            pass
+        elif not (loc1 and loc1[2] >= GOOD):
             # 17:38～17:43 三次「找不到」：目標轉到正中央剛好被自己的角色（第三人稱）擋住 → 改用整張畫面的左右位移驗證有沒有轉對
             d_all = self.diff(before, after)
             sh, _ = self._shift(before, after, d_all)
