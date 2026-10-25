@@ -2759,24 +2759,30 @@ class Tools(ExtraTools):
         if True:
             bottom, _ = self._find_vlimit(+1)
             down_px = self._vl_moved
-            top, _ = self._find_vlimit(-1)
+            top, steps_up = self._find_vlimit(-1)
             if down_px == 0 and self._vl_moved == 0:
                 # 10/25 稽核：往下、往上都量到 0 像素（不可能同時在頂又在底）→ 原本照樣用記的全程盲拉 240 像素再把水平儀歸零
                 self._depth_log(種類="修水平 找底再找頂", 往下像素=0, 往上全程=0, 用的全程=None, 水平儀原本=round(was, 1), 結果="兩方向都 0、沒拉")
                 return ("修水平：每步 10 像素慢慢往下、往上都量不到鏡頭有在動（0 像素）＝畫面沒紋理（整片天花板／地板／牆）或鏡頭被鎖，"
                         "**沒有拉、水平儀沒歸零**（原本累計 " + f"{was:+.0f} 度）；先 仰(-30) 或 轉(30) 看畫面會不會變，到看得到牆和地的地方再 修水平")
             full = top if top else (self.vrange_px or int(160 * self.dy_deg))
-            self._drag(0, full // 2)
+            if top:
+                self._drag(0, full // 2)                       # 在頂：往下拉一半
+            else:
+                # 10/25 14:2x 第 21 輪：往上找不到頂（地板沒紋理、4 步就誤判頂到）時鏡頭其實還在底附近，原本照樣「往下拉一半」→ 壓在地板上，
+                #   他 仰(30)→修水平 又被拉回地板，循環 4 次。改：從底往上拉到一半（扣掉往上已送出的像素）
+                up_sent = steps_up * self.VSTEP
+                self._drag(0, -max(0, full // 2 - up_sent))
             time.sleep(0.3)
             if TOOLFIX and not top:
                 # 10/24 20:2x 工具修正：整片重複花紋（地磚、地毯）時量不出鏡頭在動 → 原本照樣寫「已歸零」，他以為修好了
                 self.pitch_acc = 0.0
-                lv = (f"**沒修好**：往上找不到頂（畫面是重複花紋或被擋，量不出鏡頭有沒有在動），只照記的全程 {full} 的一半拉，"
+                lv = (f"**沒修好**：往上找不到頂（畫面是重複花紋或被擋，量不出鏡頭有沒有在動），照記的全程 {full} 從底往上拉到一半（往上已送 {steps_up * self.VSTEP} 像素），"
                       "**現在不一定是水平**——看下一張畫面：看得到地平線／牆和天花板各一半才算水平；還是滿地板就用 仰(30) 自己抬")
             else:
                 self.pitch_acc = 0.0
                 lv = (f"回到水平（當場量到全程 {full} 像素，從頂端往下拉一半）" if top else
-                      f"往上沒找到頂（畫面看不出停），照記的全程 {full} 的一半拉，可能不準")
+                      f"往上沒找到頂（畫面看不出停），照記的全程 {full} 從底往上拉到一半，可能不準")
             self.level_meas = (datetime.now().strftime("%H:%M"), lv)
             self._depth_log(種類="修水平 找底再找頂", 往下像素=down_px, 往上全程=top, 用的全程=full, 水平儀原本=round(was, 1))
             return (f"修水平：每步 10 像素慢慢往下{'到底' if bottom else '（沒找到底，量不出）'}（往下動了 {down_px} 像素）→ 再慢慢往上數到頂 → 往下拉一半＝{lv}。"
