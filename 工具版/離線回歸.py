@@ -135,4 +135,20 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 02:0x：補轉後 look_at 不能說「只轉了」
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump")}
+try:
+    _sent = []
+    t.live, t.image_path = True, None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
+    t._feat_deg = lambda a, b: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
+    _r = t.look_at(0.2, 0.52)
+    check("補轉後不說只轉了", "補轉" in _r and "只轉了" not in _r, _r[:300])
+except Exception as _e:
+    check("補轉後不說只轉了（跑不起來）", False, repr(_e)[:200])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

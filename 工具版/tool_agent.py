@@ -3124,7 +3124,7 @@ class Tools(ExtraTools):
             if chunk_meas is not None:
                 meas, parts, lm_used, stopped_c, done_c = chunk_meas
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
-                short = (stopped_c or abs(yaw - yaw_calc) >= 3) and abs(done_c - yaw_calc) >= 3   # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）；10/26 第 30 輪：補轉後 done 會超過算的、不算「只轉了」
+                short = stopped_c and abs(done_c - yaw_calc) >= 3   # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）；10/26 02:0x：分段後 yaw 已改成 done、補轉後會超過算的 → 只有中途停才算「只轉了」
                 if short or lm_used == 0:
                     ok = False
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
