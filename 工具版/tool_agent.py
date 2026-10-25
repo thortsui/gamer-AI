@@ -3866,18 +3866,17 @@ class Tools(ExtraTools):
 
 
 # ---------------------------------------------------------------- 主迴圈
-def _acted_last(history):
-    """上一輪有沒有叫互動類工具（長按／按／點／點字／確認點）。沒有 history 當成有（第一輪不提醒）。"""
+def _acted_last(history, n=2):
+    """最近 n 輪有沒有叫互動類工具（長按／按／點／點字／確認點）→ 有就回那個工具名、沒有回 ""。沒有 history 回 "？"（第一輪不提醒）。
+    10/25 22:2x：長按 E 後遊戲要 1～2 輪才換任務字（22:17 長按、22:18 換字），只看上一輪會誤標「不是你做的」→ 看最近兩輪。"""
     if not history:
-        return True
-    used = history[-1].get("用") or []
-    names = []
-    for u in used:
-        if isinstance(u, str):
-            names.append(u.split("(")[0].strip())
-        elif isinstance(u, dict):
-            names.append(str(u.get("工具") or u.get("做") or "").split("(")[0].strip())
-    return any(n in ("長按", "按", "點", "點字", "確認點", "按住", "雙擊") for n in names)
+        return "？"
+    for h in reversed(history[-n:]):
+        for u in (h.get("用") or []):
+            name = (u if isinstance(u, str) else str(u.get("工具") or u.get("做") or "")).split("(")[0].strip()
+            if name in ("長按", "按", "點", "點字", "確認點", "按住", "雙擊"):
+                return name
+    return ""
 
 
 def json_from_reason(reason):
@@ -4102,11 +4101,15 @@ class TaskWords:
         if ev:
             line += (NL + f"⚑ 任務字換了：「{ev['舊']}」→「{ev['新']}」（{ev['時間']}）——換了可能＝上一件做完了；"
                      "要不要送 任務完成（照規則先回顧三步）你自己決定")
-            if not acted:
+            if acted == "":
                 # 10/25 21:3x 第 22 輪：他進局 4 分鐘沒按任何東西，任務字自己連跳 蓋印表格→完成簽到→採樣→治療病人（同一局別的玩家做的），
-                #   他照樣送 任務完成／大任務完成、把「拍照✓註冊✓簽到✓」記成自己做完 → 只給讀數：上一輪沒互動就照實標出
-                line += (NL + "⚠ 但上一輪你沒有 長按／按／點 任何東西，任務字是自己換的——多半是同一局別的玩家做完了、或遊戲自動推進，"
+                #   他照樣送 任務完成／大任務完成、把「拍照✓註冊✓簽到✓」記成自己做完 → 只給讀數：最近兩輪沒互動就照實標出
+                line += (NL + "⚠ 但最近兩輪你沒有 長按／按／點 任何東西，任務字是自己換的——多半是同一局別的玩家做完了、或遊戲自動推進，"
                          "不是你做的；送 任務完成 前先想這一點")
+            elif acted not in ("？", True):
+                # 10/25 22:2x：長按 E 當下畫面看不出反應、1～2 輪後任務字才換 → 他記成「按 E 沒反應不能互動」。照實標：這多半就是那次按的結果
+                line += (NL + f"⚑ 最近兩輪你叫過 {acted}，任務字接著換了＝那次多半有反應、只是遊戲反應慢（按完當下畫面看不出）；"
+                         "別把它記成「按了沒反應」")
             if big and re.search(r"任務字|右上|任務列|下一件", str(big.get("成功條件", ""))):
                 line += NL + f"⚑ 你的大任務「{big['名稱']}」成功條件寫到右上任務字（{big['成功條件']}）——要不要送 大任務完成 你自己決定"
         elif self.events:
