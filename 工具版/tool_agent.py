@@ -807,6 +807,8 @@ class Tools(ExtraTools):
             z, z_note = self._walk_zoom(before, after, d, dd) if k == "w" else (None, "")
             if k == "w":
                 self._verify_dump("走", before, after, 秒=d, 放大=z, 畫面變化=dd)
+                # 10/26 01:4x 第 29 輪：記下這次走完「中央那個東西還要幾秒」，長按 E 沒反應時把它帶上（01:23～01:28 三次按 E 沒反應，01:26 走 才量到還要 8 秒）
+                self._eta = (time.time(), (f"中央那個東西還要走約 {d / (z - 1):.1f} 秒才到" if (z and z > 1.02) else ("幾乎沒靠近中央那個東西" if z else "中央放大量不出、距離不知道")))
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{z_note}{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" + ("（放大倍數只有 {:.1f}、換算誤差大，可能差到一倍；只算畫面正中央那一小塊，旁邊的牆可能更近）".format(z) if z < 1.3 else "（只算畫面正中央那一小塊，旁邊的牆可能更近）") if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
@@ -831,7 +833,19 @@ class Tools(ExtraTools):
                 else:
                     z_txt += "；" + self._v2("走了有沒有動", f"{dd:.0f}", f"{dd2:.0f}", (dd >= 2) == (dd2 >= 2))
             return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + z_txt
-        return f"按 {k} {d:.1f} 秒；" + self._changed(before, noise)
+        out = self._changed(before, noise)
+        if k == "e" and ("沒變" in out or "看不出" in out) and "有反應**" not in out:
+            out += self._eta_note()
+        return f"按 {k} {d:.1f} 秒；" + out
+
+    _eta = None
+
+    def _eta_note(self):
+        """長按 E 沒反應時，把上次 走 量到的距離讀數帶上（只給讀數，不替他決定）。3 分鐘內的才算。"""
+        e = self._eta
+        if not e or time.time() - e[0] > 180:
+            return ""
+        return f"；上次 走（{time.time() - e[0]:.0f} 秒前）量到：{e[1]}（這之後有沒有轉頭／橫移、距離還算不算數，自己判斷）"
 
     def see_dist(self, 標籤=""):
         r = self._see_dist_once(標籤)

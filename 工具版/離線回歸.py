@@ -114,4 +114,8 @@ if im is not None:
     check("_landmark_verify 特徵點優先", getattr(t, "_feat_used", False) and _lm is not None and 16 <= _lm <= 20 and "特徵點" in _lt, (_lm, _lt[:120]))
     _fy0, *_ = t._feat_deg(im.convert("L"), im.convert("L"))
     check("特徵點法 沒轉→0", _fy0 is not None and abs(_fy0) < 1, _fy0)
+import time as _tm
+t._eta = (_tm.time() - 30, "中央那個東西還要走約 8.3 秒才到"); _en = t._eta_note()
+check("長按沒反應帶上上次走的距離", "8.3 秒" in _en and "30 秒前" in _en, _en)
+t._eta = (_tm.time() - 400, "x"); check("超過 3 分鐘不帶", t._eta_note() == "")
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
