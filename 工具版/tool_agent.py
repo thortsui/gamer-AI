@@ -476,7 +476,7 @@ class Tools(ExtraTools):
             d2 = self.diff(before, self.grab())
             if d2 >= th:                                  # 10/25 審查：原本還要 d2 ≥ d+3，畫面真的變了卻回「沒變」
                 return (f"畫面變化 {d2:.0f}（剛按完 {d:.0f}，等 1.2 秒後才變：反應慢{bg}）"
-                        + ("；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", False) + "（第一次沒反應、第二次有＝反應慢，以第二次為準）" if self.verify2 else ""))
+                        + ("；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", True) + "（第一次還沒反應、第二次有＝反應慢，兩次結論都是有反應）" if self.verify2 else ""))
             if self.verify2:
                 v2 = "；" + self._v2("有沒有反應", f"{d:.0f}", f"{d2:.0f}", d2 < th) + "（兩次都看不出反應）"
         elif self.verify2 and self.live:
@@ -2413,7 +2413,8 @@ class Tools(ExtraTools):
             ok = abs(meas - done) <= max(5.0, 0.15 * abs(done))
             stop_note = f"；**中途量不出，停在 {done:+.0f} 度沒再轉（要轉 {d:+.0f}，剩下的下一輪再轉）**" if stopped else ""
             n_seg = max(1, int(math.ceil(abs(d) / 30.0)))
-            if getattr(self, "_rep_flag", False) and not (lm_used >= n_seg - 1 and ok):
+            segs_ok = bool(getattr(self, "_seg_ok", [])) and all(self._seg_ok)
+            if getattr(self, "_rep_flag", False) and not ((lm_used >= n_seg - 1 or (lm_used >= 1 and segs_ok)) and ok):
                 v2 = f"（{self.REP_NOTE}）"
             elif getattr(self, "_chunk_unsure", False) and not ok:
                 v2 = f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）"
@@ -2435,6 +2436,7 @@ class Tools(ExtraTools):
         meas, parts, done, stopped, lm_used = 0.0, [], 0.0, False, 0
         self._rep_flag = False
         self._chunk_unsure = False
+        self._seg_ok = []
         for i in range(n):
             before = self.grab()
             if before is None:
@@ -2477,6 +2479,7 @@ class Tools(ExtraTools):
                 stopped = True
                 break
             turned = lm_deg if lm_deg is not None else scene_deg   # 標點優先；整張位移用左右兩帶換算
+            self._seg_ok.append(abs(turned - chunk) <= max(5.0, 0.15 * abs(chunk)))
             lm_used += lm_deg is not None
             meas += turned
             parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'標點' if lm_deg is not None else '整張位移，僅參考'}）")
@@ -2938,11 +2941,12 @@ class Tools(ExtraTools):
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
                            f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
                 n_seg = max(1, int(math.ceil(abs(yaw) / 30.0)))
+                segs_ok = bool(getattr(self, "_seg_ok", [])) and all(self._seg_ok)
                 if short:
                     out.append(f"**只轉了 {done_c:+.0f} 度（要 {yaw_calc:+.0f}），目標還沒到中央**；剩下的 {yaw_calc - done_c:+.0f} 度下一輪再 視角移動到（目標現在應該在畫面{'左' if yaw_calc < 0 else '右'}半邊）")
                 elif lm_used == 0:
                     out.append("（沒有標點、沒量到實際轉了幾度，不能說已對準；看下一張畫面確認）")
-                elif getattr(self, "_rep_flag", False) and not (lm_used >= n_seg - 1 and ok):
+                elif getattr(self, "_rep_flag", False) and not ((lm_used >= n_seg - 1 or (lm_used >= 1 and segs_ok)) and ok):
                     out.append(f"（{self.REP_NOTE}）")
                     ok = False
                 elif getattr(self, "_chunk_unsure", False) and not ok:
