@@ -910,15 +910,19 @@ class Tools(ExtraTools):
         return self._move("space", 0.1, 0.1, 0.1)
 
     # ---- 視角
-    def _drag(self, dx, dy, fy=0.5):
-        """壓右鍵拖曳（跟舊版同一套）；一次最多 220 像素，分段。fy＝從畫面多高的地方開始拖（0.5＝正中央）。"""
+    DRAG_FX, DRAG_FY = 0.30, 0.40    # 10/26 05:1x 第 35 輪：拖曳起點改到左上方（避開中央角色的名牌／E框，壓在 UI 上鏡頭不會動）
+
+    def _drag(self, dx, dy, fy=None, fx=None):
+        """壓右鍵拖曳（跟舊版同一套）；一次最多 220 像素，分段。fx／fy＝從畫面哪裡開始拖（預設 0.30,0.40；原本 0.5,0.5 正中央常壓到角色身上的 UI）。"""
+        fy = self.DRAG_FY if fy is None else fy
+        fx = self.DRAG_FX if fx is None else fx
         import pydirectinput
         if not self.live:
             print(f"   [dry-run] 轉視角 dx {dx:.0f} dy {dy:.0f}")
             return
         self._fg_ok()
         bbox = self.win.client_bbox() if self.win else None
-        cx = (bbox["left"] + bbox["width"] // 2) if bbox else 960
+        cx = (bbox["left"] + int(bbox["width"] * fx)) if bbox else int(1920 * fx)
         cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
         rest_x, rest_y = int(round(dx)), int(round(dy))   # 10/25 審查：int() 截斷 → 慢慢轉 120 步少轉 24 度
         while rest_x or rest_y:
@@ -943,7 +947,7 @@ class Tools(ExtraTools):
             y = self.yaw_acc + dx / self.dx_deg
             self.yaw_acc = (y + 180) % 360 - 180
 
-    def _drag_staged(self, dx, stages=3, fy=0.5, pause=0.3):
+    def _drag_staged(self, dx, stages=3, fy=None, pause=0.3):
         """10/26 03:0x 使用者：「每出 10 度就中斷掉轉頭來量測，去頭去尾只取中間那段算一度要多少像素」
         → 一次壓著右鍵不放，分 stages 段拖，每段拖完停 pause 秒抓一張（按鍵不放、不會有新的起點死區）。回 [起點, 第1段後, 第2段後, …]。"""
         import pydirectinput
@@ -952,9 +956,10 @@ class Tools(ExtraTools):
         if f0 is None or not self.live:
             return frames
         frames.append(f0)
+        fy = self.DRAG_FY if fy is None else fy
         self._fg_ok()
         bbox = self.win.client_bbox() if self.win else None
-        cx = (bbox["left"] + bbox["width"] // 2) if bbox else 960
+        cx = (bbox["left"] + int(bbox["width"] * self.DRAG_FX)) if bbox else int(1920 * self.DRAG_FX)
         cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
         total = int(round(dx))
         pydirectinput.moveTo(cx, cy)
@@ -3238,6 +3243,11 @@ class Tools(ExtraTools):
                 out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
                 d1 = abs(loc1[0] - 0.5) + abs(loc1[1] - ay)
                 d2 = (abs(final[0] - 0.5) + abs(final[1] - ay)) if (final and final[2] >= GOOD) else None
+                if (final and final[2] >= GOOD and abs(final[0] - loc1[0]) < 0.02 and abs(final[1] - loc1[1]) < 0.02
+                        and abs(loc1[0] - fx) < 0.03 and abs(loc1[1] - fy) < 0.03 and (abs(y2) >= 5 or abs(p2) >= 5)):
+                    # 10/26 05:1x 第 35 輪：05:03 送 -14 目標從 (0.41,0.47) 沒動、補轉 -14 還是沒動，卻回「偏了…沒有完全對準」
+                    return ("；".join(out) + f"；**轉了兩次目標都沒動（還在 ({final[0]:.2f},{final[1]:.2f})）＝鏡頭根本沒轉**：右鍵壓到的地方可能是 UI（角色名牌／E框／面板）或游標被鎖；"
+                            "這塊若是釘在畫面上的字也會這樣。先 關掉 面板、或 確認是否是UI；要對準場景裡的東西")
                 if d2 is not None and d2 > d1 + 0.08:
                     # 10/25 13:0x 第 20 輪：第一次「找到目標」在 (0.41,0.77) 其實認錯（相似 0.88），照它補轉 -14/-20 後目標跑到 (0.77,0.27) 更偏
                     #   → 補轉後比補轉前更偏＝第一次認錯，轉回補轉前、不算對準
