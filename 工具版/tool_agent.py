@@ -295,6 +295,23 @@ def parse_call(item, cat):
     return name, params
 
 
+def _split_top(raw, seps):
+    """只在括號外切（10/25 23:0x：檢討 裡寫「視角移動到(x,y)沒對到」，括號裡的逗號把五格切錯位 → 工具名變成「視角移動到(0」）。"""
+    out, buf, depth = [], [], 0
+    for c in raw:
+        if c in "([（［":
+            depth += 1
+        elif c in ")]）］":
+            depth = max(0, depth - 1)
+        if depth == 0 and c in seps:
+            out.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(c)
+    out.append("".join(buf).strip())
+    return out
+
+
 def _parse_call(item, cat):
     byname = {t["名稱"]: t for t in cat["工具"]}
     if isinstance(item, dict):
@@ -316,9 +333,9 @@ def _parse_call(item, cat):
         except json.JSONDecodeError:
             pass
     # 10/24 22:1x 稽核：「、」也當分隔 → 檢討／突發狀況／新工具 內容寫了「、」就錯位 → 只用逗號分；逗號分不夠格數、又有「、」才退回連「、」一起分
-    args = [x.strip() for x in re.split(r"[,，]", raw)] if raw and raw.strip() else []
+    args = _split_top(raw, ",，") if raw and raw.strip() else []
     if raw and "、" in raw and len(args) == 1 and len(keys) > 1:      # 10/25 審查：有逗號但格數不夠（選填沒寫）不能再用「、」切
-        args = [x.strip() for x in re.split(r"[,，、]", raw)]
+        args = _split_top(raw, ",，、")
     if raw and len(args) == 1 and len(keys) > 1 and raw.count("；") >= len(keys) - 1:   # 10/25 04:0x：Claude 用「；」分五格 → 檢討 沒記下
         args = [x.strip() for x in re.split(r"[；;]", raw)]
     params = {}
