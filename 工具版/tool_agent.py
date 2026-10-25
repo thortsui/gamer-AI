@@ -2538,7 +2538,7 @@ class Tools(ExtraTools):
             elif getattr(self, "_chunk_unsure", False) and not ok:
                 v2 = f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）"
             else:
-                v2 = (self._cmp("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）"
+                v2 = (self._cmp("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
                       + ("（畫面有重複花紋，但標點段都跟送出一致）" if getattr(self, "_rep_flag", False) else "") if lm_used
                       else f"（沒有找到標點，{meas:+.0f} 度是整張位移估的，僅參考、不算一致／不一致）")
             return (f"轉 {d:+.0f} 度：分段轉（每段 ≤30 度、每段實測）{parts}；**你實際轉了約 {meas:+.0f} 度（送出 {done:+.0f}）**{stop_note}；" + v2 + cap_note)
@@ -3101,7 +3101,7 @@ class Tools(ExtraTools):
                 elif getattr(self, "_chunk_unsure", False) and not ok:
                     out.append(f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）")
                 else:
-                    out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + "（標點實測合計）"
+                    out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
                                 + ("（畫面有重複花紋，但標點段都跟送出一致）" if getattr(self, "_rep_flag", False) else "")) if lm_used
                                else "（沒有找到標點，度數是整張位移估的，僅參考）")
             else:
