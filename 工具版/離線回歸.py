@@ -197,4 +197,16 @@ try:
 finally:
     for k, v in _bak3.items():
         setattr(t, k, v)
+if im is not None:
+    import math as _m4
+    _g4 = _np3.array(im.convert("L"))
+    for _th in (0, 45, 70):     # 鏡頭低頭 _th 度時繞世界垂直軸右轉 20 度
+        _ax = (0.0, _m4.cos(_m4.radians(_th)), _m4.sin(_m4.radians(_th)))
+        _r20 = Image.fromarray(_V.synth_rotate_axis(_g4, _ax, 20.0))
+        _vy, _vp, _vn, _vc, _vd = _V.estimate_yaw_pitch(im.convert("L"), _r20, sweep=False)
+        check(f"低頭 {_th} 度時右轉 20 度→量到 +20", _vy is not None and 17 <= _vy <= 23 and _vc >= 0.5, (_vy, _vp, _vn, _vc, {k: _vd.get(k) for k in ("繞垂直軸", "逐點yaw", "俯仰估計")}))
+    _l20 = Image.fromarray(_V.synth_rotate_axis(_g4, (0.0, _m4.cos(_m4.radians(60)), _m4.sin(_m4.radians(60))), -20.0))
+    _vy2, *_ = _V.estimate_yaw_pitch(im.convert("L"), _l20, sweep=False); check("低頭 60 度時左轉 20 度→量到 -20", _vy2 is not None and -23 <= _vy2 <= -17, _vy2)
+    _p10 = Image.fromarray(_V.synth_rotate(_g4, 0.0, 10.0))
+    _vy3, _vp3, *_ = _V.estimate_yaw_pitch(im.convert("L"), _p10, sweep=False); check("純抬頭 10 度不被當成繞垂直軸", _vy3 is not None and abs(_vy3) < 2 and 8 <= _vp3 <= 12, (_vy3, _vp3))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

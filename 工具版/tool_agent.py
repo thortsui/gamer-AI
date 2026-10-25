@@ -1384,6 +1384,8 @@ class Tools(ExtraTools):
             yaw, pitch, n, conf, _diag = self._feat_mod.estimate_yaw_pitch(before, after, sweep=False)
         except Exception as e:  # noqa: BLE001
             return None, None, 0, 0.0, f"特徵點法失敗：{str(e)[:60]}"
+        self._feat_vert = (f"（鏡頭正低頭／抬頭約 {_diag.get('俯仰估計')} 度看，畫面是繞著轉的；照旋轉軸算左右轉了 {yaw:+.0f} 度）"
+                           if (_diag or {}).get("繞垂直軸") else "")
         self._feat_how = "ORB"
         self._feat_bad = ""
         self._feat_note = ""
@@ -1414,7 +1416,7 @@ class Tools(ExtraTools):
                 self._feat_how = "LoFTR"
                 return y2, p2, n2, c2, f"特徵點比對（ORB 量不出、改用 LoFTR：{n2} 個點、可信 {c2:.2f}）量到 鏡頭轉了 {y2:+.0f} 度"
             return None, None, n, conf, (self._feat_bad or f"特徵點法量不出（ORB {n} 點、可信 {conf:.2f}；LoFTR 也量不出）")
-        return yaw, pitch, n, conf, f"特徵點比對（整張畫面 {n} 個點、可信 {conf:.2f}）量到 鏡頭轉了 {yaw:+.0f} 度" + self._feat_note
+        return yaw, pitch, n, conf, f"特徵點比對（整張畫面 {n} 個點、可信 {conf:.2f}）量到 鏡頭轉了 {yaw:+.0f} 度" + self._feat_note + getattr(self, "_feat_vert", "")
 
     def _landmark_verify(self, before, after, want, sh=None, pitch=0.0):
         """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""

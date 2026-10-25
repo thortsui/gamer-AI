@@ -247,8 +247,33 @@ def _verify_ncc(e1: np.ndarray, e2: np.ndarray, yaw: float, pitch: float, m1: np
     return float((a * b).sum() / den) if den > 1e-6 else None
 
 
+LAST_FIT = {}        # 10/26 05:5x：最近一次 _fit_rotation 的旋轉軸資訊（繞垂直軸量法），估計函式抄進 diag
+_YAW_AXIS_SIGN = None
+
+
+def _axis_of(R):
+    """旋轉矩陣 → (角度 deg, 單位軸)。角度 <0.5 度時軸不可靠。"""
+    ang = math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(R) - 1) / 2))))
+    ax = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    n = np.linalg.norm(ax)
+    return ang, (ax / n if n > 1e-9 else np.zeros(3))
+
+
+def _yaw_axis_sign():
+    """純右轉 +10 度（_rot_H 的 Ry 慣例）在 Kabsch 座標下旋轉軸 y 分量的正負，之後拿來定繞垂直軸轉角的方向。"""
+    global _YAW_AXIS_SIGN
+    if _YAW_AXIS_SIGN is None:
+        t = math.radians(10.0)
+        Ry = np.array([[math.cos(t), 0, -math.sin(t)], [0, 1, 0], [math.sin(t), 0, math.cos(t)]])
+        _, ax = _axis_of(Ry)
+        _YAW_AXIS_SIGN = 1.0 if ax[1] >= 0 else -1.0
+    return _YAW_AXIS_SIGN
+
+
 def _fit_rotation(p1: np.ndarray, p2: np.ndarray, W: int, H: int):
-    """對應點 → (yaw, pitch, n, conf, iqr_yaw, iqr_pitch, total_rot)。RANSAC 單應性挑內點。"""
+    """對應點 → (yaw, pitch, n, conf, iqr_yaw, iqr_pitch, total_rot)。RANSAC 單應性挑內點。
+    10/26 05:5x：鏡頭低頭看地時，繞世界垂直軸的轉頭在畫面上是「繞著轉」不是平移，逐點角度差的 yaw 會量到 ≈0（05:50 送 −17 量到 −0）
+    → 另外用 Kabsch 的完整旋轉矩陣取旋轉軸：軸不在相機 x 軸（不是抬低頭）、而逐點 yaw 又遠小於總轉角 → 以總轉角當左右轉了幾度，方向照軸的 y 分量。"""
     if len(p1) < MIN_INLIERS:
         return None
     Hm, msk = cv2.findHomography(p1, p2, cv2.RANSAC, 4.0, maxIters=3000, confidence=0.995)
@@ -267,12 +292,26 @@ def _fit_rotation(p1: np.ndarray, p2: np.ndarray, W: int, H: int):
     iqr_y = float(np.subtract(*np.percentile(dyaw, [75, 25])))
     iqr_p = float(np.subtract(*np.percentile(dpitch, [75, 25])))
     total = None
+    conf_iqr = iqr_y
+    LAST_FIT.clear()
     try:
-        R = _kabsch_rotation(bearing(q1, W, H), bearing(q2, W, H))
-        total = round(math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(R) - 1) / 2)))), 2)
+        b1, b2 = bearing(q1, W, H), bearing(q2, W, H)
+        R = _kabsch_rotation(b1, b2)
+        ang, ax = _axis_of(R)
+        total = round(ang, 2)
+        LAST_FIT.update({"軸": [round(float(a), 3) for a in ax], "總轉角": total})
+        tilt = math.degrees(math.atan2(abs(ax[2]), abs(ax[1]))) if abs(ax[1]) + abs(ax[2]) > 1e-6 else 0.0
+        if ang >= 3.0 and abs(ax[0]) < 0.5 and abs(ax[1]) >= 0.08 and tilt >= 20.0:   # 05:50 大廳近乎垂直向下：軸 y 只有 0.15～0.19
+            # 繞垂直軸：鏡頭低頭／抬頭 ≥20 度時的左右轉頭，逐點 yaw 只剩 cos(俯仰) 倍、離散度也變大 → 以旋轉軸角度為準、方向照軸 y 分量，
+            #   可信度改用 3D 擬合殘差（R·v1 跟 v2 的夾角）的離散度
+            yaw_v = ang * (1.0 if ax[1] >= 0 else -1.0) * _yaw_axis_sign()
+            res = np.degrees(np.arccos(np.clip(np.sum((b1 @ R.T) * b2, axis=1), -1.0, 1.0)))
+            conf_iqr = float(np.subtract(*np.percentile(res, [75, 25]))) * 2.0 + float(np.median(res))
+            LAST_FIT.update({"繞垂直軸": True, "逐點yaw": round(yaw, 2), "俯仰估計": round(tilt, 1), "殘差中位": round(float(np.median(res)), 2)})
+            yaw = yaw_v
     except Exception:  # noqa: BLE001
         pass
-    return yaw, pitch, n, _conf(n, iqr_y), round(iqr_y, 2), round(iqr_p, 2), total
+    return yaw, pitch, n, _conf(n, conf_iqr), round(iqr_y, 2), round(iqr_p, 2), total
 
 
 def estimate_yaw_pitch(before, after, third_person=None, sweep: bool = True):
@@ -360,6 +399,7 @@ def estimate_yaw_pitch(before, after, third_person=None, sweep: bool = True):
         others = [c for c in cands if c is not best and c[0] > 0.2 and abs(c[2] - yaw) < 3 and abs(c[3] - pitch) < 3]
         diag["corroborated"] = len(others)
     diag.update({"moving_inliers": n, "iqr_yaw": iqr_y, "iqr_pitch": iqr_p, "total_rot": total, "pre_turn": pre})
+    diag.update({k: v for k, v in LAST_FIT.items() if k in ("繞垂直軸", "逐點yaw", "俯仰估計", "軸")})
     # 靜止點遠多於動的點、而且算出來幾乎沒轉 → 當作沒轉
     if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3:
         return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
@@ -416,6 +456,7 @@ def estimate_yaw_pitch_loftr(before, after, third_person=None):
         return None, None, int((~static).sum()), 0.0, diag
     yaw, pitch, n, conf_, iqr_y, iqr_p, total = r
     diag.update({"moving_inliers": n, "iqr_yaw": iqr_y, "static": n_static})
+    diag.update({k: v for k, v in LAST_FIT.items() if k in ("繞垂直軸", "逐點yaw", "俯仰估計", "軸")})
     if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3:
         return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
     return round(yaw, 2), round(pitch, 2), n, conf_, diag
@@ -544,6 +585,17 @@ def synth_rotate(gray: np.ndarray, yaw_deg: float, pitch_deg: float = 0.0, jpeg:
     H, W = gray.shape
     out = cv2.warpPerspective(gray, _rot_H(W, H, yaw_deg, pitch_deg), (W, H), flags=cv2.INTER_LINEAR,
                               borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    return _jpeg(out) if jpeg else out
+
+
+def synth_rotate_axis(gray: np.ndarray, axis, angle_deg: float, jpeg: bool = True) -> np.ndarray:
+    """合成繞相機座標任意軸的純旋轉（測「鏡頭低頭時繞世界垂直軸轉頭」）。axis 單位向量、angle 用 _rot_H 的 Ry 慣例（正＝右轉）。"""
+    H, W = gray.shape
+    ax = np.asarray(axis, dtype=np.float64)
+    ax = ax / np.linalg.norm(ax)
+    Rr, _ = cv2.Rodrigues(ax * math.radians(-angle_deg))      # Rodrigues 繞 +y 的正角＝左轉，取負配合 Ry 慣例
+    K = _K(W, H)
+    out = cv2.warpPerspective(gray, K @ Rr @ np.linalg.inv(K), (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
     return _jpeg(out) if jpeg else out
 
 
