@@ -102,4 +102,16 @@ check("第一輪不提醒", T._acted_last([]) == "？")
 n, p = T._parse_call("檢討(對正拍照字,視角移動到(0.91,0.21)對到中央,視角移動到(0,9)截斷沒執行,工具名寫錯,照清單寫視角移動到(x,y))", cat)
 check("parse 括號內逗號不切", p.get("下次") == "照清單寫視角移動到(x,y)" and p.get("預期") == "視角移動到(0.91,0.21)對到中央", p)
 n2, p2 = T._parse_call("視角移動到(0.91,0.21)", cat); check("parse 視角移動到 兩參數", p2.get("x") == "0.91" and p2.get("y") == "0.21", p2)
+if im is not None:
+    import numpy as _np3, sys as _sys3
+    _sys3.path.insert(0, "工具版")
+    import 獨立驗證 as _V
+    _g = _np3.array(im.convert("L"))
+    _rot = Image.fromarray(_V.synth_rotate(_g, 18.0, 0.0))
+    _fy, _fp, _fn, _fc, _ft = t._feat_deg(im.convert("L"), _rot)
+    check("特徵點法 合成右轉 18 度", _fy is not None and 16 <= _fy <= 20 and _fc >= 0.5, (_fy, _fn, _fc, _ft))
+    _lm, _lt, _sc = t._landmark_verify(im.convert("L"), _rot, 20.0)
+    check("_landmark_verify 特徵點優先", getattr(t, "_feat_used", False) and _lm is not None and 16 <= _lm <= 20 and "特徵點" in _lt, (_lm, _lt[:120]))
+    _fy0, *_ = t._feat_deg(im.convert("L"), im.convert("L"))
+    check("特徵點法 沒轉→0", _fy0 is not None and abs(_fy0) < 1, _fy0)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

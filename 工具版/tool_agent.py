@@ -1089,7 +1089,7 @@ class Tools(ExtraTools):
                     want = deg * sign
                     lm_deg, lm_txt, deg_scene = self._landmark_verify(before, after, want, sh)
                     scene_txt = f"整張位移（左右兩帶）換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度" if deg_scene is not None else "整張位移換算不出度數"
-                    self._verify_dump("轉", before, after, 送出度=want, 標點度=lm_deg, 整張度=deg_scene, 畫面變化=d, 重複花紋=bool(getattr(self, "_rep_flag", False)))
+                    self._verify_dump("轉", before, after, 送出度=want, 標點度=(None if getattr(self, "_feat_used", False) else lm_deg), 整張度=deg_scene, 畫面變化=d, 重複花紋=bool(getattr(self, "_rep_flag", False)), 特徵度=getattr(self, "_feat_last", None))
                     if getattr(self, "_rep_flag", False):
                         sh_txt += f"；{scene_txt}；{lm_txt}；（{self.REP_NOTE}）"
                     elif lm_deg is not None:
@@ -1237,6 +1237,33 @@ class Tools(ExtraTools):
         deg = math.degrees(math.atan(dy * 2 * math.tan(math.radians(self.V_FOV / 2))))
         return deg, f"景物上下移了 {dy * 100:+.0f}% 畫面高 ≈ 鏡頭{'抬頭' if deg > 0 else '低頭'} {abs(deg):.0f} 度"
 
+    _feat_mod = None
+
+    def _feat_deg(self, before, after):
+        """10/26 01:1x 第 28 輪：用 獨立驗證.py 的特徵點＋RANSAC＋針孔模型量實際轉了幾度（整張畫面幾百個點、近的東西會被當離群值剔掉）。
+        大廳第三人稱時標點／整張位移常只量到真值一半（標點落在旁邊的玩家、地面——鏡頭繞著自己轉時近的東西移得少），
+        獨立驗證 65 筆：特徵點法跟送出差中位 1.8°、標點說 -10 時真值 -18。→ (yaw, pitch, 點數, 可信, 說明)；量不出時 yaw None。"""
+        if self._feat_mod is None:
+            try:
+                import importlib
+                import sys as _sys
+                here = os.path.dirname(os.path.abspath(__file__))
+                if here not in _sys.path:
+                    _sys.path.insert(0, here)
+                type(self)._feat_mod = importlib.import_module("獨立驗證")
+            except Exception as e:  # noqa: BLE001
+                type(self)._feat_mod = False
+                self._feat_err = str(e)[:80]
+        if not self._feat_mod or before is None or after is None:
+            return None, None, 0, 0.0, "特徵點法不能用"
+        try:
+            yaw, pitch, n, conf, _diag = self._feat_mod.estimate_yaw_pitch(before, after, sweep=False)
+        except Exception as e:  # noqa: BLE001
+            return None, None, 0, 0.0, f"特徵點法失敗：{str(e)[:60]}"
+        if yaw is None or conf < 0.5 or n < 15:
+            return None, None, n, conf, f"特徵點法量不出（{n} 點、可信 {conf:.2f}）"
+        return yaw, pitch, n, conf, f"特徵點比對（整張畫面 {n} 個點、可信 {conf:.2f}）量到 鏡頭轉了 {yaw:+.0f} 度"
+
     def _landmark_verify(self, before, after, want, sh=None, pitch=0.0):
         """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""
         import math
@@ -1255,6 +1282,20 @@ class Tools(ExtraTools):
         if lm_deg is not None and scene_deg is None and abs(lm_deg - want) > max(15.0, abs(want)):
             lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {want:+.0f} 差太多，不信）"
             lm_deg = None
+        self._feat_used = False
+        f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after)
+        self._feat_last = f_yaw
+        if f_yaw is not None:
+            # 10/26 第 28 輪：特徵點法可信就以它為準（大廳第三人稱時標點常只量到一半）；標點／整張留著當參考
+            ref = []
+            if lm_deg is not None:
+                ref.append(f"標點 {lm_deg:+.0f}")
+            if scene_deg is not None:
+                ref.append(f"整張位移 {scene_deg:+.0f}")
+            lm_txt = f_txt + (f"（{'、'.join(ref)}，僅參考）" if ref else "")
+            lm_deg = f_yaw
+            self._feat_used = True
+            self._rep_flag = False      # 特徵點法有 RANSAC、不怕重複花紋
         return lm_deg, lm_txt, scene_deg
 
     SCENE_BANDS = ((0.10, 0.24), (0.24, 0.38), (0.62, 0.76), (0.76, 0.90))
@@ -2545,6 +2586,12 @@ class Tools(ExtraTools):
             if lm_deg is not None and scene_deg is None and abs(lm_deg - chunk) > max(15.0, abs(chunk)):
                 lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {chunk:+.0f} 差太多，不信）"
                 lm_deg = None
+            f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after)
+            feat_here = f_yaw is not None
+            if feat_here:                                        # 10/26 第 28 輪：特徵點優先（見 _feat_deg）
+                lm_deg, lm_txt = f_yaw, f_txt
+                if getattr(self, "_lm_ambiguous", False):
+                    self._rep_flag = False
             if lm_deg is None and scene_deg is not None and abs(scene_deg - chunk) > max(10.0, 0.5 * abs(chunk)):
                 # 10/25 05:5x：大廳人多／地磚時整張位移仍會給 -63（要 -30）、+9（要 -30）這種值，加進合計就整個錯 → 這段照送出算、標僅參考
                 self._chunk_unsure = True
@@ -2553,16 +2600,16 @@ class Tools(ExtraTools):
                 continue
             if lm_deg is None and scene_deg is None:
                 meas += chunk
-                self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 量不出=True)
+                self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 量不出=True, 特徵度=None)
                 parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ 這段照送出的算、停在這裡")
                 stopped = True
                 break
-            turned = lm_deg if lm_deg is not None else scene_deg   # 標點優先；整張位移用左右兩帶換算
-            self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=lm_deg, 整張度=scene_deg, 用的=turned, 畫面變化=dd)
+            turned = lm_deg if lm_deg is not None else scene_deg   # 特徵點＞標點＞整張位移（左右兩帶換算）
+            self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=(None if feat_here else lm_deg), 整張度=scene_deg, 用的=turned, 畫面變化=dd, 特徵度=f_yaw)
             self._seg_ok.append(abs(turned - chunk) <= max(5.0, 0.15 * abs(chunk)))
             lm_used += lm_deg is not None
             meas += turned
-            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'標點' if lm_deg is not None else '整張位移，僅參考'}）")
+            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）")
         return meas, "、".join(parts), done, stopped, lm_used
 
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
@@ -3065,12 +3112,12 @@ class Tools(ExtraTools):
                         + (f"；最像的一塊相似度只有 {loc1[2]:.2f}，不算數、不補轉" if loc1 else "") + "）")
                 if lm_deg is not None and abs(yaw) >= 3 and getattr(self, "_rep_flag", False):
                     ok = False
-                    out.append(head + f"→ 標點量到約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f}），但 {self.REP_NOTE}")
+                    out.append(head + f"→ 量到約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f}），但 {self.REP_NOTE}")
                 elif lm_deg is not None and abs(yaw) >= 3:
                     ok = abs(lm_deg - yaw) <= max(5.0, 0.15 * abs(yaw))
-                    out.append(head + f"→ 改用標點量：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）"
-                               + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if scene_deg is not None else ""))
-                    out.append(self._cmp("視角移動到 標點實測", f"{yaw:+.0f}", f"{lm_deg:+.0f}", ok, "度")
+                    out.append(head + f"→ 量實際轉了幾度：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）"
+                               + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if (scene_deg is not None and not getattr(self, "_feat_used", False)) else ""))
+                    out.append(self._cmp("視角移動到 特徵點實測" if getattr(self, "_feat_used", False) else "視角移動到 標點實測", f"{yaw:+.0f}", f"{lm_deg:+.0f}", ok, "度")
                                + ("（目標應該就在正中央、被你自己的角色擋住看不到）" if ok else "（差太多，可能沒轉到、或滑鼠拖到一半被擋）"))
                 elif scene_deg is not None and abs(yaw) >= 3:
                     ok = abs(scene_deg - yaw) <= max(5.0, 0.15 * abs(yaw))      # 10/25 稽核：改比度數、用 _cmp（原本「要 vs 實測」混進二次驗證一致率）
