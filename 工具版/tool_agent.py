@@ -806,7 +806,7 @@ class Tools(ExtraTools):
             z, z_note = self._walk_zoom(before, after, d, dd) if k == "w" else (None, "")
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
-            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{z_note}{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
+            z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{z_note}{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" + ("（放大倍數只有 {:.1f}、換算誤差大，可能差到一倍；只算畫面正中央那一小塊，旁邊的牆可能更近）".format(z) if z < 1.3 else "（只算畫面正中央那一小塊，旁邊的牆可能更近）") if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
                      ("；中央放大量不出來（這次不算距離）" + self._center_note(dd, before, after)) if (k == "w" and dd >= 2) else "")
             if TOOLFIX and k == "w" and z is None and dd >= 8:
                 # 10/25 工具迭代：走路時畫面在變、中央卻有一大塊完全沒動＝釘在畫面上的東西（照片／面板／提示），不是場景裡擋路的
@@ -2206,6 +2206,16 @@ class Tools(ExtraTools):
         v = num(每度dx, None)
         if v is None or not (0.5 <= v <= 20):
             return "定刻度 要給每度 dx（0.5～20），例如 定刻度(2.5)"
+        old = self.dx_deg
+        if self.live and not self.image_path and abs(v - old) >= 0.05:
+            # 10/25 23:4x 第 25 輪：定刻度 以前不驗就寫（他把大廳量壞的 1300/360＝3.7 寫進去，之後每次轉都過頭 48%）→ 先照新刻度轉一圈驗
+            self.dx_deg = round(v, 2)
+            r = self.cal_loop("")
+            if "**回到原點**" not in r:
+                self.dx_deg = old
+                CUR_DX[0] = old
+                return (f"定刻度({v})：照它轉一圈**沒回到原點**，不寫進校準檔、刻度維持 {old}。驗一圈說：" + r[:260]
+                        + "；大廳人多或畫面沒紋理時一圈量不準，到局內有明顯東西的地方再 量刻度／驗一圈")
         self.dx_deg = round(v, 2)
         p = os.path.join(self.gdir, "記憶", "視角校準.json")
         try:
@@ -2330,6 +2340,7 @@ class Tools(ExtraTools):
         old_dx, old_dy = self.dx_deg, self.dy_deg
         # 10/16 13:1x：他用 定刻度 手動改成 5.25（驗一圈 bug 誤導），之後 量刻度 量到 2.5 被 1.8 倍規則擋掉、沿用錯的 5.25
         # → 1.8 倍規則拿「上次 量刻度 量到的值」比；目前值是手動定的、又沒有量測紀錄，就不套規則（並說明）
+        dx_rej, dy_rej = False, False
         try:
             _h = (json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8")).get("水平") or {})
         except Exception:  # noqa: BLE001
@@ -2344,11 +2355,13 @@ class Tools(ExtraTools):
             note += r18
             if r18.endswith("不採用；"):
                 dx_deg = old_dx
+                dx_rej = True
         if dy_from_range:
             r18 = self._rule18("垂直每度 dy", dy_deg, _v.get("量測每度dy"), old_dy, False)
             note += r18
             if r18.endswith("不採用；"):
                 dy_deg = old_dy
+                dy_rej = True
         self.dx_deg, self.dy_deg = dx_deg, dy_deg
         p = os.path.join(self.gdir, "記憶", "視角校準.json")
         try:
@@ -2356,11 +2369,12 @@ class Tools(ExtraTools):
         except Exception:  # noqa: BLE001
             cal = {}
         now = datetime.now().strftime("%m/%d %H:%M")
-        cal["水平"] = {"一圈dx": loop_dx or _h.get("一圈dx"), "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
-                     "量測每度dx": round(loop_dx / 360.0, 2) if loop_dx else _h.get("量測每度dx")}
-        cal["垂直"] = {"全程dy": (full_dy if dy_from_range else _v.get("全程dy")), "每度dy": dy_deg,
+        # 10/25 23:4x 第 25 輪：不採用的量到值不能寫進「量測每度」（那是 1.8 倍規則的基準）；不然下一次就拿壞值當基準採用
+        cal["水平"] = {"一圈dx": (loop_dx if (loop_dx and not dx_rej) else _h.get("一圈dx")), "每度dx": dx_deg, "方法": "轉到畫面回起點（工具版 量刻度）", "時間": now,
+                     "量測每度dx": round(loop_dx / 360.0, 2) if (loop_dx and not dx_rej) else _h.get("量測每度dx")}
+        cal["垂直"] = {"全程dy": (full_dy if (dy_from_range and not dy_rej) else _v.get("全程dy")), "每度dy": dy_deg,
                      "方法": "每步 10 像素慢慢找上下極限（工具版 量刻度，10/23；每度 dy 只用第三人稱全程換）", "時間": now,
-                     "量測每度dy": round(full_dy / 160.0, 2) if dy_from_range else _v.get("量測每度dy"),
+                     "量測每度dy": round(full_dy / 160.0, 2) if (dy_from_range and not dy_rej) else _v.get("量測每度dy"),
                      "全程_第一人稱": (full_dy if (dy_ok and mode == "第一人稱") else _v.get("全程_第一人稱")),
                      "全程_第三人稱": (full_dy if (dy_ok and mode == "第三人稱") else _v.get("全程_第三人稱"))}
         cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
