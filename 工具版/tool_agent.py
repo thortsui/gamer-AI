@@ -77,7 +77,8 @@ def catalog_lines(cat, 類別=None):
         if t.get("自訂"):
             tag = "（你自己定義的）"
         # 12:4x 他會把用法裡的參數名照抄（轉(度)、檢討(原因,預期…)）→ 清單上寫實際範例值，參數說明放工具說明
-        out.append(f"{t.get('例') or t['用法']}｜{t['用途']}{tag}")
+        exs = t.get("例子") or []
+        out.append(f"{t.get('例') or t['用法']}｜{t['用途']}{tag}" + ("｜例：" + "；".join(exs) if exs else ""))
     return out
 
 
@@ -804,6 +805,8 @@ class Tools(ExtraTools):
             after = self.grab()
             dd = self.diff(before, after)
             z, z_note = self._walk_zoom(before, after, d, dd) if k == "w" else (None, "")
+            if k == "w":
+                self._verify_dump("走", before, after, 秒=d, 放大=z, 畫面變化=dd)
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{z_note}{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" + ("（放大倍數只有 {:.1f}、換算誤差大，可能差到一倍；只算畫面正中央那一小塊，旁邊的牆可能更近）".format(z) if z < 1.3 else "（只算畫面正中央那一小塊，旁邊的牆可能更近）") if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
@@ -1086,6 +1089,7 @@ class Tools(ExtraTools):
                     want = deg * sign
                     lm_deg, lm_txt, deg_scene = self._landmark_verify(before, after, want, sh)
                     scene_txt = f"整張位移（左右兩帶）換算 ≈ 鏡頭轉了 {deg_scene:+.0f} 度" if deg_scene is not None else "整張位移換算不出度數"
+                    self._verify_dump("轉", before, after, 送出度=want, 標點度=lm_deg, 整張度=deg_scene, 畫面變化=d, 重複花紋=bool(getattr(self, "_rep_flag", False)))
                     if getattr(self, "_rep_flag", False):
                         sh_txt += f"；{scene_txt}；{lm_txt}；（{self.REP_NOTE}）"
                     elif lm_deg is not None:
@@ -1254,6 +1258,26 @@ class Tools(ExtraTools):
         return lm_deg, lm_txt, scene_deg
 
     SCENE_BANDS = ((0.10, 0.24), (0.24, 0.38), (0.62, 0.76), (0.76, 0.90))
+
+    VERIFY = os.environ.get("GAMER_VERIFY", "1") == "1"
+
+    def _verify_dump(self, tool, before, after, **info):
+        """獨立驗證用：存前後畫面（960 寬 JPEG）＋工具送出／宣稱的值到 記憶/工具版/驗證/；之後用跟工具無關的方法（特徵點）算真值對照。"""
+        if not self.VERIFY or before is None or after is None:
+            return
+        try:
+            d = os.path.join(self.gdir, "記憶", "工具版", "驗證")
+            os.makedirs(d, exist_ok=True)
+            tag = datetime.now().strftime("%H%M%S_%f")[:9] + "_" + tool
+            for nm, im in (("before", before), ("after", after)):
+                w = 960
+                im.convert("RGB").resize((w, int(im.height * w / im.width))).save(os.path.join(d, f"{tag}_{nm}.jpg"), quality=80)
+            rec = {"時間": datetime.now().strftime("%H:%M:%S"), "工具": tool, "檔": tag, "dx_deg": self.dx_deg, "dy_deg": self.dy_deg}
+            rec.update({k: (round(v, 3) if isinstance(v, float) else v) for k, v in info.items()})
+            with open(os.path.join(d, "驗證.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
 
     def _scene_deg(self, before, after):
         """整張位移換算鏡頭轉了幾度（10/25 稽核修正）：原本拿整寬的平均位移直接 atan，但針孔模型邊緣位移比中央大 1.4～2 倍，
@@ -2529,10 +2553,12 @@ class Tools(ExtraTools):
                 continue
             if lm_deg is None and scene_deg is None:
                 meas += chunk
+                self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 量不出=True)
                 parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ 這段照送出的算、停在這裡")
                 stopped = True
                 break
             turned = lm_deg if lm_deg is not None else scene_deg   # 標點優先；整張位移用左右兩帶換算
+            self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=lm_deg, 整張度=scene_deg, 用的=turned, 畫面變化=dd)
             self._seg_ok.append(abs(turned - chunk) <= max(5.0, 0.15 * abs(chunk)))
             lm_used += lm_deg is not None
             meas += turned
@@ -2920,6 +2946,8 @@ class Tools(ExtraTools):
             self._drag(yaw * self.dx_deg, -pitch * self.dy_deg)
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
         after = self._settled()
+        if chunk_meas is None:
+            self._verify_dump("視角移動到", before, after, 送出度=yaw, 送出上下=pitch, 目標x=fx, 目標y=fy)
         redrag = ""
         if self.diff(before, after) < 3 and abs(yaw) >= 3:
             # 17:40 第一次轉完目標還在 0.75（沒轉）：中央有 E 提示時從中央壓右鍵會按到提示 → 跟 轉 一樣改從畫面上方重拖
