@@ -140,12 +140,16 @@ _bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "di
 try:
     _sent = []
     t.live, t.image_path = True, None
-    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    _noise = Image.fromarray(_np3.random.RandomState(1).randint(0, 255, (im.height, im.width, 3), dtype=_np3.uint8))   # 轉完的畫面：找不到原本那塊、也不是釘住
+    t.grab = lambda: im; t._settled = lambda prev=None: _noise; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
     t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
     t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
     t._feat_deg = lambda a, b, want=None: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
     _r = t.look_at(0.2, 0.52)
     check("補轉後不說只轉了", "補轉" in _r and "只轉了" not in _r, _r[:300])
+    check("補轉後合計跟算好的比→一致", "【對照 一致】視角移動到 分段實測 要 -39度" in _r, _r[_r.find("【對照"):][:120])
+    _sent.clear(); _r2 = t.look_turn(90)
+    check("轉(90) 補轉後跟要的 90 比→一致", "【對照 一致】轉頭合計 要 +90度" in _r2, _r2[_r2.find("【對照"):][:120])
 except Exception as _e:
     check("補轉後不說只轉了（跑不起來）", False, repr(_e)[:200])
 finally:

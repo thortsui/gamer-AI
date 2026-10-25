@@ -2676,7 +2676,7 @@ class Tools(ExtraTools):
             # 10/25 工具迭代：超過 30 度就分段轉、每段實測、合計（審查：45 度一段只剩 55% 重疊、整張位移不穩 → 改 30）；
             # 使用者：「確保至少還有一個東西維持相同的畫面」→ 哪一段量不出就停在那裡、照實說（那段已送出，照送出的算）
             meas, parts, done, stopped, lm_used = self._turn_chunks(d)
-            ok = abs(meas - done) <= max(5.0, 0.15 * abs(done))
+            ok = abs(meas - d) <= max(5.0, 0.15 * abs(d))        # 10/26 03:5x 第 34 輪：補轉後送出總量 done 比要的多，要跟「要的 d」比（03:11 轉(90) 實測 88 vs 送出 106 被判不一致）
             stop_note = f"；**中途量不出，停在 {done:+.0f} 度沒再轉（要轉 {d:+.0f}，剩下的下一輪再轉）**" if stopped else ""
             n_seg = max(1, int(math.ceil(abs(d) / 30.0)))
             segs_ok = bool(getattr(self, "_seg_ok", [])) and all(self._seg_ok)
@@ -2685,7 +2685,7 @@ class Tools(ExtraTools):
             elif getattr(self, "_chunk_unsure", False) and not ok:
                 v2 = f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）"
             else:
-                v2 = (self._cmp("轉頭合計", f"{done:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
+                v2 = (self._cmp("轉頭合計", f"{d:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
                       + ("（畫面有重複花紋，但標點段都跟送出一致）" if getattr(self, "_rep_flag", False) else "") if lm_used
                       else f"（沒有找到標點，{meas:+.0f} 度是整張位移估的，僅參考、不算一致／不一致）")
             return (f"轉 {d:+.0f} 度：分段轉（每段 ≤30 度、每段實測）{parts}；**你實際轉了約 {meas:+.0f} 度（送出 {done:+.0f}）**{stop_note}；" + v2 + cap_note)
@@ -3258,7 +3258,7 @@ class Tools(ExtraTools):
             sh, _ = self._shift(before, after, d_all)
             if chunk_meas is not None:
                 meas, parts, lm_used, stopped_c, done_c = chunk_meas
-                ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
+                ok = abs(meas - yaw_calc) <= max(5.0, 0.15 * abs(yaw_calc))   # 10/26 第 34 輪：yaw 已是送出總量（含補轉），要跟算好的 yaw_calc 比（03:43 要 44 實測 43 被判不一致）
                 short = stopped_c and abs(done_c - yaw_calc) >= 3   # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）；10/26 02:0x：分段後 yaw 已改成 done、補轉後會超過算的 → 只有中途停才算「只轉了」
                 if short or lm_used == 0:
                     ok = False
@@ -3276,7 +3276,7 @@ class Tools(ExtraTools):
                 elif getattr(self, "_chunk_unsure", False) and not ok:
                     out.append(f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）")
                 else:
-                    out.append((self._cmp("視角移動到 分段實測", f"{yaw:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
+                    out.append((self._cmp("視角移動到 分段實測", f"{yaw_calc:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
                                 + ("（畫面有重複花紋，但標點段都跟送出一致）" if getattr(self, "_rep_flag", False) else "")) if lm_used
                                else "（沒有找到標點，度數是整張位移估的，僅參考）")
             else:
