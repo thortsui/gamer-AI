@@ -118,4 +118,21 @@ import time as _tm
 t._eta = (_tm.time() - 30, "中央那個東西還要走約 8.3 秒才到"); _en = t._eta_note()
 check("長按沒反應帶上上次走的距離", "8.3 秒" in _en and "30 秒前" in _en, _en)
 t._eta = (_tm.time() - 400, "x"); check("超過 3 分鐘不帶", t._eta_note() == "")
+# 第 30 輪：分段少轉就補轉一次（模擬每次拖曳只轉到 80%）
+_sent = []
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump")}
+try:
+    t.live, t.image_path = True, None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
+    t._feat_deg = lambda a, b: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
+    _m, _p, _d, _st, _lu = t._turn_chunks(34.0)
+    check("分段少轉→補轉一次", "補轉 +7→實測 +5" in _p and abs(_m - 32.6) < 0.3 and abs(_d - 40.8) < 0.3 and not _st, (_p, round(_m, 1), round(_d, 1)))
+    _sent.clear(); t._feat_deg = lambda a, b: (0.95 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _m, _p, _d, _st, _lu = t._turn_chunks(34.0)
+    check("差在容許內不補轉", "補轉" not in _p and abs(_d - 34.0) < 0.1, _p)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

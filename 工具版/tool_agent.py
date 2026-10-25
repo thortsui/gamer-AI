@@ -2624,6 +2624,32 @@ class Tools(ExtraTools):
             lm_used += lm_deg is not None
             meas += turned
             parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）")
+        # 10/26 01:5x 第 30 輪：每段拖曳固定少 2～3 度（30→27／28、17→13）、合計常差到不一致（01:39 要 34 量到 27），他下一輪得再轉一次。
+        #   → 合計跟要的差超過容許（5 度或 15%）就補轉一次差額、照樣實測加進合計；只補一次、補完照量到的說
+        if not stopped and lm_used >= 1 and self.live and not self.image_path:
+            gap = deg - meas
+            if max(5.0, 0.15 * abs(deg)) < abs(gap) <= 30:
+                before = self.grab()
+                self._drag(gap * self.dx_deg, 0)
+                after = self._settled()
+                dd = self.diff(before, after)
+                f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after)
+                turned = f_yaw
+                how = "特徵點"
+                if turned is None:
+                    turned, _lt = self._landmark_turn(before, after, 1 if gap > 0 else -1, gap)
+                    how = "標點"
+                done += gap
+                if turned is None:
+                    meas += gap
+                    self._chunk_unsure = True
+                    parts.append(f"補轉 {gap:+.0f}→量不出、照送出算（僅參考）")
+                else:
+                    meas += turned
+                    lm_used += 1
+                    self._seg_ok.append(abs(turned - gap) <= max(5.0, 0.15 * abs(gap)))
+                    parts.append(f"補轉 {gap:+.0f}→實測 {turned:+.0f}（{how}）")
+                self._verify_dump("轉段", before, after, 送出度=gap, 標點度=(turned if how == "標點" else None), 整張度=None, 用的=turned, 畫面變化=dd, 特徵度=f_yaw, 補轉=True)
         return meas, "、".join(parts), done, stopped, lm_used
 
     # 10/23 11:1x 使用者：「新增限制（抬頭低頭只能上下45度 共90度的範圍）」→ 照水平儀累計，超過的部分不轉
@@ -3098,7 +3124,7 @@ class Tools(ExtraTools):
             if chunk_meas is not None:
                 meas, parts, lm_used, stopped_c, done_c = chunk_meas
                 ok = abs(meas - yaw) <= max(5.0, 0.15 * abs(yaw))
-                short = abs(done_c - yaw_calc) >= 3            # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）
+                short = (stopped_c or abs(yaw - yaw_calc) >= 3) and abs(done_c - yaw_calc) >= 3   # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）；10/26 第 30 輪：補轉後 done 會超過算的、不算「只轉了」
                 if short or lm_used == 0:
                     ok = False
                 out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
