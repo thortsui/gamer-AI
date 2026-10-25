@@ -88,4 +88,7 @@ if im is not None:
 if im is not None:
     _zm = im.crop((W // 8, H // 8, W - W // 8, H - H // 8)).resize((W, H))
     _pz = t._patch_zoom(im, _zm, 0.5); check("走 旁邊東西放大（_patch_zoom 1.33）", bool(_pz) and all(1.15 <= x["r"] <= 1.55 for x in _pz), [(x["名稱"][:6], x["r"]) for x in _pz])
+if im is not None:
+    T.TOOLFIX = True
+    _z, _n = t._walk_zoom(im, _zm, 0.5, 30.0); check("走 量測鏈 _walk_zoom 1.33", _z is not None and 1.15 <= _z <= 1.55, (_z, _n))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

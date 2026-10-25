@@ -717,6 +717,24 @@ class Tools(ExtraTools):
         time.sleep(d)
         pydirectinput.keyUp(k)
 
+    def _walk_zoom(self, before, after, d, dd):
+        """走路放大倍數量測鏈：中央 → 挖掉自己 → 中央以外鎖定的東西取中位 → (倍數或 None, 說明)。第一次與二次驗證都用同一條。"""
+        z = self.zoom_factor(before, after)
+        if z is None and TOOLFIX and self.self_mask is not None:
+            z = self._zoom_factor_masked(before, after)          # 10/25 工具迭代：找自己 量到的那塊挖掉再量
+        note = ""
+        if z is None and TOOLFIX and dd >= 8:
+            # 10/25 07:2x 第 14 輪：第一人稱貼近櫃檯／電腦時中央一片平、放大量不出 → 改看中央以外鎖定的東西放大幾倍（量比例 同一套），取中位
+            try:
+                pz = self._patch_zoom(before, after, d)
+            except Exception:  # noqa: BLE001
+                pz = []
+            if pz:
+                rs = sorted(x["r"] for x in pz)
+                z = rs[len(rs) // 2]
+                note = f"（中央量不出，改看旁邊 {len(pz)} 個東西的放大取中位）"
+        return z, note
+
     DEFAULT_WALK_SPEED = 3.0        # 身高/秒（還沒校準時的預設；量比例 鎖到描述畫面給了距離的東西後換成實測）
 
     def walk_speed(self):
@@ -768,20 +786,7 @@ class Tools(ExtraTools):
             time.sleep(0.25)
             after = self.grab()
             dd = self.diff(before, after)
-            z = self.zoom_factor(before, after) if k == "w" else None
-            if z is None and k == "w" and TOOLFIX and self.self_mask is not None:
-                z = self._zoom_factor_masked(before, after)          # 10/25 工具迭代：找自己 量到的那塊挖掉再量
-            z_note = ""
-            if z is None and k == "w" and TOOLFIX and dd >= 8:
-                # 10/25 07:2x 第 14 輪：第一人稱貼近櫃檯／電腦時中央一片平、放大量不出（這版 4/5）→ 改看中央以外鎖定的東西放大幾倍（量比例 同一套），取中位
-                try:
-                    pz = self._patch_zoom(before, after, d)
-                except Exception:  # noqa: BLE001
-                    pz = []
-                if pz:
-                    rs = sorted(x["r"] for x in pz)
-                    z = rs[len(rs) // 2]
-                    z_note = f"（中央量不出，改看旁邊 {len(pz)} 個東西的放大取中位）"
+            z, z_note = self._walk_zoom(before, after, d, dd) if k == "w" else (None, "")
             kk = self.depth_k()
             exp = f"（照深度比例每秒 {kk} 倍，走 {d:.1f} 秒預期約 {kk ** d:.1f} 倍）" if (kk and k == "w") else ""
             z_txt = (f"；實測畫面中央放大 {z:.1f} 倍{z_note}{exp}" + (f"＝中央那個東西從現在位置還要走約 {d / (z - 1):.1f} 秒才到" if z > 1.02 else "＝幾乎沒靠近中央那個東西") if z else
@@ -800,7 +805,7 @@ class Tools(ExtraTools):
                 after2 = self.grab()
                 dd2 = self.diff(before, after2)
                 if k == "w" and (z or z2_needed(dd)):
-                    z2 = self.zoom_factor(before, after2)
+                    z2, _ = self._walk_zoom(before, after2, d, dd2)      # 10/25 08:0x 第 15 輪：第二次也走同一條量測鏈（原本只量中央 → 旁邊量到的每次都「第二次量不出、不一致」）
                     ok = (z is None and z2 is None) or (z is not None and z2 is not None and abs(z - z2) <= 0.15)
                     z_txt += "；" + self._v2("走路放大倍數", f"{z:.1f}" if z else "量不出", f"{z2:.1f}" if z2 else "量不出", ok)
                 else:
