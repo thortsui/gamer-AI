@@ -990,10 +990,10 @@ class Tools(ExtraTools):
         if len(fr) < 4 or any(f is None for f in fr):
             return None, None, [], "抓不到畫面"
         degs = []
-        for a, b in zip(fr, fr[1:]):
-            y, _p, n, c, _t = self._feat_deg(a, b)
-            degs.append(None if y is None else round(y, 1))
         seg = px / 3.0
+        for a, b in zip(fr, fr[1:]):
+            y, _p, n, c, _t = self._feat_deg(a, b, want=(seg / self.dx_deg if self.dx_deg else None))
+            degs.append(None if y is None else round(y, 1))
         txt = "三段各量到 " + "／".join("量不出" if d is None else f"{d:+.1f}" for d in degs) + f" 度（每段送 {seg:+.0f} 像素）"
         mid = degs[1]
         if mid is None or abs(mid) < 2:
@@ -1358,7 +1358,7 @@ class Tools(ExtraTools):
 
     _feat_mod = None
 
-    def _feat_deg(self, before, after):
+    def _feat_deg(self, before, after, want=None):
         """10/26 01:1x 第 28 輪：用 獨立驗證.py 的特徵點＋RANSAC＋針孔模型量實際轉了幾度（整張畫面幾百個點、近的東西會被當離群值剔掉）。
         大廳第三人稱時標點／整張位移常只量到真值一半（標點落在旁邊的玩家、地面——鏡頭繞著自己轉時近的東西移得少），
         獨立驗證 65 筆：特徵點法跟送出差中位 1.8°、標點說 -10 時真值 -18。→ (yaw, pitch, 點數, 可信, 說明)；量不出時 yaw None。"""
@@ -1380,17 +1380,36 @@ class Tools(ExtraTools):
         except Exception as e:  # noqa: BLE001
             return None, None, 0, 0.0, f"特徵點法失敗：{str(e)[:60]}"
         self._feat_how = "ORB"
+        self._feat_bad = ""
+        self._feat_note = ""
+        if yaw is not None and conf >= 0.5 and want is not None and abs(yaw - want) > max(15.0, abs(want)):
+            # 10/26 03:3x 第 33 輪：03:23 送 +17 特徵點量到 +63。看圖是真的（第一人稱貼著咖啡桌、鏡頭被帶走抬頭 19 度），ORB 跟 LoFTR 都量到 63
+            #   → 差太多時用 LoFTR 再量一次：兩法一致就信（鏡頭真的被別的東西帶走了，照實說）；不一致就都不信、當量不出
+            try:
+                y2, _p2, n2, c2, _d2 = self._feat_mod.estimate_yaw_pitch_loftr(before, after)
+            except Exception:  # noqa: BLE001
+                y2, c2 = None, 0.0
+            if y2 is not None and c2 >= 0.5 and abs(y2 - yaw) <= max(5.0, 0.2 * abs(yaw)):
+                self._feat_note = f"（跟送出的 {want:+.0f} 差很多，但 LoFTR 也量到 {y2:+.0f}、兩法一致＝鏡頭真的轉了這麼多：可能貼著東西被帶走、或遊戲自己轉了鏡頭）"
+            else:
+                self._feat_bad = f"特徵點量到 {yaw:+.0f} 跟送出的 {want:+.0f} 差太多，LoFTR {'量不出' if y2 is None else f'量到 {y2:+.0f}'}、兩法不一致，都不信"
+                yaw, conf = None, 0.0
         if yaw is None or conf < 0.5 or n < 15:
             # 10/26 02:5x 轉角基準（工具版/轉角基準.py、轉角估計_模型比較_1026.md）：ORB 量不出的 9 對 LoFTR 救回 4 對；合成 45 度 ORB 2/28 量不出、LoFTR 0/28 → 退路
             try:
                 y2, p2, n2, c2, _d2 = self._feat_mod.estimate_yaw_pitch_loftr(before, after)
             except Exception:  # noqa: BLE001
                 y2, n2, c2 = None, 0, 0.0
+            if self._feat_bad:
+                return None, None, n, conf, self._feat_bad
+            if y2 is not None and c2 >= 0.5 and n2 >= 15 and want is not None and abs(y2 - want) > max(15.0, abs(want)):
+                self._feat_bad = f"ORB 量不出、LoFTR 量到 {y2:+.0f} 跟送出的 {want:+.0f} 差太多，單一方法不信"
+                y2 = None
             if y2 is not None and c2 >= 0.5 and n2 >= 15:
                 self._feat_how = "LoFTR"
                 return y2, p2, n2, c2, f"特徵點比對（ORB 量不出、改用 LoFTR：{n2} 個點、可信 {c2:.2f}）量到 鏡頭轉了 {y2:+.0f} 度"
-            return None, None, n, conf, f"特徵點法量不出（ORB {n} 點、可信 {conf:.2f}；LoFTR 也量不出）"
-        return yaw, pitch, n, conf, f"特徵點比對（整張畫面 {n} 個點、可信 {conf:.2f}）量到 鏡頭轉了 {yaw:+.0f} 度"
+            return None, None, n, conf, (self._feat_bad or f"特徵點法量不出（ORB {n} 點、可信 {conf:.2f}；LoFTR 也量不出）")
+        return yaw, pitch, n, conf, f"特徵點比對（整張畫面 {n} 個點、可信 {conf:.2f}）量到 鏡頭轉了 {yaw:+.0f} 度" + self._feat_note
 
     def _landmark_verify(self, before, after, want, sh=None, pitch=0.0):
         """10/25 03:0x：標點量實際轉了幾度 ＋ 跟整張位移交叉檢查（跟 _turn_chunks 同一套規則）→ (度數或 None, 說明, 整張位移換算度數或 None)。正＝右。"""
@@ -1411,7 +1430,7 @@ class Tools(ExtraTools):
             lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {want:+.0f} 差太多，不信）"
             lm_deg = None
         self._feat_used = False
-        f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after)
+        f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after, want=want)
         self._feat_last = f_yaw
         if f_yaw is not None:
             # 10/26 第 28 輪：特徵點法可信就以它為準（大廳第三人稱時標點常只量到一半）；標點／整張留著當參考
@@ -2714,8 +2733,10 @@ class Tools(ExtraTools):
             if lm_deg is not None and scene_deg is None and abs(lm_deg - chunk) > max(15.0, abs(chunk)):
                 lm_txt += f"（整張量不出、標點 {lm_deg:+.0f} 又跟送出的 {chunk:+.0f} 差太多，不信）"
                 lm_deg = None
-            f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after)
+            f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after, want=chunk)
             feat_here = f_yaw is not None
+            if not feat_here and getattr(self, "_feat_bad", ""):
+                lm_txt += f"（{self._feat_bad}）"
             if feat_here:                                        # 10/26 第 28 輪：特徵點優先（見 _feat_deg）
                 lm_deg, lm_txt = f_yaw, f_txt
                 if getattr(self, "_lm_ambiguous", False):
@@ -2747,7 +2768,7 @@ class Tools(ExtraTools):
                 self._drag(gap * self.dx_deg, 0)
                 after = self._settled()
                 dd = self.diff(before, after)
-                f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after)
+                f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after, want=gap)
                 turned = f_yaw
                 how = "特徵點"
                 if turned is None:

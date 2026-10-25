@@ -126,10 +126,10 @@ try:
     t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
     t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
     t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
-    t._feat_deg = lambda a, b: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
+    t._feat_deg = lambda a, b, want=None: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
     _m, _p, _d, _st, _lu = t._turn_chunks(34.0)
     check("分段少轉→補轉一次", "補轉 +7→實測 +5" in _p and abs(_m - 32.6) < 0.3 and abs(_d - 40.8) < 0.3 and not _st, (_p, round(_m, 1), round(_d, 1)))
-    _sent.clear(); t._feat_deg = lambda a, b: (0.95 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _sent.clear(); t._feat_deg = lambda a, b, want=None: (0.95 * _sent[-1], 0.0, 100, 0.9, "特徵點")
     _m, _p, _d, _st, _lu = t._turn_chunks(34.0)
     check("差在容許內不補轉", "補轉" not in _p and abs(_d - 34.0) < 0.1, _p)
 finally:
@@ -143,7 +143,7 @@ try:
     t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
     t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
     t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
-    t._feat_deg = lambda a, b: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
+    t._feat_deg = lambda a, b, want=None: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
     _r = t.look_at(0.2, 0.52)
     check("補轉後不說只轉了", "補轉" in _r and "只轉了" not in _r, _r[:300])
 except Exception as _e:
@@ -162,10 +162,20 @@ _n, _p = T._parse_call("量刻度中段(45)", cat); check("parse 量刻度中段
 _bak2 = {k: getattr(t, k) for k in ("_drag_staged", "_feat_deg")}
 try:
     t._drag_staged = lambda dx, stages=3, fy=0.5, pause=0.3: [im, im, im, im]
-    _seq = iter([8.0, 10.0, 10.0]); t._feat_deg = lambda a, b: (next(_seq), 0.0, 100, 0.9, "x")
+    _seq = iter([8.0, 10.0, 10.0]); t._feat_deg = lambda a, b, want=None: (next(_seq), 0.0, 100, 0.9, "x")
     _sc, _hl, _dg, _tx = t._mid_sample(75.0)
     check("中段法 75px/3÷10度＝2.5、頭段少 2 度", _sc == 2.5 and _hl == 2.0, (_sc, _hl, _dg))
 finally:
     for k, v in _bak2.items():
         setattr(t, k, v)
+if im is not None:
+    _rot18 = Image.fromarray(_V.synth_rotate(_np3.array(im.convert("L")), 18.0, 0.0))
+    _y, *_rest = t._feat_deg(im.convert("L"), _rot18, want=17.0); check("特徵點 want 接近→採用", _y is not None and 16 <= _y <= 20, _y)
+    _y2, _p2, _n2, _c2, _t2 = t._feat_deg(im.convert("L"), _rot18, want=-30.0); check("特徵點 跟送出差太多但 LoFTR 一致→信、附註", _y2 is not None and 16 <= _y2 <= 20 and "兩法一致" in _t2, _t2)
+    _bakL = T.Tools._feat_mod.estimate_yaw_pitch_loftr
+    try:
+        T.Tools._feat_mod.estimate_yaw_pitch_loftr = lambda a, b, third_person=None: (-25.0, 0.0, 60, 0.9, {})
+        _y3, _p3, _n3, _c3, _t3 = t._feat_deg(im.convert("L"), _rot18, want=-30.0); check("特徵點 跟送出差太多且 LoFTR 不一致→不信", _y3 is None and "都不信" in _t3, _t3)
+    finally:
+        T.Tools._feat_mod.estimate_yaw_pitch_loftr = _bakL
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
