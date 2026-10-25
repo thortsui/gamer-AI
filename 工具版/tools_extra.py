@@ -561,10 +561,12 @@ class ExtraTools:
                 im = self._settled()
                 g = self._trk_gray(im)
                 f = self._trk_find(g, tpl, near=(0.5, y), r=0.2)
-                if f and f[2] >= 0.5:
+                if f and f[2] >= 0.6:                     # 10/26 06:4x 第 38 輪：0.5 太鬆（06:29 轉完 0.51 認到畫面頂端的別的東西、之後整路跟錯）
                     x, y = f[0], f[1]
                 else:
                     x = 0.5                               # 轉到中間被自己的角色擋住常找不到：當作已轉正，走一步再找
+                    if f and f[2] >= 0.5:
+                        log.append(f"轉完最像的一塊相似度只有 {f[2]:.2f}、不算找到（可能認錯）")
             before = im
             self._key("w", 0.4)
             time.sleep(0.25)
@@ -577,11 +579,12 @@ class ExtraTools:
                 reason = "走了畫面沒變＝前面被擋住"
                 break
             f = self._trk_find(g, tpl, near=(x, y), r=0.25, scales=(1.0, 1.1, 1.2, 1.35))
-            if not f or f[2] < 0.5:
+            jumped = bool(f) and (abs(f[0] - x) > 0.2 or abs(f[1] - y) > 0.2)      # 走 0.4 秒它不可能在畫面上跳 20% 以上＝認到別的東西
+            if not f or f[2] < 0.6 or jumped:
                 lost += 1
-                log.append(f"第{i + 1}步 找不到它（相似度 {f[2] if f else 0:.2f}）")
+                log.append(f"第{i + 1}步 找不到它（相似度 {f[2] if f else 0:.2f}" + ("、最像的一塊跳到 ({:.2f},{:.2f}) 太遠、不算".format(f[0], f[1]) if jumped else "") + "）")
                 if lost >= 2:
-                    reason = "連兩步找不到它（可能被擋住、已經走到面前或走過頭）"
+                    reason = "連兩步找不到它（可能被擋住、已經走到面前或走過頭；或一開始就認錯）"
                     break
                 continue
             lost = 0
