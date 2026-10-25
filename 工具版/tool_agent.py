@@ -1029,6 +1029,13 @@ class Tools(ExtraTools):
             retry_note = (f"（第一次從畫面中央拖，畫面變化 {d:.0f} 幾乎沒轉——中央可能有提示擋住；改從畫面上方重拖一次，"
                           + ("這次轉了）" if d2 >= 3 else "還是沒轉）"))
             after, d = after2, d2
+        if d < 3 and self.live and not self.image_path:
+            # 10/25 09:3x 第 18 輪：開著「辦理入住／出口」面板時滑鼠拖曳被面板吃掉、鏡頭完全不動，原本還去量標點／整張位移 → 寫成「重複花紋、僅參考」誤導他 8 輪
+            ui = self._ui_words([w for w, _ in self._fixed_words(words_before, self._words(after))])
+            return (f"**鏡頭沒轉**（從畫面中央、上方各拖一次，畫面變化都只有 {d:.0f}）＝鏡頭現在轉不動"
+                    + (f"：畫面上釘著這些不是 HUD 的字，多半是開著的面板／選單按鈕：" + "、".join(f"「{w}」" for w in ui[:5]) + "；先 關掉 或 點字 把它處理掉" if ui
+                       else "：可能有面板／選單擋住或游標被鎖；先 關掉，或看畫面上有沒有按鈕要點")
+                    + "，再轉。這次沒量到角度、不判一致")
         hud = self._fixed_words(words_before, self._words(after))
         hud_txt = ("；轉前轉後都釘在畫面同一位置的字（HUD／面板上的字，不是場景裡的東西，轉頭對不正、要用 點字 或走近）："
                    + "、".join(f"「{w}」({x:.2f},{y:.2f})" for w, (x, y) in hud[:6])) if hud else ""
@@ -1284,6 +1291,17 @@ class Tools(ExtraTools):
                 note = (f"（整張比對被畫面上釘著不動的東西拉成 0%——像手上拿的東西或面板；"
                         f"只看有變的 {mv[1] * 100:.0f}% 畫面重量）")
         return sh, note
+
+    @staticmethod
+    def _ui_words(words):
+        """釘在畫面上的字裡，不是常駐 HUD（輪班／理智／$…）的那些 → 多半是面板／選單的按鈕字。"""
+        out = []
+        for w in words:
+            w = str(w).strip()
+            if not w or any(h in w for h in TASK_HUD) or re.fullmatch(r"[\d\s$%:.,/+\-]+", w):
+                continue
+            out.append(w)
+        return out
 
     def _words(self, im):
         """畫面上的字 → {字: (x, y)}（給轉頭前後比對用；05:00 他對著右側 0.87 固定不動的「蓋印表格」字連轉右 23 次）。"""
