@@ -155,4 +155,17 @@ if im is not None:
     _rot45 = Image.fromarray(_V.synth_rotate(_np3.array(im.convert("L")), 45.0, 0.0))
     _ly, _lp, _ln, _lc, _ld = _V.estimate_yaw_pitch_loftr(im.convert("L"), _rot45)
     check("LoFTR 退路 合成右轉 45 度", _ly is not None and 43 <= _ly <= 47 and _lc >= 0.5, (_ly, _ln, _lc, _ld))
+check("量刻度中段 dry-run", "不能量刻度中段" in t.cal_mid(""), t.cal_mid(""))
+check("量刻度中段 在目錄", "量刻度中段" in "\n".join(T.catalog_lines(cat)) if hasattr(T, "catalog_lines") else any(x.get("名稱") == "量刻度中段" for x in (cat["工具"] if isinstance(cat, dict) and "工具" in cat else cat)))
+_n, _p = T._parse_call("量刻度中段(45)", cat); check("parse 量刻度中段(45)", _n == "量刻度中段" and _p.get("度") == "45", (_n, _p))
+# 中段算法：模擬三段 +8／+10／+10（頭段死區 2 度）
+_bak2 = {k: getattr(t, k) for k in ("_drag_staged", "_feat_deg")}
+try:
+    t._drag_staged = lambda dx, stages=3, fy=0.5, pause=0.3: [im, im, im, im]
+    _seq = iter([8.0, 10.0, 10.0]); t._feat_deg = lambda a, b: (next(_seq), 0.0, 100, 0.9, "x")
+    _sc, _hl, _dg, _tx = t._mid_sample(75.0)
+    check("中段法 75px/3÷10度＝2.5、頭段少 2 度", _sc == 2.5 and _hl == 2.0, (_sc, _hl, _dg))
+finally:
+    for k, v in _bak2.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

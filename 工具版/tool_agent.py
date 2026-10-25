@@ -943,6 +943,111 @@ class Tools(ExtraTools):
             y = self.yaw_acc + dx / self.dx_deg
             self.yaw_acc = (y + 180) % 360 - 180
 
+    def _drag_staged(self, dx, stages=3, fy=0.5, pause=0.3):
+        """10/26 03:0x 使用者：「每出 10 度就中斷掉轉頭來量測，去頭去尾只取中間那段算一度要多少像素」
+        → 一次壓著右鍵不放，分 stages 段拖，每段拖完停 pause 秒抓一張（按鍵不放、不會有新的起點死區）。回 [起點, 第1段後, 第2段後, …]。"""
+        import pydirectinput
+        frames = []
+        f0 = self.grab()
+        if f0 is None or not self.live:
+            return frames
+        frames.append(f0)
+        self._fg_ok()
+        bbox = self.win.client_bbox() if self.win else None
+        cx = (bbox["left"] + bbox["width"] // 2) if bbox else 960
+        cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
+        total = int(round(dx))
+        pydirectinput.moveTo(cx, cy)
+        time.sleep(0.03)
+        pydirectinput.mouseDown(button="right")
+        done = 0
+        try:
+            for k in range(1, stages + 1):
+                target = total * k // stages
+                seg = target - done
+                n = max(4, abs(seg) // 10)
+                sub = 0
+                for i in range(1, n + 1):
+                    t = seg * i // n
+                    pydirectinput.moveRel(t - sub, 0, relative=True)
+                    sub = t
+                    time.sleep(0.02)
+                done = target
+                time.sleep(pause)
+                frames.append(self.grab())
+        finally:
+            pydirectinput.mouseUp(button="right")
+            pydirectinput.moveTo(cx, cy)
+            time.sleep(0.08)
+        if self.dx_deg:
+            y = self.yaw_acc + dx / self.dx_deg
+            self.yaw_acc = (y + 180) % 360 - 180
+        return frames
+
+    def _mid_sample(self, px):
+        """壓著不放分三段轉 px 像素，各段用特徵點量實際度數 → (每度像素_中段, 頭段少轉度, 各段度數, 說明)。"""
+        fr = self._drag_staged(px, 3)
+        if len(fr) < 4 or any(f is None for f in fr):
+            return None, None, [], "抓不到畫面"
+        degs = []
+        for a, b in zip(fr, fr[1:]):
+            y, _p, n, c, _t = self._feat_deg(a, b)
+            degs.append(None if y is None else round(y, 1))
+        seg = px / 3.0
+        txt = "三段各量到 " + "／".join("量不出" if d is None else f"{d:+.1f}" for d in degs) + f" 度（每段送 {seg:+.0f} 像素）"
+        mid = degs[1]
+        if mid is None or abs(mid) < 2:
+            return None, None, degs, txt + "；中段量不出、這次不算"
+        scale = round(abs(seg) / abs(mid), 2)
+        head_loss = None if degs[0] is None else round(abs(mid) - abs(degs[0]), 1)
+        return scale, head_loss, degs, txt
+
+    def cal_mid(self, 度=""):
+        """量刻度中段：壓著右鍵不放轉 30 度、每 10 度停一下抓圖，去頭去尾只用中間 10 度那段的像素÷實測度數算每度 dx；
+        再反向轉回來量第二次。頭段比中段少轉的度數＝拖曳起點死區（像素）。"""
+        if self.image_path or not self.live:
+            return "離線／dry-run 不能量刻度中段"
+        deg = max(15.0, min(60.0, num(度, 30.0) or 30.0))
+        px = deg * self.dx_deg
+        s1, h1, d1, t1 = self._mid_sample(px)
+        time.sleep(0.3)
+        s2, h2, d2, t2 = self._mid_sample(-px)
+        out = [f"量刻度中段：壓著不放轉 {deg:.0f} 度（送 {px:.0f} 像素、分三段每段停 0.3 秒抓圖），只用中間那段算每度像素，再反向轉回來量第二次。",
+               f"去：{t1}" + (f" → 中段每度 {s1} 像素" if s1 else ""),
+               f"回：{t2}" + (f" → 中段每度 {s2} 像素" if s2 else "")]
+        heads = [h for h in (h1, h2) if h is not None]
+        scales = [x for x in (s1, s2) if x]
+        try:
+            self._append("刻度樣本.md", f"量刻度中段 {deg:.0f} 度｜去 {d1}｜回 {d2}｜中段每度 {s1}／{s2}｜頭段少轉 {h1}／{h2} 度｜目前 {self.dx_deg}")
+        except Exception:  # noqa: BLE001
+            pass
+        if not scales:
+            return "；".join(out) + "；兩次中段都量不出（畫面沒紋理或人太多），換個地方再量"
+        if len(scales) == 2 and abs(scales[0] - scales[1]) > 0.08 * max(scales):
+            return "；".join(out) + f"；去回兩次差太多（{s1} vs {s2}），不採用、刻度維持 {self.dx_deg}；換個有明顯東西的地方再量"
+        scale = round(sum(scales) / len(scales), 2)
+        dead = round(sum(heads) / len(heads) * scale, 1) if heads else None
+        out.append(f"中段法每度 dx ＝ {scale}（目前用 {self.dx_deg}）" + (f"；頭段比中段少轉 {sum(heads) / len(heads):.1f} 度＝每次拖曳起點死區約 {dead} 像素" if dead is not None else ""))
+        p = os.path.join(self.gdir, "記憶", "視角校準.json")
+        try:
+            cal = json.load(open(p, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cal = {}
+        _h = cal.get("水平") or {}
+        r18 = self._rule18("水平每度 dx（中段法）", scale, _h.get("量測每度dx"), self.dx_deg, False)
+        out.append(r18)
+        if r18.endswith("不採用；"):
+            return "；".join(out) + f"刻度維持 {self.dx_deg}"
+        self.dx_deg = scale
+        CUR_DX[0] = scale
+        cal["水平"] = {"一圈dx": int(round(scale * 360)), "每度dx": scale, "量測每度dx": scale, "方法": "中段法（壓著不放轉 30 度、取中間 10 度的像素÷實測度數）",
+                      "時間": datetime.now().strftime("%m/%d %H:%M"), "死區像素": dead}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=1)
+        self.startup["每度dx"] = scale
+        self.startup.pop("驗證", None)
+        return "；".join(out) + f"已採用、寫進校準檔；之後 轉(90) 會送 dx {90 * scale:.0f}。要確認就 驗一圈"
+
     # ---- 實測（2026-10-15 使用者：他要能確保工具出來的結果跟他腦中的一致 → 每次轉視角都量畫面實際位移）
     @staticmethod
     def shift_x(a, b):
