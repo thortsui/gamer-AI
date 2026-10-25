@@ -91,4 +91,7 @@ if im is not None:
 if im is not None:
     T.TOOLFIX = True
     _z, _n = t._walk_zoom(im, _zm, 0.5, 30.0); check("走 量測鏈 _walk_zoom 1.33", _z is not None and 1.15 <= _z <= 1.55, (_z, _n))
+_rs = '我想一下……先走。 {"看到":"門在中央","想":"因為x｜所以要y｜兩步:z","先記":[],"下兩步":[{"做":"走(1.0)","結果應該是":"到門前"}]} {"做":"視角移動到(0.85,0.55)","結果應該是":"對正"}'
+_o = T.json_from_reason(_rs); check("JSON 寫在推理裡→撈出", _o.get("看到") == "門在中央" and len(_o.get("下兩步", [])) == 1, _o)
+check("推理沒 JSON→空", T.json_from_reason("只有文字沒有物件") == {})
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

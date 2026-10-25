@@ -3823,6 +3823,47 @@ class Tools(ExtraTools):
 
 
 # ---------------------------------------------------------------- 主迴圈
+def json_from_reason(reason):
+    """10/25 09:2x 第 17 輪：大腦把整段 JSON 寫在推理裡、答案欄空白（這版 2/31 輪變空輪）→ 從推理尾端往前找最後一個「{"看到"」開頭、能解析的物件。"""
+    from play_agent import parse_json_loose
+    text = str(reason or "")
+    if not text:
+        return {}
+    import re
+    starts = [m.start() for m in re.finditer(r'\{\s*"看到"', text)]
+
+    def first_obj(i):                      # 從 i 開始配對大括號（跳過字串裡的括號）→ 第一個完整物件的字串
+        depth, in_str, esc = 0, False, False
+        for j in range(i, len(text)):
+            c = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[i:j + 1]
+        return text[i:]
+    for i in reversed(starts[-4:]):
+        for cand in (first_obj(i), text[i:]):
+            try:
+                o = parse_json_loose(repair_json(cand)) or {}
+            except Exception:  # noqa: BLE001
+                o = {}
+            if isinstance(o, dict) and o.get("看到") is not None:
+                return o
+    return {}
+
+
 def repair_json(raw):
     """他兩種常見的壞 JSON（01:3x 統計 11/120 輪）：
     1. 「想」欄寫成 …｜結果應該是": "畫面會變…"  → 引號提早關掉；把 結果應該是": " 改回 結果應該是:
@@ -4308,11 +4349,18 @@ def main():
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
         o = parse_json_loose(repair_json(raw)) or {}
+        from_reason = False
+        if not (isinstance(o, dict) and (o.get("看到") or o.get("下兩步") or o.get("用"))) and reason:
+            o2 = json_from_reason(reason)
+            if o2:
+                o, from_reason = o2, True
         seen, think = str(o.get("看到") or o.get("s") or "")[:80], str(o.get("想") or "")[:300]
         calls = o.get("用") or o.get("a") or []
         if isinstance(calls, str):
             calls = [calls]
         pre, steps, plan_notes = [], [], []
+        if from_reason:
+            plan_notes.append("✗ 這輪的 JSON 寫在思考裡、答案欄是空的（程式從思考裡撈出來用了）；JSON 要放在最後的答案，不要放在思考裡")
         if plan_n:
             pre = o.get("先記") or []
             pre = [pre] if isinstance(pre, (str, dict)) else list(pre)
