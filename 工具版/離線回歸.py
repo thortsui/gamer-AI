@@ -477,4 +477,19 @@ _tw66.update([("你咕可咕以咕再咕加口", 0.90, 0.20)]); _, _ev66 = _tw66
 check("「你咕可咕以咕再咕」不算任務字換", _ev66 is None and _tw66.current == ["完成簽到"], (_ev66, _tw66.current))
 _, _ev66 = _tw66.update([("治療病人", 0.91, 0.21)])
 check("正常任務字照樣換", _ev66 is not None and _ev66["新"] == "治療病人", _ev66)
+# 第 67 輪：分段轉 畫面沒變＝鏡頭沒轉，不照送出算
+_sent = []
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []; t._dead_n = 0; t._dead_since = ""
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 0.0; t._shift = lambda a, b, d: (0.0, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
+    t._feat_deg = lambda a, b, want=None: (None, None, 0, 0.0, "量不出"); t._verify_dump = lambda *a, **k: None
+    _m, _p, _d, _st, _lu = t._turn_chunks(90.0)
+    check("黑畫面分段轉：鏡頭沒轉、合計 0、算進全沒反應", "鏡頭沒轉" in _p and abs(_m) < 0.5 and _st and t._dead_n == 1, (_p, _m, t._dead_n))
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []; t._dead_n = 0; t._dead_since = ""
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

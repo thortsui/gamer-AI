@@ -2919,6 +2919,13 @@ class Tools(ExtraTools):
                 self._drag(send_deg * self.dx_deg, 0, fy=0.25)
                 after = self._settled()
                 dd = self.diff(before, after)
+            if dd < 3:
+                # 10/27 06:3x 第 67 輪：監看畫面全黑時 轉(90) 每段「量不出、照送出算 +30」、合計寫「你實際轉了約 +30 度」——畫面根本沒變。
+                #   單拖那條路早就會說「鏡頭沒轉」，分段這條沒有 → 兩次拖畫面變化都 <3 就停、不算進合計、算進全沒反應累計
+                parts.append(f"第{i + 1}段 拖了兩次畫面都沒變（變化 {dd:.0f}）＝**鏡頭沒轉**，停在這裡" + self._dead_mark(True))
+                self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 量不出=True, 特徵度=None, 鏡頭沒轉=True)
+                stopped = True
+                break
             k_txt = f"（前面只轉到送出的 {rc * 100:.0f}%，這段多送 {(k - 1) * 100:.0f}%：送 {send_deg:+.0f} 度）" if k > 1.0 else ""
             sh, _ = self._shift(before, after, dd)
             done += chunk
