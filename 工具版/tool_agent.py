@@ -384,6 +384,7 @@ class Tools(ExtraTools):
         self._ocr = None
         self._eyes = None
         self.pitch_acc = 0.0            # 水平儀：仰 累計的度數（正＝抬頭）；修水平／水平歸零／量刻度 歸零
+        self.pitch_unknown = False      # 第 62 輪：修水平 沒修好之後水平儀不可信、上下限制先不套用
         # 10/23 使用者：「網站上製作一個水平儀 上面標注著他覺得自己目前面對的角度（包含是否低頭等）」
         #   左右：每次拖曳都照他的刻度換成度數累計（正＝右轉），開工測試時歸零＝「開工那時面對的方向」；上下用 pitch_acc
         self.yaw_acc = 0.0
@@ -2697,6 +2698,7 @@ class Tools(ExtraTools):
             time.sleep(0.3)
             self._depth_log(種類="回水平", 離底像素=pos, 全程=est, 拉=pos - est // 2)
             self.pitch_acc = 0.0
+            self.pitch_unknown = False
         else:
             # 10/25 07:0x：找不到極限時的「頂到」多半是誤判（沒紋理、動 0 像素就停在離頂 40 像素）→ 原本當成在底、往上拉半程＝拉到天花板，
             #   之後水平儀還歸零、他接下來每次低頭都被 ±45 限制擋住。改成把掃過的像素原路拉回、水平儀維持量之前的值
@@ -3037,6 +3039,8 @@ class Tools(ExtraTools):
 
     def _pitch_room(self, d):
         """想轉 d 度（正＝抬頭）→ 限制內實際能轉幾度"""
+        if getattr(self, "pitch_unknown", False):          # 第 62 輪：修水平 沒修好之後基準不可信，不拿它擋
+            return d
         L = self._pitch_lim()
         return max(-L, min(L, self.pitch_acc + d)) - self.pitch_acc
 
@@ -3056,6 +3060,8 @@ class Tools(ExtraTools):
         r = self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15) + lim_note
         self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + d))
         lv = ("水平" if abs(self.pitch_acc) < 3 else f"{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度")
+        if getattr(self, "pitch_unknown", False):
+            return r + "｜水平儀：修水平 沒修好之後不可靠、這次沒套 ±45 限制；畫面水平時叫 水平歸零"
         return r + f"｜水平儀（程式累計你送的 仰）：現在約 {lv}；歪了用 修水平 一次拉回"
 
     VSTEP = 10            # 11:5x 使用者：每次 10 像素慢慢動
@@ -3287,6 +3293,7 @@ class Tools(ExtraTools):
                 self._drag(0, -delta)
                 time.sleep(0.3)
                 self.pitch_acc = 0.0
+                self.pitch_unknown = True       # 第 62 輪：不一定水平 → 不拿水平儀擋
                 lv = (f"**不一定水平**：往上只走 {top} 像素就看不出鏡頭在動（天花板／牆沒紋理、太早當成頂到），跟記的全程 {ref} 差太多，不信它；"
                       f"改照記的全程從底算、往{'上' if delta > 0 else '下'}補 {abs(delta)} 像素。看下一張畫面：滿是天花板就 仰(-15)、滿是地板就 仰(15)")
                 self.level_meas = (datetime.now().strftime("%H:%M"), lv)
@@ -3303,11 +3310,16 @@ class Tools(ExtraTools):
             time.sleep(0.3)
             if TOOLFIX and not top:
                 # 10/24 20:2x 工具修正：整片重複花紋（地磚、地毯）時量不出鏡頭在動 → 原本照樣寫「已歸零」，他以為修好了
+                # 10/27 01:0x 第 62 輪：01:01 往上送了 2000 像素還在抬頭 44 度、水平儀卻寫 0；他 仰(-44) 回到水平後水平儀變「低頭 44」，
+                #   之後 ±45 限制會照錯基準擋他 → 沒修好時標不可靠、上下限制先不套用，等 水平歸零 或修好
                 self.pitch_acc = 0.0
+                self.pitch_unknown = True
                 lv = (f"**沒修好**：往上找不到頂（畫面是重複花紋或被擋，量不出鏡頭有沒有在動），照記的全程 {full} 從底往上拉到一半（往上已送 {steps_up * self.VSTEP} 像素），"
-                      "**現在不一定是水平**——看下一張畫面：看得到地平線／牆和天花板各一半才算水平；還是滿地板就用 仰(30) 自己抬")
+                      "**現在不一定是水平**——看下一張畫面：看得到地平線／牆和天花板各一半才算水平；還是滿地板就用 仰(30) 自己抬；"
+                      "**水平儀暫時不可靠，上下 ±45 的限制先不套用**，畫面水平時叫 水平歸零 它才會重新算")
             else:
                 self.pitch_acc = 0.0
+                self.pitch_unknown = False
                 lv = (f"回到水平（當場量到全程 {full} 像素，從頂端往下拉一半）" if top else
                       f"往上沒找到頂（畫面看不出停），照記的全程 {full} 從底往上拉到一半，可能不準")
             self.level_meas = (datetime.now().strftime("%H:%M"), lv)
@@ -3609,6 +3621,7 @@ class Tools(ExtraTools):
         """水平歸零：你確認畫面已經水平，把水平儀（仰 的累計）歸零。"""
         old = self.pitch_acc
         self.pitch_acc = 0.0
+        self.pitch_unknown = False
         return f"水平儀歸零（原本累計 {old:+.0f} 度）"
 
     def _new_word_checker(self, start):
