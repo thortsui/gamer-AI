@@ -845,6 +845,9 @@ class Tools(ExtraTools):
             out += self._nomove_note("沒變" in out or "看不出" in out)
         if k == "e" and ("沒變" in out or "看不出" in out) and "有反應**" not in out:
             out += self._eta_note()
+        elif k == "e" and ("有反應" in out or "任務字變了" in out):
+            # 10/26 16:5x 使用者：「會去互動的東西都要拍照記錄」→ 按了有反應就提醒（只告訴）
+            out += "（使用者交代：按了有反應的東西要 記長相 拍下來、再 記互動物 寫怎麼用，之後 找長相／走過去 直接用照片）"
         return f"按 {k} {d:.1f} 秒；" + out
 
     _eta = None

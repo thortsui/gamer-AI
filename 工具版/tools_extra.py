@@ -805,14 +805,24 @@ class ExtraTools:
             return "記流程 要給 名字,步驟（用 → 隔開）"
         return self._append("流程.md", f"{名字}｜" + "→".join(steps)) + "。想一次做完就 新工具(" + 名字 + ",用途," + "→".join(steps) + ")"
 
+    def _look_reminder(self, name):
+        """10/26 16:5x 使用者：「會去互動、或要當標點的東西都要做成點、拍照記錄」→ 記互動物／登記物品／標點 時沒有這個名字的長相就提醒（只告訴）。"""
+        try:
+            nm = re.sub(r"[\/:*?\"<>|]+", "", str(name)).strip()[:20]
+            d = os.path.join(self.mdir, "長相")
+            have = os.path.isdir(os.path.join(d, nm)) if nm else False
+        except Exception:  # noqa: BLE001
+            have = True
+        return "" if have else f"（使用者交代：互動的東西／標點都要拍照——還沒有「{name}」的長相，接著 記長相({name},編號或 x1,y1,x2,y2) 把它框起來存照片）"
+
     def mem_interact(self, 名稱="", 功能="", 用法=""):
-        return self._append("互動物.md", f"{名稱}｜功能:{功能}｜用法:{用法}")
+        return self._append("互動物.md", f"{名稱}｜功能:{功能}｜用法:{用法}") + self._look_reminder(名稱)
 
     def mem_touch(self, 名稱="", 功能="", 用法=""):
         return self._append("觸碰物.md", f"{名稱}｜站上去:{功能}｜{用法}")
 
     def mem_landmark(self, 名稱="", 樣子="", 方向=""):
-        return self._append("標點.md", f"{名稱}｜樣子:{樣子}｜方向:{方向}｜（這版沒座標地圖，只記文字）")
+        return self._append("標點.md", f"{名稱}｜樣子:{樣子}｜方向:{方向}｜（這版沒座標地圖，只記文字）") + self._look_reminder(名稱)
 
     def mem_space(self, 名稱="", 為什麼=""):
         self._append("空間.md", f"切到:{名稱}｜{為什麼}")
@@ -1048,6 +1058,7 @@ class ExtraTools:
         ret += f"。之後你的 看到 寫到「{name}」" + (f"或別名" if it.get("別名") else "") + "、或描述畫面認出它，面板【登記的物品】會直接提醒你"
         if str(目標).strip():                            # 順便記長相
             ret += NL + self.mem_look(name, 目標)
+        ret += self._look_reminder(name)
         return ret
 
     def items_panel(self, seen=""):
