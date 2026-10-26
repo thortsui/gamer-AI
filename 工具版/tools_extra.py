@@ -562,6 +562,7 @@ class ExtraTools:
             return (f"走過去「{name}」：目標那一塊 ({x:.2f},{y:.2f}) 沒有紋理（整片平的、對比 {_sd:.0f}），盯不住、會到處認錯；"
                     "換一個有紋理的點（邊緣、有字、有圖案的地方），或先 描述畫面 用編號")
         is_new = self._new_word_checker(im)
+        seen_new = []          # 第 63 輪：路上冒出的、不像 E 提示的字（走完一起回報、不因此停）
         log, reason, lost = [], "", 0
         for i in range(8):
             yaw, _ = self._angles_to(x, 0.5, im.width, im.height)
@@ -604,16 +605,23 @@ class ExtraTools:
             log.append(f"第{i + 1}步 在 ({x:.2f},{y:.2f}) 大小 {size:.1f} 倍（相似度 {sc:.2f}）")
             words = self._words(im)
             new = [w for w in words if is_new(w)]
-            if new:
-                reason = "跳出原本沒有的字：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:4])
+            # 10/27 01:5x 第 63 輪：10/26～27 因「跳出原本沒有的字」停下 23 次，全是 OCR 雜訊／玩家名／理智警語／招牌（「公室」「火焰 ;」「, ~ aoye 8」），
+            #   之後 0 次長按有反應 → 只有像 E 提示的字（有獨立的 E、或 長按／按 E）才停；其他新字記下來、走完再一起回報
+            prompt_like = [w for w in new if re.search(r"(^|[\s\[（(])E([\s\]）)]|$)|長按|按 ?E", str(w))]
+            if prompt_like:
+                reason = "跳出像 E 提示的字：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in prompt_like[:4])
                 break
+            for w in new[:3]:
+                if w not in seen_new:
+                    seen_new.append(w)
             if size >= 2.5 or tpl.shape[0] >= 0.4 * GH:
                 reason = f"它已經變大 {size:.1f} 倍＝到面前了"
                 break
         else:
             reason = "走滿 8 步"
         self._append("刻度樣本.md", f"走過去 {name}｜{len(log)} 步｜停：{reason[:50]}")
-        return (self._pop_look_how() + f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}。現在的畫面下一輪給你"
+        extra = ("；路上冒出的字（沒因此停）：" + "、".join(f"「{w}」" for w in seen_new[:5])) if seen_new else ""
+        return (self._pop_look_how() + f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}{extra}。現在的畫面下一輪給你"
                 + ("；到了就試 長按(e,1.5) 或 讀字" if "面前" in reason or "字" in reason else ""))
 
     # ---------------- 學習

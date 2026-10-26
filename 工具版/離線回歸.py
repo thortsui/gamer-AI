@@ -435,4 +435,12 @@ check("水平儀不可靠時不擋", t._pitch_room(-20) == -20)
 t.pitch_unknown = False
 check("水平儀可靠時照擋", abs(t._pitch_room(-20)) < 20)
 t.pitch_acc = 0.0
+# 第 63 輪：走過去 新字只在像 E 提示才停
+import re as _re63
+_pat = r"(^|[\s\[（(])E([\s\]）)]|$)|長按|按 ?E"
+check("「公室」不像 E 提示", not _re63.search(_pat, "公室"))
+check("「, ~ aoye 8」不像 E 提示", not _re63.search(_pat, ", ~ aoye 8"))
+check("「E estamp」像 E 提示", bool(_re63.search(_pat, "E estamp")))
+check("「[E] 開啟」像 E 提示", bool(_re63.search(_pat, "[E] 開啟")))
+check("「長按E」像 E 提示", bool(_re63.search(_pat, "長按E")))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
