@@ -832,13 +832,24 @@ class Tools(ExtraTools):
                     z_txt += "；" + self._v2("走路放大倍數", f"{z:.1f}" if z else "量不出", f"{z2:.1f}" if z2 else "量不出", ok)
                 else:
                     z_txt += "；" + self._v2("走了有沒有動", f"{dd:.0f}", f"{dd2:.0f}", (dd >= 2) == (dd2 >= 2))
-            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + z_txt
+            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" + self._nomove_note(True) if dd < 2 else self._nomove_note(False)) + z_txt
         out = self._changed(before, noise)
+        if k in ("a", "d"):
+            out += self._nomove_note("沒變" in out or "看不出" in out)
         if k == "e" and ("沒變" in out or "看不出" in out) and "有反應**" not in out:
             out += self._eta_note()
         return f"按 {k} {d:.1f} 秒；" + out
 
     _eta = None
+    _nomove = 0
+
+    def _nomove_note(self, nomove):
+        """10/26 11:5x 第 43 輪：11:36～11:48 走／右移／左移 連 8 輪畫面變化 ≤2（被碰撞體夾住），每次只回「沒變＝可能被擋」他就換個方向再試
+        → 連續第 3 次起在回傳加上累計次數（只給讀數）。"""
+        self._nomove = self._nomove + 1 if nomove else 0
+        if self._nomove >= 3:
+            return f"（**已連續 {self._nomove} 次 走／橫移 畫面都沒變＝人沒在動**，換方向平移也一樣就是被卡住了）"
+        return ""
 
     def _eta_note(self):
         """長按 E 沒反應時，把上次 走 量到的距離讀數帶上（只給讀數，不替他決定）。3 分鐘內的才算。"""

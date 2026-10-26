@@ -228,4 +228,7 @@ try:
 finally:
     for k, v in _bak6.items():
         setattr(t, k, v)
+t._nomove = 0
+check("連續沒動 第 3 次才提示", t._nomove_note(True) == "" and t._nomove_note(True) == "" and "連續 3 次" in t._nomove_note(True))
+check("有動就歸零", t._nomove_note(False) == "" and t._nomove == 0)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
