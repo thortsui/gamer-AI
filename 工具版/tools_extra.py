@@ -265,7 +265,12 @@ class ExtraTools:
                 return f"描述畫面是 {age:.0f} 秒前的，畫面可能已經變了；先重新 描述畫面 再用編號"
             it = next((i for i in fresh if i["編號"] == int(mn.group(1))), None)
         elif q and not self._look_name(q):
-            it = next((i for i in fresh if i["名稱"] and (q in i["名稱"] or i["名稱"].split("（")[0].split(" ")[0] in q)), None)   # 10/25 審查：空名稱不比
+            # 10/27 03:5x 第 64 輪：03:36 走過去(藍色發光框) 被配到「[1]（左側按鈕）」——名稱第一個 token 是空字串時「"" in q」永遠成立 → 第一項中獎。
+            #   改：q 在名稱裡、或名稱的頭（≥2 字）在 q 裡，才算配到
+            def _head(n):
+                h = n.split("（")[0].strip().split(" ")[0].strip("[]（）() ")
+                return h if len(h) >= 2 else None
+            it = next((i for i in fresh if i["名稱"] and (q in i["名稱"] or (_head(i["名稱"]) and _head(i["名稱"]) in q))), None)   # 10/25 審查：空名稱不比
         if it:
             return it["x"], it["y"], f"[{it['編號']}]{it['名稱']}"
         if q and not mn:                                 # 20:xx 記過長相的東西：直接拿照片在現在的畫面找

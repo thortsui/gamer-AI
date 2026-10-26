@@ -443,4 +443,19 @@ check("「, ~ aoye 8」不像 E 提示", not _re63.search(_pat, ", ~ aoye 8"))
 check("「E estamp」像 E 提示", bool(_re63.search(_pat, "E estamp")))
 check("「[E] 開啟」像 E 提示", bool(_re63.search(_pat, "[E] 開啟")))
 check("「長按E」像 E 提示", bool(_re63.search(_pat, "長按E")))
+# 第 64 輪：走過去 名稱對應不能因為空 token 配到第一項
+import time as _tm64
+_bak = {k: getattr(t, k, None) for k in ("desc_items", "desc_at")}
+try:
+    t.desc_items = [{"編號": 1, "名稱": " [商店] 左側按鈕", "x": 0.05, "y": 0.41}, {"編號": 2, "名稱": "角色", "x": 0.3, "y": 0.58}, {"編號": 3, "名稱": "發光藍框 (0.48,0.42)", "x": 0.48, "y": 0.42}]
+    t.desc_at = _tm64.time()
+    _r = t._resolve_target("藍色發光框")
+    check("名稱沒有的東西不配到第一項", isinstance(_r, str) and "沒有「藍色發光框」" in _r, _r)
+    _r = t._resolve_target("發光藍框")
+    check("名稱有的配對", not isinstance(_r, str) and _r[2].startswith("[3]"), _r)
+    _r = t._resolve_target("商店")
+    check("頭兩字配對", not isinstance(_r, str) and _r[2].startswith("[1]"), _r)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
