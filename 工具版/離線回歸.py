@@ -209,4 +209,13 @@ if im is not None:
     _vy2, *_ = _V.estimate_yaw_pitch(im.convert("L"), _l20, sweep=False); check("低頭 60 度時左轉 20 度→量到 -20", _vy2 is not None and -23 <= _vy2 <= -17, _vy2)
     _p10 = Image.fromarray(_V.synth_rotate(_g4, 0.0, 10.0))
     _vy3, _vp3, *_ = _V.estimate_yaw_pitch(im.convert("L"), _p10, sweep=False); check("純抬頭 10 度不被當成繞垂直軸", _vy3 is not None and abs(_vy3) < 2 and 8 <= _vp3 <= 12, (_vy3, _vp3))
+if im is not None:
+    import cv2 as _cv5
+    _gb = _cv5.GaussianBlur(_np3.array(im.convert("L")), (0, 0), 12)          # 沒紋理的牆
+    _turned = _V.synth_hud(_gb, _V.synth_rotate(_gb, 25.0))                   # 轉了 25 度、HUD 與中央角色釘著
+    _ty, _tp, _tn, _tc, _td = _V.estimate_yaw_pitch(Image.fromarray(_gb), Image.fromarray(_turned), sweep=False)
+    check("沒紋理轉 25 度→不說 0 度（量不出或量到）", _ty is None or _ty >= 10, (_ty, _tc, _td.get("reason"), _td.get("整張差")))
+    _same = _V.synth_hud(_gb, _np3.clip(_gb.astype(_np3.int16) + _np3.random.RandomState(2).randint(-3, 4, _gb.shape), 0, 255).astype(_np3.uint8))
+    _sy, _sp, _sn, _sc, _sd = _V.estimate_yaw_pitch(Image.fromarray(_gb), Image.fromarray(_same), sweep=False)
+    check("沒轉（只有雜訊）→ 0 度", _sy is not None and abs(_sy) < 1, (_sy, _sc))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

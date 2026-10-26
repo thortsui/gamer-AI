@@ -144,6 +144,21 @@ def black_mask(gray: np.ndarray) -> np.ndarray:
     return cv2.erode(valid, np.ones((25, 25), np.uint8))
 
 
+def global_change(g1: np.ndarray, g2: np.ndarray, mask=None) -> float:
+    """整張（遮罩內）平均絕對差，縮到 160×90 算；沒轉頭時角色待機動畫約 2～7，轉了頭通常 >15。
+    10/26 08:1x 第 39 輪：沒紋理的牆前轉頭，ORB 只對得上釘在畫面上的字（E框、機台字）→ 靜止點 ≥20 就回「0 度、可信 1.0」，其實轉了 30 度。"""
+    a = cv2.resize(g1, (160, 90)).astype(np.float32)
+    b = cv2.resize(g2, (160, 90)).astype(np.float32)
+    if mask is not None:
+        m = cv2.resize(mask, (160, 90), interpolation=cv2.INTER_NEAREST) > 0
+        if m.sum() > 100:
+            return float(np.abs(a - b)[m].mean())
+    return float(np.abs(a - b).mean())
+
+
+STATIC_OK_CHANGE = 10.0   # 整張差低於這個才准用「靜止點很多＝沒轉」的判斷
+
+
 def center_static(g1: np.ndarray, g2: np.ndarray) -> float:
     """中央角色區前後的 NCC：高＝那塊釘在畫面上（第三人稱的自己）。"""
     H, W = g1.shape
@@ -371,9 +386,14 @@ def estimate_yaw_pitch(before, after, third_person=None, sweep: bool = True):
                 best = cand
 
     if best is None or best[0] <= 0.0:
-        # 動的點太少：靜止點很多就是根本沒轉
+        # 動的點太少：靜止點很多就是根本沒轉——但整張畫面差很大就不是「沒轉」，是場景沒紋理、只有釘在畫面上的字對得上
         if n_static >= 20:
-            return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
+            gc = global_change(g1, g2, base)
+            diag["整張差"] = round(gc, 1)
+            if gc < STATIC_OK_CHANGE:
+                return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
+            diag["reason"] = "只有釘在畫面上的東西對得上、場景沒紋理（整張差 %.0f）" % gc
+            return None, None, 0, 0.0, diag
         return None, None, 0 if best is None else best[1], 0.0, diag
 
     # 光度驗證：每個候選答案都扭過去疊疊看，挑疊得最好的（假點群湊出的答案疊不上）；疊得差的再把可信度打折
@@ -400,8 +420,8 @@ def estimate_yaw_pitch(before, after, third_person=None, sweep: bool = True):
         diag["corroborated"] = len(others)
     diag.update({"moving_inliers": n, "iqr_yaw": iqr_y, "iqr_pitch": iqr_p, "total_rot": total, "pre_turn": pre})
     diag.update({k: v for k, v in LAST_FIT.items() if k in ("繞垂直軸", "逐點yaw", "俯仰估計", "軸")})
-    # 靜止點遠多於動的點、而且算出來幾乎沒轉 → 當作沒轉
-    if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3:
+    # 靜止點遠多於動的點、而且算出來幾乎沒轉 → 當作沒轉（整張差大就不算）
+    if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3 and global_change(g1, g2, base) < STATIC_OK_CHANGE:
         return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
     return round(yaw, 2), round(pitch, 2), n, conf, diag
 
@@ -451,13 +471,13 @@ def estimate_yaw_pitch_loftr(before, after, third_person=None):
     n_static = int(static.sum())
     r = _fit_rotation(p1[~static], p2[~static], W, H) if (~static).sum() >= MIN_INLIERS else None
     if r is None:
-        if n_static >= 20:
+        if n_static >= 20 and global_change(g1, g2, base) < STATIC_OK_CHANGE:
             return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
         return None, None, int((~static).sum()), 0.0, diag
     yaw, pitch, n, conf_, iqr_y, iqr_p, total = r
     diag.update({"moving_inliers": n, "iqr_yaw": iqr_y, "static": n_static})
     diag.update({k: v for k, v in LAST_FIT.items() if k in ("繞垂直軸", "逐點yaw", "俯仰估計", "軸")})
-    if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3:
+    if n_static >= 3 * n and n_static >= 30 and abs(yaw) < 3 and abs(pitch) < 3 and global_change(g1, g2, base) < STATIC_OK_CHANGE:
         return 0.0, 0.0, n_static, _conf(n_static, 0.0), diag
     return round(yaw, 2), round(pitch, 2), n, conf_, diag
 
