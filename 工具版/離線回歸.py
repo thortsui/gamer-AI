@@ -389,4 +389,24 @@ check("轉頭有量到就解除", t._dead_n == 0 and t._dead_mark(False) == "")
 t._turn_record(20, 0)
 check("轉頭量到 0 算沒反應", t._dead_n == 1)
 t._dead_n = 0; t._dead_since = ""; t._nomove = 0; t._turn_hist = []
+# 第 60 輪：esc 不歸零全沒反應累計
+t._dead_n = 0; t._dead_since = ""; t._nomove = 0
+for _i in range(5):
+    t._dead_mark(True)
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "diff")}
+try:
+    t.live, t.image_path = True, None
+    t.grab = lambda: im; t.diff = lambda a, b: 40.0        # 按了畫面有變（Roblox 選單打開）
+    _r = t._move("esc", 0.1, 0.1, 0.1)
+    check("按 esc 畫面變了也不歸零", t._dead_n == 5, (t._dead_n, _r[:80]))
+    t.diff = lambda a, b: 2.0
+    _r = t._move("w", 0.3, 0.3, 0.3)
+    check("走 畫面變化 2（雜訊）不歸零", t._dead_n == 6, (t._dead_n, _r[:80]))
+    t.diff = lambda a, b: 40.0
+    _r = t._move("w", 0.3, 0.3, 0.3)
+    check("走 有動才歸零", t._dead_n == 0, (t._dead_n, _r[:80]))
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._dead_n = 0; t._dead_since = ""; t._nomove = 0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

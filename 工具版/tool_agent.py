@@ -839,7 +839,12 @@ class Tools(ExtraTools):
                     z_txt += "；" + self._v2("走路放大倍數", f"{z:.1f}" if z else "量不出", f"{z2:.1f}" if z2 else "量不出", ok)
                 else:
                     z_txt += "；" + self._v2("走了有沒有動", f"{dd:.0f}", f"{dd2:.0f}", (dd >= 2) == (dd2 >= 2))
-            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" + self._nomove_note(True) if dd < 2 else self._nomove_note(False)) + z_txt
+            # 10/27 00:2x 第 60 輪：按(esc) 開 Roblox 選單「畫面有變」把「連續 N 個動作全沒反應」歸零（00:03→00:06 重新數），他每按一次 esc 讀數就消失
+            #   → 只有移動鍵（w/a/s/d/space）才算進走路累計與全沒反應累計；其他鍵不碰計數
+            #   真正歸零的是 00:05 走(0.3) 畫面變化剛好 2（雜訊）被當「有動」→ 累計用 ≤2 算沒動（跟第 43 輪「畫面變化 ≤2」一致）
+            _mv = str(k).lower() in ("w", "a", "s", "d", "space")
+            _nm = (self._nomove_note(dd <= 2) if _mv else "")
+            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + _nm + z_txt
         out = self._changed(before, noise)
         if k in ("a", "d"):
             out += self._nomove_note("沒變" in out or "看不出" in out)

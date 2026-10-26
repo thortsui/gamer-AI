@@ -18,7 +18,9 @@ d = os.path.join(ROOT, "專案", a.game, "記憶", "工具版")
 f = a.file or os.path.join(d, (a.date or sorted(x for x in os.listdir(d) if re.fullmatch(r"\d{4}-\d\d-\d\d\.jsonl", x))[-1][:-6]) + ".jsonl")
 R = [json.loads(l) for l in open(f, encoding="utf-8") if l.strip()]
 if a.since:
-    R = [r for r in R if r["時間"] >= a.since]
+    # 10/27 00:2x：跨午夜後 jsonl 仍是啟動那天的檔、時間欄只有 HH:MM → 用檔案順序：從第一筆 ≥ since 起全算（不用字串比較）
+    _i = next((i for i, r in enumerate(R) if r["時間"] >= a.since), None)
+    R = R[_i:] if _i is not None else []
 
 
 def seg(rows, label):

@@ -56,7 +56,8 @@ def main():
         r["_miss"] = cur - prev_miss if cur >= prev_miss else cur   # 變小＝程序重啟、從 0 重算
         prev_miss = cur
     if a.since:
-        recs = [r for r in recs if r["時間"] >= a.since]
+        _i = next((i for i, r in enumerate(recs) if r["時間"] >= a.since), None)   # 10/27：跨午夜用檔案順序
+        recs = recs[_i:] if _i is not None else []
     if not recs:
         print("沒有紀錄")
         return
