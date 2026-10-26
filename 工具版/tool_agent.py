@@ -1014,6 +1014,9 @@ class Tools(ExtraTools):
             return "離線／dry-run 不能量刻度中段"
         deg = max(15.0, min(60.0, num(度, 30.0) or 30.0))
         px = deg * self.dx_deg
+        can, dchk = self._cam_can_turn()
+        if not can:
+            return f"量刻度中段：{self.CAM_LOCKED_MSG}（試拖 40 像素畫面變化 {dchk:.0f}）"
         s1, h1, d1, t1 = self._mid_sample(px)
         time.sleep(0.3)
         s2, h2, d2, t2 = self._mid_sample(-px)
@@ -2363,6 +2366,26 @@ class Tools(ExtraTools):
         print(f"   🧪 人稱回報：{v}｜開工數值：{self.startup_text()}")
         return f"記下：{v}{note}。開工數值現在：{self.startup_text()}"
 
+    def _cam_can_turn(self):
+        """10/26 08:5x 第 40 輪：攝影機監看模式／面板鎖住時鏡頭完全轉不動，驗一圈 900 卻回「回到原點、位移 0%」、量刻度 900／900 二次一致
+        → 量之前先拖 40 像素看畫面有沒有變（再拖回來）。回 (轉得動, 畫面變化)。"""
+        a = self.grab()
+        if a is None:
+            return True, 0.0
+        time.sleep(0.25)
+        a2 = self.grab() or a
+        noise = self.diff(a, a2)
+        self._drag(40, 0)
+        time.sleep(0.25)
+        b = self.grab()
+        d = self.diff(a2, b)
+        self._drag(-40, 0)
+        time.sleep(0.2)
+        return d >= max(3.0, noise * 2 + 2), d
+
+    CAM_LOCKED_MSG = ("**鏡頭轉不動**（拖了畫面沒變）——這次不算、不是回到原點／不是刻度對。可能有面板、選單或監看模式把滑鼠鎖住；"
+                      "先看畫面上有什麼擋著、用 關掉 或點面板自己的按鈕，鏡頭會轉了再量")
+
     def cal_loop(self, dx=""):
         """驗一圈：他自己算「轉 360 度要送多少 dx」填進來（不寫＝照目前刻度 360×每度dx），程式拖完比對起點畫面，
         回報有沒有回到原點、偏多少（2026-10-15 11:1x 使用者：「他自己需要試試看，按照他的計算，測試轉 360 度是否回到原點，製作成工具」）。"""
@@ -2380,6 +2403,9 @@ class Tools(ExtraTools):
         start0 = self.grab()
         if start0 is None:
             return "抓不到畫面"
+        can, dchk = self._cam_can_turn()
+        if not can:
+            return f"驗一圈：{self.CAM_LOCKED_MSG}（試拖 40 像素畫面變化 {dchk:.0f}）"
         # 10/16 13:0x：大廳裡 8 次驗一圈，畫面差 40～69、位移卡在 ±47% 上限也照給「調大／調小」，最後一次差 50、位移 4% 被判「回到原點」
         # → 他把刻度從 2.5 改成 5.25。改：先量背景（沒轉時 0.4 秒內本來就動多少），差要在背景範圍內＋位移 <4% 才算回到原點
         time.sleep(0.4)
@@ -2488,6 +2514,9 @@ class Tools(ExtraTools):
         start = self.grab()
         if start is None:
             return "抓不到畫面"
+        can, dchk = self._cam_can_turn()
+        if not can:
+            return f"量刻度：{self.CAM_LOCKED_MSG}（試拖 40 像素畫面變化 {dchk:.0f}）"
         loop1 = self._loop_once()
         loop_dx = loop1
         v2_note = ""
@@ -3667,7 +3696,7 @@ class Tools(ExtraTools):
         after = self.grab()
         if self.diff(before, after) < 2:
             # 10/25 審查：原本自動 捲(-3) 會把刻度／深度／人稱整套作廢（使用者 10/18 也說少用中鍵縮放）
-            return "按 esc 畫面沒變（可能本來就沒有面板）；面板還在就用 點字 點它的叉叉或「關閉」"
+            return "按 esc 畫面沒變（可能本來就沒有面板）；面板還在就用 點字 點它的叉叉或「關閉」" + self._panel_buttons(after)
         # 10/20 07:1x：購買視窗按 esc 沒關到，反而打開 Roblox 平台選單（帳號／邀請好友／ESC 繼續），他花兩輪才關回
         # → 按完看一下，是平台選單就再按一次 esc 關回，回傳講清楚
         menu = ("帳號", "邀請好友", "在此伺服器中", "協助")
@@ -3677,8 +3706,20 @@ class Tools(ExtraTools):
             still = sum(1 for w in self._words(self.grab()) if any(m in w for m in menu)) >= 2
             return ("關掉面板：按 esc 打開的是 Roblox 平台選單（帳號／邀請好友／設定），不是遊戲裡的視窗；"
                     + ("已再按一次 esc，選單還在——點底部藍色「繼續」" if still else "已再按一次 esc 關回遊戲")
-                    + "。遊戲裡的視窗（購買道具等）要點它右上角的 X")
+                    + "。遊戲裡的視窗（購買道具等）要點它右上角的 X" + ("" if still else self._panel_buttons(self.grab())))
         return "關掉面板：" + r
+
+    def _panel_buttons(self, im):
+        """10/26 08:5x 第 40 輪：監看模式底部有「< 辦理入住 >」「出口」，esc 關不掉、他 14 輪在關掉／走／轉之間打轉
+        → 把畫面下半（HUD 左下角以外）讀到的字列出來，讓他自己決定點哪個（只給讀數）。"""
+        try:
+            words = self._words(im)
+        except Exception:  # noqa: BLE001
+            return ""
+        cand = [(w, xy) for w, xy in words.items() if xy[1] >= 0.70 and 0.25 <= xy[0] <= 0.80 and len(w.strip()) >= 2]
+        if not cand:
+            return ""
+        return "。畫面下半現在讀到這些字（esc 關不掉的面板通常要點它自己的按鈕）：" + "、".join(f"「{w}」({xy[0]:.2f},{xy[1]:.2f})" for w, xy in cand[:6])
 
     def fix_paywall(self):
         return "付費視窗：" + self.key_press("esc", 0.1) + "（鐵律：不花錢）"

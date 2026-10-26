@@ -218,4 +218,14 @@ if im is not None:
     _same = _V.synth_hud(_gb, _np3.clip(_gb.astype(_np3.int16) + _np3.random.RandomState(2).randint(-3, 4, _gb.shape), 0, 255).astype(_np3.uint8))
     _sy, _sp, _sn, _sc, _sd = _V.estimate_yaw_pitch(Image.fromarray(_gb), Image.fromarray(_same), sweep=False)
     check("沒轉（只有雜訊）→ 0 度", _sy is not None and abs(_sy) < 1, (_sy, _sc))
+check("_panel_buttons 無字→空", t._panel_buttons(None) == "" or isinstance(t._panel_buttons(None), str))
+_bak6 = {k: getattr(t, k) for k in ("live", "image_path", "grab", "diff", "_drag")}
+try:
+    t.live, t.image_path = True, None
+    t.grab = lambda: im; t.diff = lambda a, b: 0.5; t._drag = lambda dx, dy, fy=None, fx=None: None
+    _r = t.cal_loop(""); check("鏡頭轉不動→驗一圈不算", "鏡頭轉不動" in _r, _r[:120])
+    _r2 = t.cal_mid(""); check("鏡頭轉不動→量刻度中段不算", "鏡頭轉不動" in _r2, _r2[:120])
+finally:
+    for k, v in _bak6.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
