@@ -315,4 +315,31 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []
+# 第 56 輪：補轉標點量到不合理就不信；送出 <8 度不判釘住
+_sent = []
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump", "_words")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, ""); t._verify_dump = lambda *a, **k: None
+    _calls = [0]
+    def _fd(a, b, want=None):
+        _calls[0] += 1
+        return (0.5 * _sent[-1], 0.0, 100, 0.9, "特徵點") if _calls[0] == 1 else (None, None, 0, 0.0, "量不出")
+    t._feat_deg = _fd
+    t._landmark_turn = lambda *a, **k: (51.0, "標點")
+    _m, _p, _d, _st, _lu = t._turn_chunks(17.0)
+    check("補轉標點 +51（送 +16）不信、合計不含 51", "不信" in _p and _m < 30, (_p, round(_m, 1)))
+    _sent.clear(); _calls[0] = 0; t._landmark_turn = lambda *a, **k: (18.0, "標點")
+    _m, _p, _d, _st, _lu = t._turn_chunks(-17.0)
+    check("補轉標點反方向 +18 不信", "不信" in _p and _m > -30, (_p, round(_m, 1)))
+    t._feat_deg = lambda a, b, want=None: (6.0, 0.0, 100, 0.9, "特徵點"); t._landmark_turn = lambda *a, **k: (None, "沒標點")
+    t._words = lambda im_: {"拿起電擊槍": (0.46, 0.50)}
+    _r = t.look_at(0.46, 0.50)
+    check("送 -6 度不判釘在畫面上", "＝它是釘在畫面上的東西" not in _r, _r[:200])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

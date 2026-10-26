@@ -2954,6 +2954,11 @@ class Tools(ExtraTools):
                 if turned is None:
                     turned, _lt = self._landmark_turn(before, after, 1 if gap > 0 else -1, gap)
                     how = "標點"
+                    # 10/26 22:3x 第 56 輪：22:25 補轉送 +16 標點量到 +51（合計寫成 +77）、22:31 送 -34 標點量到 +18（反方向）都被信了
+                    #   → 跟主段一樣：標點反方向、或超過送出 1.5 倍（且差 ≥15 度）就不信、當量不出
+                    if turned is not None and ((turned > 0) != (send_deg > 0) or abs(turned) > max(abs(send_deg) * 1.5, abs(send_deg) + 15)):
+                        parts.append(f"（補轉標點量到 {turned:+.0f}、跟送出的 {send_deg:+.0f} 差太多，不信）")
+                        turned = None
                 done += gap
                 label = "補轉" if rep_i == 0 else "再補轉"
                 k_txt = f"（只轉到 {rc * 100:.0f}%、多送 {(k - 1) * 100:.0f}%：送 {send_deg:+.0f}）" if k > 1.0 else ""
@@ -3398,7 +3403,8 @@ class Tools(ExtraTools):
             f_chk = self._feat_deg(before, after, want=yaw)[0] if (abs(yaw) >= 5 and self.live and not self.image_path) else None
             cam_moved = self.diff(before, after) >= 8 and (f_chk is None or abs(f_chk) >= 0.4 * abs(yaw))
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
-        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and cam_moved) else None
+        # 第 56 輪：22:32 送 -6 度（預期位移才 4% 畫面）這局鏡頭常只轉一半，E框 的字移 1～2% 就被判「釘在畫面上」→ 送出 ≥8 度才判
+        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 8 and cam_moved) else None
         exp_dx, exp_dy = 0.5 - fx, ay - fy
         if pinned and not self._pin_ok(pinned[0] - fx, pinned[1] - fy, exp_dx, exp_dy):
             # 10/25 03:2x 第 8 輪：對 (0.54,0.52) 只轉 6 度、預期位移才 4%，那塊東西移到 (0.51,0.50)（跟著景物動）卻被當「釘住」轉回去
@@ -3408,7 +3414,7 @@ class Tools(ExtraTools):
         # 背後的場景變了，相似度掉到 0.5～0.6 → 回「沒對準、再微調」，每次又往上轉 22 度，最後鏡頭對著天花板
         # → 影像比不出來時，再用字比：目標附近的字轉完還在原位＝釘在畫面上；釘住就把鏡頭轉回原方向
         pin_word = ""
-        if not (pinned and pinned[2] >= 0.95) and abs(yaw) >= 5 and cam_moved:
+        if not (pinned and pinned[2] >= 0.95) and abs(yaw) >= 8 and cam_moved:
             import difflib
             def words2(im):              # 整張讀＋右上任務框放大讀（半透明框在亮背景上整張讀常讀不到）
                 d = dict(self._words(im))
