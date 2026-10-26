@@ -857,8 +857,27 @@ class Tools(ExtraTools):
         """10/26 11:5x 第 43 輪：11:36～11:48 走／右移／左移 連 8 輪畫面變化 ≤2（被碰撞體夾住），每次只回「沒變＝可能被擋」他就換個方向再試
         → 連續第 3 次起在回傳加上累計次數（只給讀數）。"""
         self._nomove = self._nomove + 1 if nomove else 0
+        dead = self._dead_mark(nomove)
         if self._nomove >= 3:
-            return f"（**已連續 {self._nomove} 次 走／橫移 畫面都沒變＝人沒在動**，換方向平移也一樣就是被卡住了）"
+            return f"（**已連續 {self._nomove} 次 走／橫移 畫面都沒變＝人沒在動**，換方向平移也一樣就是被卡住了）" + dead
+        return dead
+
+    _dead_n = 0
+    _dead_since = ""
+
+    def _dead_mark(self, dead):
+        """10/26 23:5x 第 59 輪：23:09～23:49 四十分鐘，轉頭 0 度、走／橫移／跳 畫面變化 0～2、點「辦理入住」沒反應，只有 esc 選單有反應；
+        每個工具各自回「沒變」，他每輪換一種再試。→ 跨工具累計：轉頭／走路／橫移／點擊 連續 ≥5 次都沒反應就在回傳加一句總讀數（只給讀數）。"""
+        if dead:
+            if self._dead_n == 0:
+                self._dead_since = datetime.now().strftime("%H:%M")
+            self._dead_n += 1
+        else:
+            self._dead_n = 0
+            self._dead_since = ""
+        if self._dead_n >= 5:
+            return (f"（**從 {self._dead_since} 起連續 {self._dead_n} 個動作全沒反應**：轉頭、走路、橫移、點按鈕量到的畫面變化都是 0～2、遊戲畫面還在動＝"
+                    "現在這個狀態不吃這些輸入，再換方向／再點同一個地方多半一樣）")
         return ""
 
     def _eta_note(self):
@@ -940,6 +959,8 @@ class Tools(ExtraTools):
 
     def _turn_record(self, sent, measured):
         """記下一次量到的轉角（送出度、實測度），只留最近 3 分鐘 8 筆。"""
+        if abs(sent) >= 8:
+            self._dead_mark(abs(measured) < 1.0)
         now = time.time()
         self._turn_hist = [h for h in self._turn_hist if now - h[0] <= 600][-9:] + [(now, float(sent), float(measured))]   # 第 51 輪：留 10 分鐘
 
@@ -1274,7 +1295,7 @@ class Tools(ExtraTools):
             # 10/25 09:3x 第 18 輪：開著「辦理入住／出口」面板時滑鼠拖曳被面板吃掉、鏡頭完全不動，原本還去量標點／整張位移 → 寫成「重複花紋、僅參考」誤導他 8 輪
             wa = self._words(after)
             ui = self._ui_words([w for w, _ in self._fixed_words(words_before, wa)] + [w for w, (x, y) in wa.items() if y >= 0.6])
-            return (f"**鏡頭沒轉**（從畫面中央、上方各拖一次，畫面變化都只有 {d:.0f}）＝鏡頭現在轉不動"
+            return self._dead_mark(True) + (f"**鏡頭沒轉**（從畫面中央、上方各拖一次，畫面變化都只有 {d:.0f}）＝鏡頭現在轉不動"
                     + (f"：畫面上釘著這些不是 HUD 的字，多半是開著的面板／選單按鈕：" + "、".join(f"「{w}」" for w in ui[:5]) + "；先 關掉 或 點字 把它處理掉" if ui
                        else "：可能有面板／選單擋住或游標被鎖；先 關掉，或看畫面上有沒有按鈕要點")
                     + "，再轉。這次沒量到角度、不判一致")
@@ -3391,7 +3412,7 @@ class Tools(ExtraTools):
             if self.diff(before, after) < 3:
                 # 10/18 21:56：中央、上方都拖不動（整張畫面沒變）又補轉 → 直接回報，不補轉
                 return (f"視角移動到：算好要轉 左右 {yaw:+.0f}、上下 {pitch:+.0f} 度，但從畫面中央、上方拖兩次畫面都沒變——"
-                        "鏡頭現在轉不動（可能有面板／選單擋住滑鼠，或游標被鎖）；沒有補轉。先 關掉 面板或看看畫面上有什麼擋著")
+                        "鏡頭現在轉不動（可能有面板／選單擋住滑鼠，或游標被鎖）；沒有補轉。先 關掉 面板或看看畫面上有什麼擋著" + self._dead_mark(True))
         out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw_calc:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"
                + (f"（分段後實際送出左右 {yaw:+.0f} 度）" if abs(yaw - yaw_calc) >= 1 else "") + lim_note]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
@@ -3473,7 +3494,7 @@ class Tools(ExtraTools):
                         and abs(loc1[0] - fx) < 0.05 and abs(loc1[1] - fy) < 0.06 and (abs(y2) >= 8 or abs(p2) >= 8)):
                     # 10/26 09:5x 第 41 輪：角色身上的剪貼簿 E框 會上下晃 0.03，原本 0.02 門檻抓不到（09:39／09:41 各補轉一次還是「不一致」）
                     # 10/26 05:1x 第 35 輪：05:03 送 -14 目標從 (0.41,0.47) 沒動、補轉 -14 還是沒動，卻回「偏了…沒有完全對準」
-                    return ("；".join(out) + f"；**轉了兩次目標都沒動（還在 ({final[0]:.2f},{final[1]:.2f})）＝鏡頭根本沒轉**：右鍵壓到的地方可能是 UI（角色名牌／E框／面板）或游標被鎖；"
+                    return ("；".join(out) + self._dead_mark(True) + f"；**轉了兩次目標都沒動（還在 ({final[0]:.2f},{final[1]:.2f})）＝鏡頭根本沒轉**：右鍵壓到的地方可能是 UI（角色名牌／E框／面板）或游標被鎖；"
                             "這塊若是釘在畫面上的字也會這樣。先 關掉 面板、或 確認是否是UI；要對準場景裡的東西")
                 if d2 is not None and d2 > d1 + 0.08:
                     # 10/25 13:0x 第 20 輪：第一次「找到目標」在 (0.41,0.77) 其實認錯（相似 0.88），照它補轉 -14/-20 後目標跑到 (0.77,0.27) 更偏
@@ -3828,7 +3849,8 @@ class Tools(ExtraTools):
             pydirectinput.mouseUp()
         else:
             print(f"   [dry-run] 點 ({fx:.2f},{fy:.2f})")
-        return f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before, noise)
+        r = f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before, noise)
+        return r + self._dead_mark("沒變" in r or "看不出" in r)
 
     def click_text(self, 字=""):
         """點字：10:5x 統計 56 次只找到 14 次（找到的全對），42 次是 OCR 讀歪（「亻呆安」「你的況很要」）

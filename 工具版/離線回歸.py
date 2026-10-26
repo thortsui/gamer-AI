@@ -375,4 +375,18 @@ finally:
 _cp = t._cursor_pos()
 check("讀得到游標位置", _cp is None or (isinstance(_cp, tuple) and len(_cp) == 2), _cp)
 check("dry-run 點 照常", "點了" in t._do_click(0.5, 0.83), t._do_click(0.5, 0.83))
+# 第 59 輪：跨工具「全沒反應」累計
+t._dead_n = 0; t._dead_since = ""; t._nomove = 0
+for _i in range(4):
+    _n = t._dead_mark(True)
+check("4 次沒反應還不提示", _n == "", _n)
+_n = t._dead_mark(True)
+check("第 5 次起提示 全沒反應", "連續 5 個動作全沒反應" in _n, _n)
+_n = t._nomove_note(True)
+check("走 沒變也算進去（6）", "連續 6 個動作全沒反應" in _n, _n)
+t._turn_record(20, 15)
+check("轉頭有量到就解除", t._dead_n == 0 and t._dead_mark(False) == "")
+t._turn_record(20, 0)
+check("轉頭量到 0 算沒反應", t._dead_n == 1)
+t._dead_n = 0; t._dead_since = ""; t._nomove = 0; t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
