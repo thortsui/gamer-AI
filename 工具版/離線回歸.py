@@ -342,4 +342,33 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []
+# 第 57 輪：鏡頭只轉到一半、字只移一半 → 不是釘住
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump", "_words")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []
+    _noise57 = Image.fromarray(_np3.random.RandomState(3).randint(0, 255, (im.height, im.width, 3), dtype=_np3.uint8))   # 轉完的畫面：影像比對找不到那塊
+    t.grab = lambda: im; t._settled = lambda prev=None: _noise57; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: None
+    t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, ""); t._verify_dump = lambda *a, **k: None
+    t._landmark_turn = lambda *a, **k: (None, "沒標點")
+    _fc = [0]
+    def _fd57(a, b, want=None):                                              # 要 -11：第一段轉 -5、補轉都 0（合計只轉一半）
+        _fc[0] += 1
+        return (-5.0 if _fc[0] == 1 else 0.0, 0.0, 100, 0.9, "特徵點")
+    t._feat_deg = _fd57
+    _wb = {"還回電擊槍": (0.43, 0.40)}; _wa = {"還回電擊槍": (0.455, 0.40)}        # 字移了 0.025（一半）
+    _state = [0]
+    def _wf(im_):
+        _state[0] += 1
+        return dict(_wb) if _state[0] % 2 == 1 else dict(_wa)
+    t._words = _wf
+    _r = t.look_at(0.43, 0.40)
+    check("只轉一半、字移一半 → 不判釘住", "＝它是釘在畫面上的東西" not in _r, _r[:200])
+    _state[0] = 0; _fc[0] = 0; t._words = lambda im_: dict(_wb)          # 字完全沒動
+    _r = t.look_at(0.43, 0.40)
+    check("只轉一半、字完全沒動 → 釘住", "＝它是釘在畫面上的東西" in _r, _r[:200])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

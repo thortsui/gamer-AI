@@ -3399,13 +3399,18 @@ class Tools(ExtraTools):
         #   20:55 同一個 E框 才剛對準過。釘住的判斷要先確定鏡頭真的轉了（分段實測 ≥ 要的四成；單拖用特徵點量）
         if chunk_meas is not None:
             cam_moved = self.diff(before, after) >= 8 and chunk_meas[2] >= 1 and abs(chunk_meas[0]) >= 0.4 * abs(yaw_calc)
+            turn_ratio = abs(chunk_meas[0]) / abs(yaw_calc) if (chunk_meas[2] >= 1 and yaw_calc) else 1.0
         else:
             f_chk = self._feat_deg(before, after, want=yaw)[0] if (abs(yaw) >= 5 and self.live and not self.image_path) else None
             cam_moved = self.diff(before, after) >= 8 and (f_chk is None or abs(f_chk) >= 0.4 * abs(yaw))
+            turn_ratio = abs(f_chk) / abs(yaw) if (f_chk is not None and yaw) else 1.0
+        # 10/26 23:0x 第 57 輪：20:56／22:32／22:56 三次，鏡頭只轉到要的四～五成、E框 的字自然只移一半，還是被判「釘在畫面上」；下一輪同一目標就對準了。
+        #   釘住＝「照實際轉了的度數算應該移多少、卻幾乎沒移」，預期位移要乘上實測÷要的（0.3～1）
+        turn_ratio = max(0.3, min(1.0, turn_ratio))
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
         # 第 56 輪：22:32 送 -6 度（預期位移才 4% 畫面）這局鏡頭常只轉一半，E框 的字移 1～2% 就被判「釘在畫面上」→ 送出 ≥8 度才判
         pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 8 and cam_moved) else None
-        exp_dx, exp_dy = 0.5 - fx, ay - fy
+        exp_dx, exp_dy = (0.5 - fx) * turn_ratio, (ay - fy) * turn_ratio      # 第 57 輪：照實際轉到的比例算預期位移
         if pinned and not self._pin_ok(pinned[0] - fx, pinned[1] - fy, exp_dx, exp_dy):
             # 10/25 03:2x 第 8 輪：對 (0.54,0.52) 只轉 6 度、預期位移才 4%，那塊東西移到 (0.51,0.50)（跟著景物動）卻被當「釘住」轉回去
             #   → E 框明明到了中央還被轉回。釘住＝幾乎沒動（不到預期位移的四成）才算
