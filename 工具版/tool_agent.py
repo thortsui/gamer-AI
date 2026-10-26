@@ -3065,8 +3065,15 @@ class Tools(ExtraTools):
         if abs(d) < 3:
             return (f"上下只能 ±{self.PITCH_LIM:.0f} 度（使用者限制），現在已經{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度，"
                     f"再往{'上' if want > 0 else '下'}就超過了，這次沒轉" + self.LEVEL_HINT if abs(want) >= 3 else "度數太小（<3 度）沒意義")
+        _b0 = self.grab() if (self.live and not self.image_path) else None
         r = self._look(abs(d), "y", -1 if d > 0 else 1, 3, 60, 15) + lim_note
-        self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + d))
+        _mp = None
+        if _b0 is not None:                       # 第 68 輪：累計量到的上下度數（量不出才用送出的）
+            _a0 = self._settled()
+            _mp, _ = self._pitch_from_vshift(_b0, _a0)
+            if _mp is not None and abs(_mp) > abs(d) + 10:
+                _mp = None
+        self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + (_mp if _mp is not None else d)))
         lv = ("水平" if abs(self.pitch_acc) < 3 else f"{'抬頭' if self.pitch_acc > 0 else '低頭'} {abs(self.pitch_acc):.0f} 度")
         if getattr(self, "pitch_unknown", False):
             return r + "｜水平儀：修水平 沒修好之後不可靠、這次沒套 ±45 限制；畫面水平時叫 水平歸零"
@@ -3439,8 +3446,15 @@ class Tools(ExtraTools):
             yaw_send = yaw + comp * (1 if yaw > 0 else -1) if comp else yaw
             lim_note += self._comp_note(comp)
             self._drag(yaw_send * self.dx_deg, -pitch * self.dy_deg)
-        self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + pitch))
         after = self._settled()
+        # 10/27 07:2x 第 68 輪：水平儀原本累計「送出的」上下度數；07:03～07:17 六輪 視角移動到 都「上下只轉了 +0、原本要 +15」——
+        #   累計早就到 +45 擋住了，畫面其實是水平的（遊戲會把第三人稱鏡頭拉回）。改：量得到上下位移就累計量到的，量不出才累計送出的
+        mp = None
+        if abs(pitch) >= 3 and self.live and not self.image_path:
+            mp, _mpt = self._pitch_from_vshift(before, after)
+            if mp is not None and abs(mp) > abs(pitch) + 10:
+                mp = None
+        self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + (mp if mp is not None else pitch)))
         if chunk_meas is None:
             self._verify_dump("視角移動到", before, after, 送出度=yaw, 送出上下=pitch, 目標x=fx, 目標y=fy)
         redrag = ""

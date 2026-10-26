@@ -492,4 +492,26 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []; t._dead_n = 0; t._dead_since = ""
+# 第 68 輪：水平儀累計量到的上下度數
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump", "_pitch_from_vshift")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []; t.pitch_acc = 0.0; t.pitch_unknown = False
+    _noise68 = Image.fromarray(_np3.random.RandomState(4).randint(0, 255, (im.height, im.width, 3), dtype=_np3.uint8))
+    t.grab = lambda: im; t._settled = lambda prev=None: _noise68; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: None
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, ""); t._verify_dump = lambda *a, **k: None
+    t._feat_deg = lambda a, b, want=None: (0.0, 0.0, 100, 0.9, "特徵點")
+    t._pitch_from_vshift = lambda a, b: (1.0, "幾乎沒動")          # 遊戲把鏡頭拉回：送 +15 只量到 +1
+    t.look_at(0.5, 0.3)
+    check("視角移動到 上下累計量到的 +1 不是送出的 +15", abs(t.pitch_acc - 1.0) < 0.5, t.pitch_acc)
+    t.pitch_acc = 0.0; t._pitch_from_vshift = lambda a, b: (None, "量不出")
+    t.look_at(0.5, 0.3)
+    check("量不出時照送出累計", t.pitch_acc > 10, t.pitch_acc)
+    t.pitch_acc = 0.0; t._pitch_from_vshift = lambda a, b: (2.0, "")
+    t.look_pitch("20")
+    check("仰 也累計量到的", abs(t.pitch_acc - 2.0) < 0.5, t.pitch_acc)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.pitch_acc = 0.0; t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
