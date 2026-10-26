@@ -843,9 +843,13 @@ class Tools(ExtraTools):
             #   → 只有移動鍵（w/a/s/d/space）才算進走路累計與全沒反應累計；其他鍵不碰計數
             #   真正歸零的是 00:05 走(0.3) 畫面變化剛好 2（雜訊）被當「有動」→ 累計用 ≤2 算沒動（跟第 43 輪「畫面變化 ≤2」一致）
             _mv = str(k).lower() in ("w", "a", "s", "d", "space")
+            if _mv and dd > 2:
+                self._last_ok = (datetime.now().strftime("%H:%M"), f"走路 {k}")
             _nm = (self._nomove_note(dd <= 2) if _mv else "")
             return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + _nm + z_txt
         out = self._changed(before, noise)
+        if not ("沒變" in out or "看不出" in out):
+            self._last_ok = (datetime.now().strftime("%H:%M"), f"{'長按' if d >= 1.0 else '按'} {k}")   # 第 61 輪
         if k in ("a", "d"):
             out += self._nomove_note("沒變" in out or "看不出" in out)
         if k == "e" and ("沒變" in out or "看不出" in out) and "有反應**" not in out:
@@ -869,8 +873,9 @@ class Tools(ExtraTools):
 
     _dead_n = 0
     _dead_since = ""
+    _last_ok = None          # (時間字串, 動作) 最後一個有反應的動作
 
-    def _dead_mark(self, dead):
+    def _dead_mark(self, dead, act=""):
         """10/26 23:5x 第 59 輪：23:09～23:49 四十分鐘，轉頭 0 度、走／橫移／跳 畫面變化 0～2、點「辦理入住」沒反應，只有 esc 選單有反應；
         每個工具各自回「沒變」，他每輪換一種再試。→ 跨工具累計：轉頭／走路／橫移／點擊 連續 ≥5 次都沒反應就在回傳加一句總讀數（只給讀數）。"""
         if dead:
@@ -880,9 +885,13 @@ class Tools(ExtraTools):
         else:
             self._dead_n = 0
             self._dead_since = ""
+            if act:
+                self._last_ok = (datetime.now().strftime("%H:%M"), act)
         if self._dead_n >= 5:
+            # 第 61 輪：00:42 長按 E（保全攝影機）有反應、00:44 起全沒反應 → 把「最後一個有反應的動作」寫進讀數（只是紀錄，不解讀）
+            lo = f"；進這個狀態前最後一個有反應的動作：{self._last_ok[1]}（{self._last_ok[0]}）" if self._last_ok else ""
             return (f"（**從 {self._dead_since} 起連續 {self._dead_n} 個動作全沒反應**：轉頭、走路、橫移、點按鈕量到的畫面變化都是 0～2、遊戲畫面還在動＝"
-                    "現在這個狀態不吃這些輸入，再換方向／再點同一個地方多半一樣）")
+                    f"現在這個狀態不吃這些輸入，再換方向／再點同一個地方多半一樣{lo}）")
         return ""
 
     def _eta_note(self):
@@ -965,7 +974,7 @@ class Tools(ExtraTools):
     def _turn_record(self, sent, measured):
         """記下一次量到的轉角（送出度、實測度），只留最近 3 分鐘 8 筆。"""
         if abs(sent) >= 8:
-            self._dead_mark(abs(measured) < 1.0)
+            self._dead_mark(abs(measured) < 1.0, act=f"轉頭 {sent:+.0f} 度")
         now = time.time()
         self._turn_hist = [h for h in self._turn_hist if now - h[0] <= 600][-9:] + [(now, float(sent), float(measured))]   # 第 51 輪：留 10 分鐘
 
@@ -2882,6 +2891,14 @@ class Tools(ExtraTools):
             rc = c_got / c_sent
             return (min(2.0, 1.0 / rc), rc) if 0.2 <= rc < 0.75 else (1.0, rc)
 
+        def _acc(sent_deg, got_deg):
+            # 10/27 00:5x 第 61 輪：00:39 第 2 段與補轉都量到 0（鏡頭卡住）、比例算成 0.48 → 再補轉送 -41，鏡頭鬆開轉了 -39、合計過頭 19 度
+            #   → 量到不到送出兩成的段當「卡住」不算進比例（卡住不是比例問題、多送沒用）
+            nonlocal c_sent, c_got
+            if (got_deg > 0) == (sent_deg > 0) and abs(got_deg) >= 0.2 * abs(sent_deg):
+                c_sent += abs(sent_deg)
+                c_got += abs(got_deg)
+
         for i in range(n):
             before = self.grab()
             if before is None:
@@ -2955,9 +2972,7 @@ class Tools(ExtraTools):
             meas += turned
             if feat_here or lm_deg is not None:
                 self._turn_record(send_deg, turned)
-                if (turned > 0) == (send_deg > 0):
-                    c_sent += abs(send_deg)
-                    c_got += abs(turned)
+                _acc(send_deg, turned)
             parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）" + k_txt
                          + (self._under_turn_note(send_deg, turned) if (feat_here or lm_deg is not None) else ""))
         # 10/26 01:5x 第 30 輪：每段拖曳固定少 2～3 度（30→27／28、17→13）、合計常差到不一致（01:39 要 34 量到 27），他下一輪得再轉一次。
@@ -2971,6 +2986,8 @@ class Tools(ExtraTools):
                 gsgn = 1 if gap > 0 else -1
                 k, rc = _k()
                 send_deg = (gap + comp * gsgn) * k
+                if abs(send_deg) > abs(gap) + 15:          # 第 61 輪：補轉最多比差額多送 15 度
+                    send_deg = (abs(gap) + 15) * gsgn
                 self._drag(send_deg * self.dx_deg, 0)
                 after = self._settled()
                 dd = self.diff(before, after)
@@ -2998,9 +3015,7 @@ class Tools(ExtraTools):
                 meas += turned
                 lm_used += 1
                 self._turn_record(send_deg, turned)
-                if (turned > 0) == (send_deg > 0):
-                    c_sent += abs(send_deg)
-                    c_got += abs(turned)
+                _acc(send_deg, turned)
                 self._seg_ok.append(abs(turned - gap) <= max(5.0, 0.15 * abs(gap)))
                 parts.append(f"{label} {gap:+.0f}→實測 {turned:+.0f}（{how}）" + k_txt + self._under_turn_note(send_deg, turned))
                 self._verify_dump("轉段", before, after, 送出度=gap, 標點度=(turned if how == "標點" else None), 整張度=None, 用的=turned, 畫面變化=dd, 特徵度=f_yaw, 補轉=True)
@@ -3855,7 +3870,7 @@ class Tools(ExtraTools):
         else:
             print(f"   [dry-run] 點 ({fx:.2f},{fy:.2f})")
         r = f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before, noise)
-        return r + self._dead_mark("沒變" in r or "看不出" in r)
+        return r + self._dead_mark("沒變" in r or "看不出" in r, act=f"點 ({fx:.2f},{fy:.2f})")
 
     def click_text(self, 字=""):
         """點字：10:5x 統計 56 次只找到 14 次（找到的全對），42 次是 OCR 讀歪（「亻呆安」「你的況很要」）

@@ -409,4 +409,24 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._dead_n = 0; t._dead_since = ""; t._nomove = 0
+# 第 61 輪：卡住的段不算進比例；補轉上限；讀數帶最後有反應的動作
+_sent = []
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []; t._dead_n = 0; t._dead_since = ""; t._last_ok = None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, ""); t._verify_dump = lambda *a, **k: None
+    _seq = iter([0.95, 0.0, 0.0, 0.98])          # 第 1 段正常、第 2 段與補轉卡住、再補轉鬆開
+    t._feat_deg = lambda a, b, want=None: (next(_seq, 0.98) * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _m, _p, _d, _st, _lu = t._turn_chunks(-40.0)
+    check("卡住的段不算比例：再補轉不多送、合計不過頭", abs(_sent[-1]) <= 21 and -45 <= _m <= -35, (_p, round(_m, 1), _sent))
+    _n = t._dead_mark(False, act="長按 e"); _n = ""
+    for _i in range(5):
+        _n = t._dead_mark(True)
+    check("讀數帶最後有反應的動作", "最後一個有反應的動作：長按 e" in _n, _n)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []; t._dead_n = 0; t._dead_since = ""; t._last_ok = None
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
