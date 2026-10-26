@@ -1019,13 +1019,17 @@ class Tools(ExtraTools):
             pydirectinput.moveTo(cx, cy)
             time.sleep(0.03)
             pydirectinput.mouseDown(button="right")
+            # 10/26 20:0x 第 52 輪：18:40 起每次拖曳只轉到送出的 0～60%（四個起點、各種步距都一樣；驗一圈 卻回原點；20:03 兩次拖畫面全沒變、下一步 走 卻正常）
+            #   → 猜是遊戲掉幀時右鍵按下後鏡頭還沒進入拖曳模式、頭幾個位移被當成游標移動吃掉。按下後先等 0.1 秒、每步放慢到 0.03、放開前等 0.05
+            time.sleep(0.10)
             n = 8
             done_x = done_y = 0
             for i in range(1, n + 1):
                 tx, ty = sx * i // n, sy * i // n
                 pydirectinput.moveRel(tx - done_x, ty - done_y, relative=True)
                 done_x, done_y = tx, ty
-                time.sleep(0.02)
+                time.sleep(0.03)
+            time.sleep(0.05)
             pydirectinput.mouseUp(button="right")
             pydirectinput.moveTo(cx, cy)
             time.sleep(0.08)
@@ -1051,6 +1055,7 @@ class Tools(ExtraTools):
         pydirectinput.moveTo(cx, cy)
         time.sleep(0.03)
         pydirectinput.mouseDown(button="right")
+        time.sleep(0.10)        # 第 52 輪：跟 _drag 一樣，按下後先等鏡頭進入拖曳模式
         done = 0
         try:
             for k in range(1, stages + 1):
