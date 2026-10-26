@@ -271,4 +271,30 @@ check("補償 10 分鐘窗口 少轉 5／6／11 → 6", t._comp_deg() == 6.0, t.
 t._turn_hist = [(_tm.time() - 700, 19.0, 14.0), (_tm.time() - 200, -11.0, -5.0), (_tm.time() - 10, 17.0, 12.0)]
 check("補償 超過 10 分鐘的不算 → 0", t._comp_deg() == 0.0, t._comp_deg())
 t._turn_hist = []
+# 第 53 輪：同一次呼叫內少轉就按比例多送；補轉兩次；視角移動到 ≥10 度走分段路
+_sent = []
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
+    t._feat_deg = lambda a, b, want=None: (0.5 * _sent[-1], 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
+    _m, _p, _d, _st, _lu = t._turn_chunks(40.0)
+    check("只轉到 50%：第 2 段多送 100%、補轉後合計到 40", "多送 100%" in _p and abs(_m - 40.0) < 0.6 and "補轉" in _p, (_p, round(_m, 1), _sent))
+    _sent.clear(); t._feat_deg = lambda a, b, want=None: (0.5 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _m, _p, _d, _st, _lu = t._turn_chunks(20.0)
+    check("一段 20 只轉到 10：補轉多送到 20、合計 20", abs(_m - 20.0) < 0.6 and "補轉 +10" in _p, (_p, round(_m, 1), _sent))
+    _sent.clear(); t._turn_hist = []; t._feat_deg = lambda a, b, want=None: (0.8 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _m, _p, _d, _st, _lu = t._turn_chunks(34.0)
+    check("80% 不按比例多送（補轉照舊）", "多送" not in _p and "補轉 +7→實測 +5" in _p, _p)
+    _sent.clear(); t._turn_hist = []; t._feat_deg = lambda a, b, want=None: (0.5 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _noise53 = Image.fromarray(_np3.random.RandomState(2).randint(0, 255, (im.height, im.width, 3), dtype=_np3.uint8))
+    t._settled = lambda prev=None: _noise53
+    _r = t.look_at(0.65, 0.5)
+    check("視角移動到 +19 度走分段路有補轉", "每段實測" in _r and "補轉" in _r, _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []; t.DRAG_FX, t.DRAG_FY = 0.30, 0.40; t._drag_idx = 0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

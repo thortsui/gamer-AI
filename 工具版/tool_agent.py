@@ -2845,6 +2845,16 @@ class Tools(ExtraTools):
         sgn = 1 if deg > 0 else -1
         if comp:
             parts.append(self._comp_note(comp))
+        # 10/26 20:2x 第 53 輪：18:40 起每段只轉到送出的 0～70%、而且時好時壞（20:18 兩段 107%、20:17 44%），跨呼叫的中位補償（第 50 輪）抓不到
+        #   → 同一次呼叫內閉環：前面量到的段合計只轉到 20～75%，後面的段和補轉就按 1/比例多送（最多 2 倍），量到的照實說
+        c_sent, c_got = 0.0, 0.0
+
+        def _k():
+            if c_sent <= 0:
+                return 1.0, None
+            rc = c_got / c_sent
+            return (min(2.0, 1.0 / rc), rc) if 0.2 <= rc < 0.75 else (1.0, rc)
+
         for i in range(n):
             before = self.grab()
             if before is None:
@@ -2853,13 +2863,16 @@ class Tools(ExtraTools):
                 break
             if self._repetitive(before)[0]:
                 self._rep_flag = True
-            self._drag((chunk + comp * sgn) * self.dx_deg, 0)
+            k, rc = _k()
+            send_deg = (chunk + comp * sgn) * k
+            self._drag(send_deg * self.dx_deg, 0)
             after = self._settled()
             dd = self.diff(before, after)
             if dd < 3:                                           # 中央有提示擋住拖不動 → 從上方重拖
-                self._drag((chunk + comp * sgn) * self.dx_deg, 0, fy=0.25)
+                self._drag(send_deg * self.dx_deg, 0, fy=0.25)
                 after = self._settled()
                 dd = self.diff(before, after)
+            k_txt = f"（前面只轉到送出的 {rc * 100:.0f}%，這段多送 {(k - 1) * 100:.0f}%：送 {send_deg:+.0f} 度）" if k > 1.0 else ""
             sh, _ = self._shift(before, after, dd)
             done += chunk
             lm_deg, lm_txt = self._landmark_turn(before, after, 1 if chunk > 0 else -1, chunk)
@@ -2914,17 +2927,24 @@ class Tools(ExtraTools):
             lm_used += lm_deg is not None
             meas += turned
             if feat_here or lm_deg is not None:
-                self._turn_record(chunk + comp * sgn, turned)
-            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）"
-                         + (self._under_turn_note(chunk + comp * sgn, turned) if (feat_here or lm_deg is not None) else ""))
+                self._turn_record(send_deg, turned)
+                if (turned > 0) == (send_deg > 0):
+                    c_sent += abs(send_deg)
+                    c_got += abs(turned)
+            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）" + k_txt
+                         + (self._under_turn_note(send_deg, turned) if (feat_here or lm_deg is not None) else ""))
         # 10/26 01:5x 第 30 輪：每段拖曳固定少 2～3 度（30→27／28、17→13）、合計常差到不一致（01:39 要 34 量到 27），他下一輪得再轉一次。
         #   → 合計跟要的差超過容許（5 度或 15%）就補轉一次差額、照樣實測加進合計；只補一次、補完照量到的說
         if not stopped and lm_used >= 1 and self.live and not self.image_path:
-            gap = deg - meas
-            if max(5.0, 0.15 * abs(deg)) < abs(gap) <= 30:
+            for rep_i in range(2):                      # 第 53 輪：補轉最多兩次（50% 時補一次還差一半）
+                gap = deg - meas
+                if not (max(5.0, 0.15 * abs(deg)) < abs(gap) <= 30):
+                    break
                 before = self.grab()
                 gsgn = 1 if gap > 0 else -1
-                self._drag((gap + comp * gsgn) * self.dx_deg, 0)
+                k, rc = _k()
+                send_deg = (gap + comp * gsgn) * k
+                self._drag(send_deg * self.dx_deg, 0)
                 after = self._settled()
                 dd = self.diff(before, after)
                 f_yaw, _fp, _fn, _fc, f_txt = self._feat_deg(before, after, want=gap)
@@ -2934,17 +2954,23 @@ class Tools(ExtraTools):
                     turned, _lt = self._landmark_turn(before, after, 1 if gap > 0 else -1, gap)
                     how = "標點"
                 done += gap
+                label = "補轉" if rep_i == 0 else "再補轉"
+                k_txt = f"（只轉到 {rc * 100:.0f}%、多送 {(k - 1) * 100:.0f}%：送 {send_deg:+.0f}）" if k > 1.0 else ""
                 if turned is None:
                     est, est_txt = self._unmeasured_est(gap)
                     meas += est
                     self._chunk_unsure = True
-                    parts.append(f"補轉 {gap:+.0f}→量不出、" + (est_txt if est_txt else "照送出算（僅參考）"))
-                else:
-                    meas += turned
-                    lm_used += 1
-                    self._turn_record(gap + comp * gsgn, turned)
-                    self._seg_ok.append(abs(turned - gap) <= max(5.0, 0.15 * abs(gap)))
-                    parts.append(f"補轉 {gap:+.0f}→實測 {turned:+.0f}（{how}）" + self._under_turn_note(gap + comp * gsgn, turned))
+                    parts.append(f"{label} {gap:+.0f}→量不出、" + (est_txt if est_txt else "照送出算（僅參考）"))
+                    self._verify_dump("轉段", before, after, 送出度=gap, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 特徵度=None, 補轉=True)
+                    break
+                meas += turned
+                lm_used += 1
+                self._turn_record(send_deg, turned)
+                if (turned > 0) == (send_deg > 0):
+                    c_sent += abs(send_deg)
+                    c_got += abs(turned)
+                self._seg_ok.append(abs(turned - gap) <= max(5.0, 0.15 * abs(gap)))
+                parts.append(f"{label} {gap:+.0f}→實測 {turned:+.0f}（{how}）" + k_txt + self._under_turn_note(send_deg, turned))
                 self._verify_dump("轉段", before, after, 送出度=gap, 標點度=(turned if how == "標點" else None), 整張度=None, 用的=turned, 畫面變化=dd, 特徵度=f_yaw, 補轉=True)
         return meas, "、".join(parts), done, stopped, lm_used
 
@@ -3335,8 +3361,9 @@ class Tools(ExtraTools):
         chunk_meas = None
         yaw_calc = yaw
         yaw_send = yaw
-        if abs(yaw) > 30 and self.live and not self.image_path:
-            meas_, parts_, done_, stopped_, lm_used_ = self._turn_chunks(yaw)   # 10/25：超過 30 度分段轉、每段實測（使用者：確保前後畫面還有同一個東西）
+        if abs(yaw) >= 10 and self.live and not self.image_path:
+            # 10/25：超過 30 度分段轉、每段實測（使用者：確保前後畫面還有同一個東西）；第 53 輪：≥10 度都走這條（有實測比例閉環＋補轉）
+            meas_, parts_, done_, stopped_, lm_used_ = self._turn_chunks(yaw)
             chunk_meas = (meas_, parts_ + (f"；中途量不出，停在 {done_:+.0f} 度" if stopped_ else ""), lm_used_, stopped_, done_)
             yaw = done_
             self._drag(0, -pitch * self.dy_deg)
@@ -3453,7 +3480,7 @@ class Tools(ExtraTools):
                 short = stopped_c and abs(done_c - yaw_calc) >= 3   # 10/25 06:5x：第一段就量不出 → 停在 20 度卻回「已對準正中央」（要 41 度）；10/26 02:0x：分段後 yaw 已改成 done、補轉後會超過算的 → 只有中途停才算「只轉了」
                 if short or lm_used == 0:
                     ok = False
-                out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 角度大、已改分段轉並每段實測：{parts}；"
+                out.append(f"轉完在中央附近找不到原本那一塊（轉到中央常被你自己的角色擋住）→ 每段實測：{parts}；"
                            f"你實際轉了約 {meas:+.0f} 度（送出 {yaw:+.0f}、原本算要 {yaw_calc:+.0f}）")
                 n_seg = max(1, int(math.ceil(abs(yaw) / 30.0)))
                 segs_ok = bool(getattr(self, "_seg_ok", [])) and all(self._seg_ok)
