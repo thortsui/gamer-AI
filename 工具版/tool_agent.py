@@ -959,12 +959,9 @@ class Tools(ExtraTools):
             return ""
         if (measured > 0) == (sent > 0) and abs(measured) >= 0.6 * abs(sent):
             return ""
-        old = (self.DRAG_FX, self.DRAG_FY)
-        self._drag_idx = (self._drag_idx + 1) % len(self.DRAG_STARTS)
-        self.DRAG_FX, self.DRAG_FY = self.DRAG_STARTS[self._drag_idx]
+        # 第 54 輪：第 49 輪的「換起點」四個點都只轉到 48～56%、假說不成立 → 不再換起點，只回報比例
         pct = abs(measured) / abs(sent) * 100 if (measured > 0) == (sent > 0) else 0.0
-        return (f"（這段只轉到送出的 {pct:.0f}%：拖曳起點 ({old[0]:.2f},{old[1]:.2f}) 可能壓在 UI／面板上，"
-                f"下一次改從 ({self.DRAG_FX:.2f},{self.DRAG_FY:.2f}) 開始拖）")
+        return f"（這段只轉到送出的 {pct:.0f}%）"
 
     COMP_MAX = 12.0
 
@@ -3389,8 +3386,15 @@ class Tools(ExtraTools):
         out = [f"算好：({fx:.2f},{fy:.2f}) 離中央 左右 {yaw_calc:+.0f} 度、上下 {pitch:+.0f} 度 → 送 dx {yaw * self.dx_deg:+.0f}、dy {-pitch * self.dy_deg:+.0f}"
                + (f"（分段後實際送出左右 {yaw:+.0f} 度）" if abs(yaw - yaw_calc) >= 1 else "") + lim_note]
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
+        # 10/26 21:0x 第 54 輪：20:56 送 +11 鏡頭幾乎沒轉（這局常只轉到 0～50%），E框 的字當然還在原位 → 被判「釘在畫面上的 UI」還把鏡頭轉回去；
+        #   20:55 同一個 E框 才剛對準過。釘住的判斷要先確定鏡頭真的轉了（分段實測 ≥ 要的四成；單拖用特徵點量）
+        if chunk_meas is not None:
+            cam_moved = self.diff(before, after) >= 8 and chunk_meas[2] >= 1 and abs(chunk_meas[0]) >= 0.4 * abs(yaw_calc)
+        else:
+            f_chk = self._feat_deg(before, after, want=yaw)[0] if (abs(yaw) >= 5 and self.live and not self.image_path) else None
+            cam_moved = self.diff(before, after) >= 8 and (f_chk is None or abs(f_chk) >= 0.4 * abs(yaw))
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
-        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and self.diff(before, after) >= 8) else None
+        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 5 and cam_moved) else None
         exp_dx, exp_dy = 0.5 - fx, ay - fy
         if pinned and not self._pin_ok(pinned[0] - fx, pinned[1] - fy, exp_dx, exp_dy):
             # 10/25 03:2x 第 8 輪：對 (0.54,0.52) 只轉 6 度、預期位移才 4%，那塊東西移到 (0.51,0.50)（跟著景物動）卻被當「釘住」轉回去
@@ -3400,7 +3404,7 @@ class Tools(ExtraTools):
         # 背後的場景變了，相似度掉到 0.5～0.6 → 回「沒對準、再微調」，每次又往上轉 22 度，最後鏡頭對著天花板
         # → 影像比不出來時，再用字比：目標附近的字轉完還在原位＝釘在畫面上；釘住就把鏡頭轉回原方向
         pin_word = ""
-        if not (pinned and pinned[2] >= 0.95) and abs(yaw) >= 5:
+        if not (pinned and pinned[2] >= 0.95) and abs(yaw) >= 5 and cam_moved:
             import difflib
             def words2(im):              # 整張讀＋右上任務框放大讀（半透明框在亮背景上整張讀常讀不到）
                 d = dict(self._words(im))

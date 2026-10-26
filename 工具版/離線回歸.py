@@ -246,8 +246,8 @@ check("比例 10/34≈0.29", abs(t._recent_ratio() - 10 / 34) < 0.01, t._recent_
 _e, _tx = t._unmeasured_est(-24)
 check("量不出的段照比例估 -24→約 -7", -8.5 < _e < -6.5 and "不確定" in _tx and t._chunk_unsure, (_e, _tx))
 _n = t._under_turn_note(-17, -4)
-check("轉不足 換拖曳起點 → (0.70,0.40)", (t.DRAG_FX, t.DRAG_FY) == (0.70, 0.40) and "24%" in _n, (_n, t.DRAG_FX))
-check("轉夠 不換起點", t._under_turn_note(-30, -27) == "" and (t.DRAG_FX, t.DRAG_FY) == (0.70, 0.40))
+check("轉不足 只回報比例、不換起點", (t.DRAG_FX, t.DRAG_FY) == (0.30, 0.40) and "24%" in _n, (_n, t.DRAG_FX))
+check("轉夠 沒說明", t._under_turn_note(-30, -27) == "")
 t._turn_hist = []; t._turn_record(30, 28); t._turn_record(30, 27); t._chunk_unsure = False
 _e, _tx = t._unmeasured_est(20)
 check("比例正常時 量不出照送出算", _e == 20 and _tx == "" and not t._chunk_unsure, (_e, _tx))
@@ -297,4 +297,22 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []; t.DRAG_FX, t.DRAG_FY = 0.30, 0.40; t._drag_idx = 0
+# 第 54 輪：鏡頭沒轉時目標的字當然在原位，不能判「釘在畫面上」
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_landmark_turn", "_scene_deg", "_feat_deg", "_repetitive", "_verify_dump", "_words")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.0, "")
+    t._drag = lambda dx, dy, fy=0.5: None
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, "")
+    t._feat_deg = lambda a, b, want=None: (0.0, 0.0, 100, 0.9, "特徵點"); t._verify_dump = lambda *a, **k: None
+    t._words = lambda im_: {"保全攝影機": (0.57, 0.45)}
+    _r = t.look_at(0.57, 0.45)
+    check("鏡頭沒轉（特徵點 0）不判釘在畫面上", "＝它是釘在畫面上的東西" not in _r, _r[:300])
+    t._feat_deg = lambda a, b, want=None: (11.0, 0.0, 100, 0.9, "特徵點")
+    _r = t.look_at(0.57, 0.45)
+    check("鏡頭轉了 11 度、字還在原位 → 釘在畫面上", "＝它是釘在畫面上的東西" in _r, _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
