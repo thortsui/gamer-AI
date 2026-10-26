@@ -941,7 +941,7 @@ class Tools(ExtraTools):
     def _turn_record(self, sent, measured):
         """記下一次量到的轉角（送出度、實測度），只留最近 3 分鐘 8 筆。"""
         now = time.time()
-        self._turn_hist = [h for h in self._turn_hist if now - h[0] <= 180][-7:] + [(now, float(sent), float(measured))]
+        self._turn_hist = [h for h in self._turn_hist if now - h[0] <= 600][-9:] + [(now, float(sent), float(measured))]   # 第 51 輪：留 10 分鐘
 
     def _recent_ratio(self):
         """最近 3 分鐘量到的「實測÷送出」合計比例（≥2 筆、每筆送出 ≥8 度才算；反方向算 0）；不夠筆數回 None。"""
@@ -972,14 +972,16 @@ class Tools(ExtraTools):
         """10/26 19:2x 第 50 輪：18:40 起每段固定少轉 3～6 度（-20→-14、-22→-17／-18、+15→+9／+10、-11→-5／-6），四個拖曳起點都一樣（48～56%）
         → 不是起點壓到 UI。最近 3 分鐘 ≥3 段（送出 8～35 度、同方向）「送出−實測」中位 4～12 度、而且彼此差 ≤6 → 這次每段多送這麼多度；
         量到的照實說、跟要的比，所以補錯了下一段會看到。驗一圈／量刻度 不補（它們在量刻度本身）。"""
+        # 第 51 輪（19:5x）：19:30～19:50 他每 1～2 分鐘才轉一次、一半量不出，3 分鐘內湊不到 3 筆，補償從沒觸發（+19→+14、-11→-5、+17→+12／+6 都沒補）
+        #   → 窗口放到 10 分鐘、彼此差放到 8 度
         now = time.time()
-        hs = [h for h in self._turn_hist if now - h[0] <= 180 and 8 <= abs(h[1]) <= 35 and (h[2] > 0) == (h[1] > 0)]
+        hs = [h for h in self._turn_hist if now - h[0] <= 600 and 8 <= abs(h[1]) <= 35 and (h[2] > 0) == (h[1] > 0)]
         if len(hs) < 3:
             return 0.0
         losses = sorted(abs(h[1]) - abs(h[2]) for h in hs[-5:])
         med = losses[len(losses) // 2]
         spread = losses[-1] - losses[0]
-        if med < 4 or spread > 6:       # 平常每段就少 2～3 度（30→27／28），那是正常誤差、不補
+        if med < 4 or spread > 8:       # 平常每段就少 2～3 度（30→27／28），那是正常誤差、不補
             return 0.0
         return float(min(self.COMP_MAX, round(med)))
 
@@ -1289,7 +1291,9 @@ class Tools(ExtraTools):
                 v2_txt = "；" + self._v2("轉頭位移", f"{(sh or 0) * 100:+.0f}" if sh is not None else "量不出",
                                          f"{(sh2 or 0) * 100:+.0f}" if sh2 is not None else "量不出", ok, "%")
             # 10/16 07:0x：10/15～16 回測：|dx|>130（約 50 度以上）方向對 81、相反 70、卡搜尋上限(≥45%) 95 → 前後畫面沒重疊、量不出來
-            unmeasurable = sh is not None and (deg > 45 or abs(sh) >= 0.45)   # 10/25 審查：用度數判，不用像素（刻度不同時 45 度就被判量不出）
+            # 第 51 輪：19:35 轉(-30) 位移 -47% 碰到搜尋上限就被判「轉太大量不出」，但 30 度本來就會移 43～47% 畫面、特徵點量 30 度一段整天都量得到
+            #   → 只有超過 45 度才算轉太大；位移碰上限的照常用特徵點／標點量
+            unmeasurable = sh is not None and deg > 45   # 10/25 審查：用度數判，不用像素（刻度不同時 45 度就被判量不出）
             if unmeasurable:
                 sh_txt = ("轉太大，前後畫面幾乎沒有重疊，量不出景物位移和實際轉向（這次的位移不算數）；"
                           "要知道實際轉多少就分成 50 度以內一次一次轉")

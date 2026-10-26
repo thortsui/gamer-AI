@@ -264,4 +264,11 @@ check("補償 少轉 13／22／10 差太多 → 0（不穩不補）", t._comp_de
 t._turn_hist = []; t._turn_record(-20, -14); t._turn_record(-22, -17); t._turn_record(15, 10)
 check("補償後 dry-run 轉(-20) 照常", "轉了 20 度" in t.look_yaw("-20") if hasattr(t, "look_yaw") else True)
 t._turn_hist = []
+# 第 51 輪：5 分鐘前的段也算；差 7 度仍補
+import time as _tm
+t._turn_hist = [(_tm.time() - 300, 19.0, 14.0), (_tm.time() - 200, -11.0, -5.0), (_tm.time() - 10, 17.0, 6.0)]
+check("補償 10 分鐘窗口 少轉 5／6／11 → 6", t._comp_deg() == 6.0, t._comp_deg())
+t._turn_hist = [(_tm.time() - 700, 19.0, 14.0), (_tm.time() - 200, -11.0, -5.0), (_tm.time() - 10, 17.0, 12.0)]
+check("補償 超過 10 分鐘的不算 → 0", t._comp_deg() == 0.0, t._comp_deg())
+t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
