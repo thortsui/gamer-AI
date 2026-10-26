@@ -471,4 +471,10 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._last_ok = None
+# 第 66 輪：口吃式對話泡泡不算任務字
+_tw66 = T.TaskWords(); _tw66.update([("完成簽到", 0.91, 0.21)]); _tw66.update([("完成簽到", 0.91, 0.21)])
+_tw66.update([("你咕可咕以咕再咕加口", 0.90, 0.20)]); _, _ev66 = _tw66.update([("你咕可咕以咕再咕加口", 0.90, 0.20)])
+check("「你咕可咕以咕再咕」不算任務字換", _ev66 is None and _tw66.current == ["完成簽到"], (_ev66, _tw66.current))
+_, _ev66 = _tw66.update([("治療病人", 0.91, 0.21)])
+check("正常任務字照樣換", _ev66 is not None and _ev66["新"] == "治療病人", _ev66)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

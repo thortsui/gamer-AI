@@ -4680,11 +4680,15 @@ class TaskWords:
         # 10/19 07:3x：上方橫帶讀到伺服器／玩家名稱（「索利克斯胡巴咍托 2」）被當成換字 → 換字事件只認右緣任務框（x≥0.78），上方橫帶只顯示
         # 10/26 18:3x 第 48 輪：大廳招牌「頂尖輪／你的頂尖輪」（y 0.39）連兩輪讀到被當成「拍照→你的頂尖輪」換字
         #   → 換字事件只認任務框那一帶（y ≤ 0.37；10/18～10/26 真的任務字都在 0.14～0.37），再下面的字只顯示
-        cur = [self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 2 and w[1] >= 0.78 and w[2] <= 0.37]
+        # 10/27 05:5x 第 66 輪：05:54 角色對話泡泡「你咕可咕以咕再咕加口」飄到右上被當成任務字換（完成簽到→…）
+        #   → 同一個字出現 ≥3 次的（口吃式對話、OCR 連字）不算任務字
+        def _ok_word(t):
+            return len(t) >= 2 and max(t.count(c) for c in set(t)) < 3
+        cur = [self.norm(w[0]) for w in words if _ok_word(self.norm(w[0])) and w[1] >= 0.78 and w[2] <= 0.37]
         self.miss = 0 if cur else self.miss + 1
         # 10/20 04:3x：遊戲自己連跳「完成簽到→跟隨病人到他的房間→從房間3中的病人身上採集樣本」，每個只讀到一輪、要連兩輪才算 → 全漏掉。
         # 4 個中文字以上、正好在任務框那一格（x 0.88～0.94、y 0.17～0.25；10/19～20 真的任務字都在這裡，對話泡泡、道具 HUD 不在）的字讀到一次就算
-        sure = {self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 4 and 0.88 <= w[1] <= 0.94 and 0.17 <= w[2] <= 0.25}
+        sure = {self.norm(w[0]) for w in words if len(self.norm(w[0])) >= 4 and _ok_word(self.norm(w[0])) and 0.88 <= w[1] <= 0.94 and 0.17 <= w[2] <= 0.25}
         text = "、".join(w[0] for w in words) or "（沒讀到）"
         ev = None
         if self.hist or sure:
