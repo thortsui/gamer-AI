@@ -3783,6 +3783,20 @@ class Tools(ExtraTools):
         self.pending_click = None
         return "取消了預約的點擊"
 
+    @staticmethod
+    def _cursor_pos():
+        """螢幕上游標現在在哪（像素）；讀不到回 None。"""
+        try:
+            import ctypes
+            class _PT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            pt = _PT()
+            if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+                return int(pt.x), int(pt.y)
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
     def _do_click(self, fx, fy):
         before, noise = self._grab_noise()
         if self.live:
@@ -3791,8 +3805,18 @@ class Tools(ExtraTools):
             if not bbox:
                 return "找不到 Roblox 視窗"
             self._fg_ok()
-            pydirectinput.moveTo(int(bbox["left"] + fx * bbox["width"]), int(bbox["top"] + fy * bbox["height"]))
+            tx, ty = int(bbox["left"] + fx * bbox["width"]), int(bbox["top"] + fy * bbox["height"])
+            pydirectinput.moveTo(tx, ty)
             time.sleep(0.05)
+            # 10/26 23:2x 第 58 輪：23:16／23:20 第一人稱（中央十字）時 確認點(辦理入住) 兩次「點了 (0.50,0.83)、畫面變化 0」——
+            #   遊戲鎖游標在正中央，moveTo 被拉回去、點到的其實是畫面中央（第一人稱左鍵＝用手上的東西）。點之前先讀游標真的在哪，
+            #   不在要點的地方就不點、照實說
+            cur = self._cursor_pos()
+            if cur is not None and (abs(cur[0] - tx) > 25 or abs(cur[1] - ty) > 25):
+                cfx = (cur[0] - bbox["left"]) / max(1, bbox["width"])
+                cfy = (cur[1] - bbox["top"]) / max(1, bbox["height"])
+                return (f"**沒點**：想點 ({fx:.2f},{fy:.2f})，但游標被遊戲鎖住、移過去又被拉回 ({cfx:.2f},{cfy:.2f})（第一人稱／鎖游標模式會這樣），"
+                        "點下去會點到別的地方。先讓游標放出來（畫面上有十字準心＝鎖著；試 關掉 或看畫面有沒有解鎖的提示）再點")
             # 10/17 13:3x：Roblox 介面按鈕（ESC 繼續、辦理入住、出口）點了畫面變化 0 的居多（10/16～17 約七成）；
             # 游標瞬移過去 Roblox 常沒認到滑到按鈕上 → 原地小晃一下再按
             pydirectinput.moveRel(3, 0, relative=True)

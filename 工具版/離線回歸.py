@@ -371,4 +371,8 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []
+# 第 58 輪：點之前讀游標位置
+_cp = t._cursor_pos()
+check("讀得到游標位置", _cp is None or (isinstance(_cp, tuple) and len(_cp) == 2), _cp)
+check("dry-run 點 照常", "點了" in t._do_click(0.5, 0.83), t._do_click(0.5, 0.83))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
