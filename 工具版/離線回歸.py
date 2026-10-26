@@ -231,4 +231,11 @@ finally:
 t._nomove = 0
 check("連續沒動 第 3 次才提示", t._nomove_note(True) == "" and t._nomove_note(True) == "" and "連續 3 次" in t._nomove_note(True))
 check("有動就歸零", t._nomove_note(False) == "" and t._nomove == 0)
+# 第 48 輪：任務框以下的字（大廳招牌 y 0.39）連兩輪不算換字；任務框內的字連兩輪算
+_tw = T.TaskWords(); _tw.update([("拍照", 0.91, 0.21)]); _tw.update([("拍照", 0.91, 0.21)])
+_tw.update([("頂尖輪", 0.87, 0.39)]); _, _ev = _tw.update([("你的頂尖輪", 0.86, 0.39)])
+check("任務字換 不認 y 0.39 的招牌", _ev is None and _tw.current == ["拍照"], (_ev, _tw.current))
+_, _ev1 = _tw.update([("在電腦上註冊", 0.91, 0.21)]); _, _ev2 = _tw.update([("在電腦上註冊", 0.91, 0.21)])
+_ev = _ev1 or _ev2
+check("任務字換 認任務框內的字", _ev is not None and _ev["新"] == "在電腦上註冊", (_ev1, _ev2))
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
