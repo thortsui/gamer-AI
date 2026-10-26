@@ -238,4 +238,18 @@ check("任務字換 不認 y 0.39 的招牌", _ev is None and _tw.current == ["�
 _, _ev1 = _tw.update([("在電腦上註冊", 0.91, 0.21)]); _, _ev2 = _tw.update([("在電腦上註冊", 0.91, 0.21)])
 _ev = _ev1 or _ev2
 check("任務字換 認任務框內的字", _ev is not None and _ev["新"] == "在電腦上註冊", (_ev1, _ev2))
+# 第 49 輪：轉不足換拖曳起點；量不出的段照最近比例估
+t._turn_hist = []; t.DRAG_FX, t.DRAG_FY = 0.30, 0.40; t._drag_idx = 0
+check("比例 不夠筆數 None", t._recent_ratio() is None)
+t._turn_record(-17, -4); t._turn_record(-17, -6)
+check("比例 10/34≈0.29", abs(t._recent_ratio() - 10 / 34) < 0.01, t._recent_ratio())
+_e, _tx = t._unmeasured_est(-24)
+check("量不出的段照比例估 -24→約 -7", -8.5 < _e < -6.5 and "不確定" in _tx and t._chunk_unsure, (_e, _tx))
+_n = t._under_turn_note(-17, -4)
+check("轉不足 換拖曳起點 → (0.70,0.40)", (t.DRAG_FX, t.DRAG_FY) == (0.70, 0.40) and "24%" in _n, (_n, t.DRAG_FX))
+check("轉夠 不換起點", t._under_turn_note(-30, -27) == "" and (t.DRAG_FX, t.DRAG_FY) == (0.70, 0.40))
+t._turn_hist = []; t._turn_record(30, 28); t._turn_record(30, 27); t._chunk_unsure = False
+_e, _tx = t._unmeasured_est(20)
+check("比例正常時 量不出照送出算", _e == 20 and _tx == "" and not t._chunk_unsure, (_e, _tx))
+t._turn_hist = []; t.DRAG_FX, t.DRAG_FY = 0.30, 0.40; t._drag_idx = 0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

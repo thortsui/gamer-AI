@@ -932,6 +932,48 @@ class Tools(ExtraTools):
 
     # ---- 視角
     DRAG_FX, DRAG_FY = 0.30, 0.40    # 10/26 05:1x 第 35 輪：拖曳起點改到左上方（避開中央角色的名牌／E框，壓在 UI 上鏡頭不會動）
+    # 10/26 18:5x 第 49 輪：18:40～18:51 每段都只轉到送出的 25～35%（-17→-4／-6、-15→-5、-30→-8，標點與特徵點都這麼說），
+    #   起點 (0.30,0.40) 正好壓在左側黑螢幕／E框 上。量到連續轉不足就換起點輪著試；量不出的段不再「照送出算」，改用最近幾段的實測比例估
+    DRAG_STARTS = ((0.30, 0.40), (0.70, 0.40), (0.50, 0.80), (0.30, 0.25))
+    _turn_hist = []
+    _drag_idx = 0
+
+    def _turn_record(self, sent, measured):
+        """記下一次量到的轉角（送出度、實測度），只留最近 3 分鐘 8 筆。"""
+        now = time.time()
+        self._turn_hist = [h for h in self._turn_hist if now - h[0] <= 180][-7:] + [(now, float(sent), float(measured))]
+
+    def _recent_ratio(self):
+        """最近 3 分鐘量到的「實測÷送出」合計比例（≥2 筆、每筆送出 ≥8 度才算；反方向算 0）；不夠筆數回 None。"""
+        now = time.time()
+        hs = [h for h in self._turn_hist if now - h[0] <= 180 and abs(h[1]) >= 8]
+        if len(hs) < 2:
+            return None
+        sent = sum(abs(h[1]) for h in hs)
+        got = sum(abs(h[2]) if (h[2] > 0) == (h[1] > 0) else 0.0 for h in hs)
+        return got / sent if sent else None
+
+    def _under_turn_note(self, sent, measured):
+        """量到的不到送出的六成（送出 ≥10 度）→ 下一次換拖曳起點；回說明（沒事回空字串）。"""
+        if measured is None or abs(sent) < 10:
+            return ""
+        if (measured > 0) == (sent > 0) and abs(measured) >= 0.6 * abs(sent):
+            return ""
+        old = (self.DRAG_FX, self.DRAG_FY)
+        self._drag_idx = (self._drag_idx + 1) % len(self.DRAG_STARTS)
+        self.DRAG_FX, self.DRAG_FY = self.DRAG_STARTS[self._drag_idx]
+        pct = abs(measured) / abs(sent) * 100 if (measured > 0) == (sent > 0) else 0.0
+        return (f"（這段只轉到送出的 {pct:.0f}%：拖曳起點 ({old[0]:.2f},{old[1]:.2f}) 可能壓在 UI／面板上，"
+                f"下一次改從 ({self.DRAG_FX:.2f},{self.DRAG_FY:.2f}) 開始拖）")
+
+    def _unmeasured_est(self, sent):
+        """量不出的一段要算多少：最近幾段比例 <0.6 就照比例估（回 (估的度數, 說明)），否則照送出算。"""
+        ratio = self._recent_ratio()
+        if ratio is not None and ratio < 0.6:
+            est = sent * ratio
+            self._chunk_unsure = True
+            return est, f"最近幾段只轉到送出的 {ratio * 100:.0f}%，這段多半也沒轉到，照同樣比例估約 {est:+.0f} 度（不確定）"
+        return sent, ""
 
     def _drag(self, dx, dy, fy=None, fx=None):
         """壓右鍵拖曳（跟舊版同一套）；一次最多 220 像素，分段。fx／fy＝從畫面哪裡開始拖（預設 0.30,0.40；原本 0.5,0.5 正中央常壓到角色身上的 UI）。"""
@@ -1242,8 +1284,9 @@ class Tools(ExtraTools):
                         sh_txt += f"；{scene_txt}；{lm_txt}；（{self.REP_NOTE}）"
                     elif lm_deg is not None:
                         ok = abs(lm_deg - want) <= max(5.0, 0.15 * abs(want))
+                        self._turn_record(want, lm_deg)
                         sh_txt += (f"；{scene_txt}；{lm_txt}；**你實際轉了約 {lm_deg:+.0f} 度（要轉 {want:+.0f} 度）**；"
-                                   + self._cmp("轉了幾度", f"{want:+.0f}", f"{lm_deg:+.0f}", ok, "度"))
+                                   + self._cmp("轉了幾度", f"{want:+.0f}", f"{lm_deg:+.0f}", ok, "度") + self._under_turn_note(want, lm_deg))
                     elif deg_scene is not None:
                         sh_txt += f"；{lm_txt}；{scene_txt}（沒有標點，{deg_scene:+.0f} 度僅參考、不判一致；要轉 {want:+.0f} 度）"
                     else:
@@ -2745,6 +2788,8 @@ class Tools(ExtraTools):
                 v2 = f"（{self.REP_NOTE}）"
             elif getattr(self, "_chunk_unsure", False) and not ok:
                 v2 = f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）"
+            elif getattr(self, "_chunk_unsure", False):
+                v2 = f"（有一段量不出、是估的，合計 {meas:+.0f} 僅參考、不判一致；看下一張畫面確認）"   # 第 49 輪：18:50 補轉量不出照送出算 → 判一致、說已對準，其實沒轉到
             else:
                 v2 = (self._cmp("轉頭合計", f"{d:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
                       + ("（畫面有重複花紋，但標點段都跟送出一致）" if getattr(self, "_rep_flag", False) else "") if lm_used
@@ -2820,9 +2865,11 @@ class Tools(ExtraTools):
                 parts.append(f"第{i + 1}段 {chunk:+.0f}→整張位移量到 {scene_deg:+.0f}（跟送出差太多、不合理，這段照送出的 {chunk:+.0f} 算、僅參考）")
                 continue
             if lm_deg is None and scene_deg is None:
-                meas += chunk
+                est, est_txt = self._unmeasured_est(chunk)
+                meas += est
                 self._verify_dump("轉段", before, after, 送出度=chunk, 標點度=None, 整張度=None, 用的=None, 畫面變化=dd, 量不出=True, 特徵度=None)
-                parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ 這段照送出的算、停在這裡")
+                parts.append(f"第{i + 1}段 已送出 {chunk:+.0f} 但量不出（前後畫面找不到同一個東西；{lm_txt}）→ "
+                             + (est_txt if est_txt else "這段照送出的算") + "、停在這裡")
                 stopped = True
                 break
             turned = lm_deg if lm_deg is not None else scene_deg   # 特徵點＞標點＞整張位移（左右兩帶換算）
@@ -2830,7 +2877,10 @@ class Tools(ExtraTools):
             self._seg_ok.append(abs(turned - chunk) <= max(5.0, 0.15 * abs(chunk)))
             lm_used += lm_deg is not None
             meas += turned
-            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）")
+            if feat_here or lm_deg is not None:
+                self._turn_record(chunk, turned)
+            parts.append(f"第{i + 1}段 {chunk:+.0f}→實測 {turned:+.0f}（{'特徵點' if feat_here else ('標點' if lm_deg is not None else '整張位移，僅參考')}）"
+                         + (self._under_turn_note(chunk, turned) if (feat_here or lm_deg is not None) else ""))
         # 10/26 01:5x 第 30 輪：每段拖曳固定少 2～3 度（30→27／28、17→13）、合計常差到不一致（01:39 要 34 量到 27），他下一輪得再轉一次。
         #   → 合計跟要的差超過容許（5 度或 15%）就補轉一次差額、照樣實測加進合計；只補一次、補完照量到的說
         if not stopped and lm_used >= 1 and self.live and not self.image_path:
@@ -2848,14 +2898,16 @@ class Tools(ExtraTools):
                     how = "標點"
                 done += gap
                 if turned is None:
-                    meas += gap
+                    est, est_txt = self._unmeasured_est(gap)
+                    meas += est
                     self._chunk_unsure = True
-                    parts.append(f"補轉 {gap:+.0f}→量不出、照送出算（僅參考）")
+                    parts.append(f"補轉 {gap:+.0f}→量不出、" + (est_txt if est_txt else "照送出算（僅參考）"))
                 else:
                     meas += turned
                     lm_used += 1
+                    self._turn_record(gap, turned)
                     self._seg_ok.append(abs(turned - gap) <= max(5.0, 0.15 * abs(gap)))
-                    parts.append(f"補轉 {gap:+.0f}→實測 {turned:+.0f}（{how}）")
+                    parts.append(f"補轉 {gap:+.0f}→實測 {turned:+.0f}（{how}）" + self._under_turn_note(gap, turned))
                 self._verify_dump("轉段", before, after, 送出度=gap, 標點度=(turned if how == "標點" else None), 整張度=None, 用的=turned, 畫面變化=dd, 特徵度=f_yaw, 補轉=True)
         return meas, "、".join(parts), done, stopped, lm_used
 
@@ -3373,6 +3425,9 @@ class Tools(ExtraTools):
                     ok = False
                 elif getattr(self, "_chunk_unsure", False) and not ok:
                     out.append(f"（有一段整張位移量到不合理的值、照送出算，合計 {meas:+.0f} 僅參考、不判一致）")
+                elif getattr(self, "_chunk_unsure", False):
+                    ok = False      # 第 49 輪：18:50 兩段各只轉到 -4／-6，補轉 -24 量不出照送出算 → 合計 -34「一致、已對準」，其實目標還在左邊
+                    out.append(f"（有一段量不出、是估的，合計 {meas:+.0f} 僅參考、不能說已對準；看下一張畫面確認目標在哪）")
                 else:
                     out.append((self._cmp("視角移動到 分段實測", f"{yaw_calc:+.0f}", f"{meas:+.0f}", ok, "度") + ("（特徵點實測合計）" if "特徵點" in parts else "（標點實測合計）")
                                 + ("（畫面有重複花紋，但標點段都跟送出一致）" if getattr(self, "_rep_flag", False) else "")) if lm_used
@@ -3390,8 +3445,9 @@ class Tools(ExtraTools):
                     ok = abs(lm_deg - yaw) <= max(5.0, 0.15 * abs(yaw))
                     out.append(head + f"→ 量實際轉了幾度：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）"
                                + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if (scene_deg is not None and not getattr(self, "_feat_used", False)) else ""))
+                    self._turn_record(yaw, lm_deg)
                     out.append(self._cmp("視角移動到 特徵點實測" if getattr(self, "_feat_used", False) else "視角移動到 標點實測", f"{yaw:+.0f}", f"{lm_deg:+.0f}", ok, "度")
-                               + ("（目標應該就在正中央、被你自己的角色擋住看不到）" if ok else "（差太多，可能沒轉到、或滑鼠拖到一半被擋）"))
+                               + ("（目標應該就在正中央、被你自己的角色擋住看不到）" if ok else "（差太多，可能沒轉到、或滑鼠拖到一半被擋）") + self._under_turn_note(yaw, lm_deg))
                 elif scene_deg is not None and abs(yaw) >= 3:
                     ok = abs(scene_deg - yaw) <= max(5.0, 0.15 * abs(yaw))      # 10/25 稽核：改比度數、用 _cmp（原本「要 vs 實測」混進二次驗證一致率）
                     out.append(head + f"→ 標點量不到（{lm_txt}）、改用整張位移（左右兩帶）換算：鏡頭轉了約 {scene_deg:+.0f} 度（要轉 {yaw:+.0f} 度；畫面變化 {d_all:.0f}）")
