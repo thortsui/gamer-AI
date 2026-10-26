@@ -160,7 +160,11 @@ def main():
         h, m, s_ = (int(x) for x in r["時間"].split(":"))
         t = h * 3600 + m * 60 + s_
         died = bool(re.search(r"你死了|再玩一次", sv))
-        lobby = ("大廳" in sv or "ANIMAL" in sv.upper()) and "輪班" not in sv
+        # 10/26 18:2x：18:18 理智 5%→回大廳漏算——他寫「道具欄5%」、回大廳那輪只寫「商店邀請職業日誌按鈕列」沒寫「大廳」。
+        # 改：程式側 右上字（任務框 OCR）有字＝局內；這輪 右上字 空而且看到大廳 HUD 字（商店／邀請／職業／日誌／最高轉移速度／配對踏板）＝大廳
+        tw = r.get("右上字")
+        lobby_hud = bool(re.search(r"大廳|商店|邀請|職業|日誌|最高轉移速度|配對踏板|角色扮演", sv)) or "ANIMAL" in sv.upper()
+        lobby = lobby_hud and "輪班" not in sv and not tw
         if not died and in_game and lobby and sanity is not None and sanity <= 5:
             died = True
         if died:
@@ -173,7 +177,12 @@ def main():
         ms = re.search(r"(?:理智\s*(\d+)\s*%|(\d+)\s*%\s*理智|(\d+)\s*%\s*[/、]?\s*\$|左下(?:理智)?\s*(\d+)\s*%)", sv)
         if ms:
             sanity = int(next(g for g in ms.groups() if g))
-        if "輪班" in sv:
+        else:
+            # 10/26 18:2x：「道具欄5%」「左下精神12%」這種寫法——整段只有一個百分比就當理智
+            pcs = [int(x) for x in re.findall(r"(\d+)\s*%", sv) if int(x) <= 100]
+            if len(pcs) == 1:
+                sanity = pcs[0]
+        if "輪班" in sv or tw:
             in_game = True
         elif lobby:
             in_game, sanity = False, None
