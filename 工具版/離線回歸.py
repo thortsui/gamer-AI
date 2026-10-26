@@ -458,4 +458,17 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 65 輪：esc 不覆蓋「最後一個有反應的動作」
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "diff")}
+try:
+    t.live, t.image_path = True, None; t._last_ok = ("05:13", "長按 e")
+    t.grab = lambda: im; t.diff = lambda a, b: 40.0
+    t._move("esc", 0.1, 0.1, 0.1)
+    check("按 esc 有變也不覆蓋最後有反應動作", t._last_ok == ("05:13", "長按 e"), t._last_ok)
+    t._move("e", 1.5, 1.5, 1.5)
+    check("長按 e 有變會更新", t._last_ok[1] == "長按 e" and t._last_ok[0] != "05:13", t._last_ok)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._last_ok = None
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

@@ -849,8 +849,9 @@ class Tools(ExtraTools):
             _nm = (self._nomove_note(dd <= 2) if _mv else "")
             return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + _nm + z_txt
         out = self._changed(before, noise)
-        if not ("沒變" in out or "看不出" in out):
-            self._last_ok = (datetime.now().strftime("%H:%M"), f"{'長按' if d >= 1.0 else '按'} {k}")   # 第 61 輪
+        # 第 61 輪；10/27 05:2x 第 65 輪：esc 開 Roblox 選單也算「有反應」，05:20 把「最後一個有反應的動作：長按 e（05:13）」蓋成「按 esc」→ esc／tab 不算
+        if not ("沒變" in out or "看不出" in out) and str(k).lower() not in ("esc", "escape", "tab"):
+            self._last_ok = (datetime.now().strftime("%H:%M"), f"{'長按' if d >= 1.0 else '按'} {k}")
         if k in ("a", "d"):
             out += self._nomove_note("沒變" in out or "看不出" in out)
         if k == "e" and ("沒變" in out or "看不出" in out) and "有反應**" not in out:
