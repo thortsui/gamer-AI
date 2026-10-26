@@ -3706,7 +3706,7 @@ class Tools(ExtraTools):
             still = sum(1 for w in self._words(self.grab()) if any(m in w for m in menu)) >= 2
             return ("關掉面板：按 esc 打開的是 Roblox 平台選單（帳號／邀請好友／設定），不是遊戲裡的視窗；"
                     + ("已再按一次 esc，選單還在——點底部藍色「繼續」" if still else "已再按一次 esc 關回遊戲")
-                    + "。遊戲裡的視窗（購買道具等）要點它右上角的 X" + ("" if still else self._panel_buttons(self.grab())))
+                    + "。遊戲裡的視窗（購買道具等）要點它右上角的 X" + ("" if still else (time.sleep(0.5) or self._panel_buttons(self.grab()))))
         return "關掉面板：" + r
 
     def _panel_buttons(self, im):
@@ -3716,7 +3716,7 @@ class Tools(ExtraTools):
             words = self._words(im)
         except Exception:  # noqa: BLE001
             return ""
-        cand = [(w, xy) for w, xy in words.items() if xy[1] >= 0.70 and 0.25 <= xy[0] <= 0.80 and len(w.strip()) >= 2]
+        cand = [(w, xy) for w, xy in words.items() if xy[1] >= 0.65 and 0.20 <= xy[0] <= 0.85 and len(w.strip()) >= 2]   # 09:06 關掉 沒列到「辦理入住」(0.50,0.80)／「出口」(0.50,0.88)：esc 關回後馬上抓、字還沒出來
         if not cand:
             return ""
         return "。畫面下半現在讀到這些字（esc 關不掉的面板通常要點它自己的按鈕）：" + "、".join(f"「{w}」({xy[0]:.2f},{xy[1]:.2f})" for w, xy in cand[:6])
