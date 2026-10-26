@@ -429,4 +429,10 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []; t._dead_n = 0; t._dead_since = ""; t._last_ok = None
+# 第 62 輪：修水平 沒修好 → 上下限制先不套用
+t.pitch_acc = -44.0; t.pitch_unknown = True
+check("水平儀不可靠時不擋", t._pitch_room(-20) == -20)
+t.pitch_unknown = False
+check("水平儀可靠時照擋", abs(t._pitch_room(-20)) < 20)
+t.pitch_acc = 0.0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
