@@ -3275,6 +3275,12 @@ class Tools(ExtraTools):
         loc1 = self._locate(patch, after, near=(0.5, ay, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
         bad_comp = False
+        if loc1 and loc1[2] >= GOOD and (abs(loc1[0] - 0.5) > 0.2 or abs(loc1[1] - ay) > 0.2) and abs(yaw) >= 5:
+            # 10/26 11:2x 第 42 輪：11:09 送 +15 度，「找到」目標在 (0.27,0.77)（離中央 23%／27%＝差了 30 多度），補轉 −32/−17 更偏。
+            #   轉完目標理應在中央附近；差超過 20% 畫面就是認錯（大廳人多、地磚同款），不拿它補轉，改用特徵點量實際轉了幾度
+            out.append(f"轉完最像的一塊在 ({loc1[0]:.2f},{loc1[1]:.2f})（相似度 {loc1[2]:.2f}），離中央太遠、跟送出的角度對不上＝多半認錯，不拿它補轉")
+            loc1 = None
+            final = None
         if loc1 and loc1[2] >= GOOD:
             out.append(f"轉完找目標：在 ({loc1[0]:.2f},{loc1[1]:.2f})（相似度 {loc1[2]:.2f}）")
             if abs(loc1[0] - 0.5) > 0.04 or abs(loc1[1] - ay) > 0.06:      # 偏了補一次
