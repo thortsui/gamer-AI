@@ -3288,8 +3288,9 @@ class Tools(ExtraTools):
                 out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
                 d1 = abs(loc1[0] - 0.5) + abs(loc1[1] - ay)
                 d2 = (abs(final[0] - 0.5) + abs(final[1] - ay)) if (final and final[2] >= GOOD) else None
-                if (final and final[2] >= GOOD and abs(final[0] - loc1[0]) < 0.02 and abs(final[1] - loc1[1]) < 0.02
-                        and abs(loc1[0] - fx) < 0.03 and abs(loc1[1] - fy) < 0.03 and (abs(y2) >= 5 or abs(p2) >= 5)):
+                if (final and final[2] >= GOOD and abs(final[0] - loc1[0]) < 0.05 and abs(final[1] - loc1[1]) < 0.06
+                        and abs(loc1[0] - fx) < 0.05 and abs(loc1[1] - fy) < 0.06 and (abs(y2) >= 8 or abs(p2) >= 8)):
+                    # 10/26 09:5x 第 41 輪：角色身上的剪貼簿 E框 會上下晃 0.03，原本 0.02 門檻抓不到（09:39／09:41 各補轉一次還是「不一致」）
                     # 10/26 05:1x 第 35 輪：05:03 送 -14 目標從 (0.41,0.47) 沒動、補轉 -14 還是沒動，卻回「偏了…沒有完全對準」
                     return ("；".join(out) + f"；**轉了兩次目標都沒動（還在 ({final[0]:.2f},{final[1]:.2f})）＝鏡頭根本沒轉**：右鍵壓到的地方可能是 UI（角色名牌／E框／面板）或游標被鎖；"
                             "這塊若是釘在畫面上的字也會這樣。先 關掉 面板、或 確認是否是UI；要對準場景裡的東西")

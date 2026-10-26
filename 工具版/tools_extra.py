@@ -552,6 +552,15 @@ class ExtraTools:
         GH, GW = g.shape
         tpl = self._trk_crop(g, x, y, int(0.09 * GW), int(0.12 * GH))
         h0 = tpl.shape[0]
+        try:
+            import numpy as _np
+            _sd = float(_np.asarray(tpl, dtype=_np.float32).std())
+        except Exception:  # noqa: BLE001
+            _sd = 99.0
+        if _sd < 8.0:
+            # 10/26 09:5x 第 41 輪：09:46 走過去(0.78,0.42) 那塊是整片平的（相似度 1.00 到處都像），第 2 步認到 (0.20,0.57) 跟去
+            return (f"走過去「{name}」：目標那一塊 ({x:.2f},{y:.2f}) 沒有紋理（整片平的、對比 {_sd:.0f}），盯不住、會到處認錯；"
+                    "換一個有紋理的點（邊緣、有字、有圖案的地方），或先 描述畫面 用編號")
         is_new = self._new_word_checker(im)
         log, reason, lost = [], "", 0
         for i in range(8):
