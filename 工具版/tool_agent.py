@@ -3109,6 +3109,20 @@ class Tools(ExtraTools):
                 return ("修水平：每步 10 像素慢慢往下、往上都量不到鏡頭有在動（0 像素）＝畫面沒紋理（整片天花板／地板／牆）或鏡頭被鎖，"
                         "**沒有拉、水平儀沒歸零**（原本累計 " + f"{was:+.0f} 度）；先 仰(-30) 或 轉(30) 看畫面會不會變，到看得到牆和地的地方再 修水平")
             full = top if top else (self.vrange_px or int(160 * self.dy_deg))
+            ref = self.vrange_px or int(160 * self.dy_deg)
+            if top and ref and top < 0.6 * ref:
+                # 10/26 15:2x 第 46 輪：15:15 往上 180 像素就判「頂到」（天花板沒紋理），照 180 的一半拉 → 還是看天花板，他再 仰(-15) 自己拉；
+                #   15:07 同房間量到 470、記的 520 → 量到的全程比記的小太多就不信它，改用記的全程從底算：往上補到 ref/2
+                delta = ref // 2 - top
+                self._drag(0, -delta)
+                time.sleep(0.3)
+                self.pitch_acc = 0.0
+                lv = (f"**不一定水平**：往上只走 {top} 像素就看不出鏡頭在動（天花板／牆沒紋理、太早當成頂到），跟記的全程 {ref} 差太多，不信它；"
+                      f"改照記的全程從底算、往{'上' if delta > 0 else '下'}補 {abs(delta)} 像素。看下一張畫面：滿是天花板就 仰(-15)、滿是地板就 仰(15)")
+                self.level_meas = (datetime.now().strftime("%H:%M"), lv)
+                self._depth_log(種類="修水平 找底再找頂", 往下像素=down_px, 往上全程=top, 用的全程=ref, 水平儀原本=round(was, 1), 結果="量到的全程太小、改用記的")
+                return (f"修水平：每步 10 像素慢慢往下{'到底' if bottom else '（沒找到底）'}（往下動了 {down_px} 像素）→ 再慢慢往上 → {lv}；"
+                        f"水平儀原本以為{'抬頭' if was > 0 else '低頭'} {abs(was):.0f} 度，已歸零")
             if top:
                 self._drag(0, full // 2)                       # 在頂：往下拉一半
             else:
