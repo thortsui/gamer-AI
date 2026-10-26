@@ -252,4 +252,16 @@ t._turn_hist = []; t._turn_record(30, 28); t._turn_record(30, 27); t._chunk_unsu
 _e, _tx = t._unmeasured_est(20)
 check("比例正常時 量不出照送出算", _e == 20 and _tx == "" and not t._chunk_unsure, (_e, _tx))
 t._turn_hist = []; t.DRAG_FX, t.DRAG_FY = 0.30, 0.40; t._drag_idx = 0
+# 第 50 輪：每段固定少轉 → 補償量
+t._turn_hist = []
+check("補償 不夠筆數 0", t._comp_deg() == 0.0)
+t._turn_record(-20, -14); t._turn_record(-22, -17); t._turn_record(15, 10)
+check("補償 少轉 5／5／6 → 5", t._comp_deg() == 5.0, t._comp_deg())
+t._turn_hist = []; t._turn_record(30, 28); t._turn_record(30, 27); t._turn_record(17, 14)
+check("補償 少轉 2～3 → 0（正常誤差）", t._comp_deg() == 0.0, t._comp_deg())
+t._turn_hist = []; t._turn_record(-17, -4); t._turn_record(-30, -8); t._turn_record(-15, -5)
+check("補償 少轉 13／22／10 差太多 → 0（不穩不補）", t._comp_deg() == 0.0, t._comp_deg())
+t._turn_hist = []; t._turn_record(-20, -14); t._turn_record(-22, -17); t._turn_record(15, 10)
+check("補償後 dry-run 轉(-20) 照常", "轉了 20 度" in t.look_yaw("-20") if hasattr(t, "look_yaw") else True)
+t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
