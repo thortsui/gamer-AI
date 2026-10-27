@@ -4863,6 +4863,13 @@ class TaskWords:
     def __init__(self):
         self.hist, self.current, self.events, self.last_text, self.prev_text = [], [], [], "", ""
         self.miss = 0          # 連續幾輪右上任務框一個字都沒讀到
+        self.known = set()     # 第 93 輪：這次啟動後確認過的任務字（跟目前任務字一半像的新字，沒見過的要連兩輪讀到一樣才算換）
+
+    @staticmethod
+    def near(a, b):
+        """第 93 輪：兩個字有一半像但又不到「同一個」（ratio 0.4～0.6）＝多半是同一個字 OCR 讀壞（蓋印表格／盜印表嵍、檢查鰍的廅印表格）。"""
+        import difflib
+        return 0.4 <= difflib.SequenceMatcher(None, a, b).ratio() < 0.6
 
     @staticmethod
     def norm(t):
@@ -4897,12 +4904,19 @@ class TaskWords:
             confirmed = [w for w in cur if w in sure or any(self.same(w, x) for x in last)]
             # 14:2x：原本也跟「最近讀過但沒確認」的字比，14:17 讀過一次「拍照」→ 14:20 確認時被當舊字、換字事件漏掉；只跟目前認定的比
             new = [w for w in confirmed if not any(self.same(w, p) for p in self.current)]
+            # 10/28 06:0x 第 93 輪：10/27～28 任務字換 38 次有 9 次是 OCR 讀壞（05:53「蓋印表格→盜印表嵍」、05:54 又換回、09:01「檢查鰍的廅印表格」），
+            #   順序實驗的 任務字換 指標被灌水。跟目前任務字一半像的新字、而且這次啟動後沒確認過 → 要連兩輪讀到一模一樣才算換；
+            #   見過的真任務字（列印徽章→獲取徽章 也一半像）照舊一次就算
+            held = [w for w in new if (any(self.near(w, p) for p in self.current) and w not in self.known and w not in last)]
+            new = [w for w in new if w not in held]
+            confirmed = [w for w in confirmed if w not in held]      # 先不算的字也不併進目前任務字（不然下一輪就變「同一個」）
             if new and (self.current or self.events):
                 ev = {"時間": datetime.now().strftime("%H:%M"), "舊": "、".join(self.current) or "（沒有）", "新": "、".join(new)}
                 self.events.append(ev)
             # 兩行的任務字只讀到其中一行時不縮小（10/19「從房間3中的病人／身上採集樣本」一行一行輪流讀到被當成換字）
             if new:
                 self.current = confirmed
+                self.known.update(confirmed)
             elif confirmed:
                 self.current = self.current + [w for w in confirmed if not any(self.same(w, p) for p in self.current)]
         self.hist.append(cur)

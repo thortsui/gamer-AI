@@ -994,4 +994,22 @@ finally:
         t.startup.pop("人稱", None)
     else:
         t.startup["人稱"] = _bak_p92
+# 第 93 輪：跟目前任務字一半像、沒見過的新字 → 連兩輪讀到一樣才算換
+_tw93 = T.TaskWords()
+_tw93.update([("蓋印表格", 0.91, 0.21)]); _tw93.update([("蓋印表格", 0.91, 0.21)])
+check("任務字 蓋印表格 建立", _tw93.current == ["蓋印表格"], _tw93.current)
+_t, _e = _tw93.update([("盜印表嵍", 0.91, 0.21)])
+check("OCR 讀壞 盜印表嵍（一半像、沒見過、只讀一次）→ 不算換", _e is None and _tw93.current == ["蓋印表格"], (_e, _tw93.current))
+_t, _e = _tw93.update([("一蓋印表格", 0.91, 0.21)])
+check("一蓋印表格 包含 蓋印表格 → 不算換", _e is None, _e)
+_t, _e = _tw93.update([("拍照", 0.91, 0.21)]); _t, _e2 = _tw93.update([("拍照", 0.91, 0.21)])
+check("拍照 連兩輪 → 換（完全不像、照舊）", _e2 is not None and _e2["新"] == "拍照", (_e, _e2))
+_t, _e = _tw93.update([("列印徽章", 0.91, 0.21)])
+check("列印徽章（跟 拍照 不像、任務框一次就算）→ 換", _e is not None and _e["新"] == "列印徽章", _e)
+_t, _e = _tw93.update([("獲取徽章", 0.91, 0.21)])
+check("獲取徽章 跟 列印徽章 一半像、第一次見 → 先不算", _e is None, _e)
+_t, _e = _tw93.update([("獲取徽章", 0.91, 0.21)])
+check("獲取徽章 連兩輪一樣 → 算換", _e is not None and _e["新"] == "獲取徽章", _e)
+_t, _e = _tw93.update([("列印徽章", 0.91, 0.21)])
+check("列印徽章 見過 → 一次就算換回", _e is not None and _e["新"] == "列印徽章", _e)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
