@@ -3482,6 +3482,21 @@ class Tools(ExtraTools):
             pass
         return r
 
+    def _hud_task_word_at(self, im, fx, fy):
+        """第 91 輪：(fx,fy) 在右上任務框區（x≥0.78、y≤0.37）且裁切放大 OCR 在同位置（差 ≤0.08）讀到跟目前認定的任務字同一個字 → 回那個字；否則空字串。
+        跟第 70／71 輪 描述畫面 標釘的規則一樣（只認同字，避免把玩家列表／0/5 當任務字）。"""
+        cur = [TaskWords.norm(t) for t in (getattr(self, "task_current", None) or []) if TaskWords.norm(t)]
+        if not cur or not (fx >= 0.78 and fy <= 0.37):
+            return ""
+        try:
+            ws = top_right_words(im) or []
+        except Exception:  # noqa: BLE001
+            return ""
+        for w, wx, wy in ws:
+            if abs(wx - fx) <= 0.08 and abs(wy - fy) <= 0.08 and TaskWords.norm(w) and any(TaskWords.same(TaskWords.norm(w), c) for c in cur):
+                return w
+        return ""
+
     def _look_at_core(self, x="", y=""):
         import math
         fx, fy = num(x, -1), num(y, -1)
@@ -3498,6 +3513,16 @@ class Tools(ExtraTools):
         if before is None:
             return "抓不到畫面"
         W, H = before.width, before.height
+        # 10/28 03:1x 第 91 輪：10/26～28 對右上任務框區叫 視角移動到 30 次，13 次轉完才判「釘在畫面上」轉回、16 次回「已對準」（03:10 對 (0.91,0.23)「拍照」）。
+        #   轉之前就能量：那一區 OCR 讀到的字跟目前任務字同字＝HUD → 不轉、照實說（第 70／71 輪 描述畫面 已經這樣標）
+        hud = self._hud_task_word_at(before, fx, fy)
+        if hud:
+            try:
+                self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜轉前就判是右上任務框的字「{hud}」、沒轉")
+            except Exception:  # noqa: BLE001
+                pass
+            return (f"({fx:.2f},{fy:.2f}) 是右上任務框的字「{hud}」（HUD、釘在畫面上，跟目前認定的任務字同一個字），轉頭不會讓它移到中央；**沒有轉**。"
+                    "要對準場景裡的東西：描述畫面 用 場景 的編號、或 讀字 找 E 提示；不確定哪裡是 UI 就叫 確認是否是UI")
         # 目標附近一小塊當「長相」，轉完在新畫面找它，確認到了中央沒有
         SW, SH = 240, 124
         small = before.resize((SW, SH))

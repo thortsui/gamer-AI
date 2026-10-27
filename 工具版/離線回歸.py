@@ -944,4 +944,24 @@ finally:
                 pass
         else:
             setattr(t, k, v)
+# 第 91 輪：視角移動到 對右上任務框的任務字 → 轉前就擋
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_drag", "task_current", "_append")}
+_bak_trw = T.top_right_words
+try:
+    t.live, t.image_path = True, None; t.grab = lambda: im; t._append = lambda *a, **k: ""
+    _dr91 = []; t._drag = lambda dx, dy, fy=0.5, fx=None: _dr91.append(dx)
+    T.top_right_words = lambda im_: [("拍照", 0.91, 0.21)]
+    t.task_current = ["拍照"]
+    _r = t.look_at(0.91, 0.23)
+    check("對右上任務字 拍照 → 轉前就說是 HUD、沒轉", "右上任務框的字「拍照」" in _r and "沒有轉" in _r and not _dr91, (_r[:200], _dr91))
+    t.task_current = []
+    check("沒有目前任務字 → 不擋", t._hud_task_word_at(im, 0.91, 0.23) == "")
+    t.task_current = ["蓋印表格"]
+    check("那裡的字跟任務字不同 → 不擋", t._hud_task_word_at(im, 0.91, 0.23) == "")
+    t.task_current = ["拍照"]
+    check("座標不在右上區 → 不擋", t._hud_task_word_at(im, 0.5, 0.5) == "")
+finally:
+    T.top_right_words = _bak_trw
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
