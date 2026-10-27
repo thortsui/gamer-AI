@@ -3453,7 +3453,36 @@ class Tools(ExtraTools):
             a = b
         return a
 
+    E_WORD_RE = r"(^|[\s\[（(])E([\s\]）)]|$)|長按|按 ?E"
+
+    def _eprompt_note(self):
+        """第 90 輪：轉完把畫面上像 E 提示的字（程式 OCR 讀的）和它離中央幾度列出來——只給位置，不判斷。"""
+        if not self.live or self.image_path:
+            return ""
+        im = self.grab()
+        if im is None:
+            return ""
+        words = self._words(im)
+        hits = [(w, xy) for w, xy in words.items() if re.search(self.E_WORD_RE, str(w))]
+        if not hits:
+            return ""
+        parts = []
+        for w, (wx, wy) in hits[:3]:
+            yaw, pit = self._angles_to(wx, wy, im.width, im.height)
+            parts.append(f"「{w}」在 ({wx:.2f},{wy:.2f})（離中央 左右 {yaw:+.0f} 度、上下 {pit:+.0f} 度）")
+        return "；轉完畫面上像 E 提示的字（程式讀的、只給位置）：" + "、".join(parts)
+
     def look_at(self, x="", y=""):
+        # 10/28 02:4x 第 90 輪：02:34～02:39 連 5 輪「視角移動到(E框)→已對準→走 0.5→下一輪 E 框在另一邊」（0.59→0.25→0.9→0.18→0.85），
+        #   分段實測都一致＝鏡頭照他給的座標轉了，是他自己估的 E 框座標不準；程式能讀字 → 轉完把像 E 提示的字的實際位置附上
+        r = self._look_at_core(x, y)
+        try:
+            r += self._eprompt_note()
+        except Exception:  # noqa: BLE001
+            pass
+        return r
+
+    def _look_at_core(self, x="", y=""):
         import math
         fx, fy = num(x, -1), num(y, -1)
         if not (0 <= fx <= 1 and 0 <= fy <= 1):

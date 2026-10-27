@@ -924,4 +924,24 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 90 輪：視角移動到 轉完附上畫面上像 E 提示的字的位置
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_words", "_look_at_core")}
+try:
+    t.live, t.image_path = True, None; t.grab = lambda: im
+    t._look_at_core = lambda x="", y="": "算好：…；**已對準正中央**"
+    t._words = lambda im_: {"按E samp表格": (0.18, 0.47), "輪班 1": (0.5, 0.03), "蓋印表格": (0.91, 0.21)}
+    _r = t.look_at(0.85, 0.65)
+    check("轉完列出像 E 提示的字與離中央幾度", "像 E 提示的字" in _r and "「按E samp表格」在 (0.18,0.47)" in _r and "左右 -" in _r and "蓋印表格" not in _r.split("像 E 提示的字")[1], _r)
+    t._words = lambda im_: {"輪班 1": (0.5, 0.03)}
+    _r = t.look_at(0.85, 0.65)
+    check("沒有像 E 提示的字就不加", "像 E 提示的字" not in _r, _r)
+finally:
+    for k, v in _bak.items():
+        if k == "_look_at_core":
+            try:
+                delattr(t, k)
+            except AttributeError:
+                pass
+        else:
+            setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
