@@ -755,4 +755,20 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []
+# 第 82 輪：長按 E 連續沒反應跨輪累計、帶最後一次有反應時間
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "diff", "_grab_noise", "_changed", "_eta_note", "_e_fail", "_e_last_ok")}
+try:
+    t.live, t.image_path = True, None; t._e_fail = 0; t._e_last_ok = None
+    t.grab = lambda: im; t.diff = lambda a, b: 40.0; t._grab_noise = lambda: (im, 0.0); t._eta_note = lambda: ""
+    t._changed = lambda before, noise=None: "畫面變化 30（比背景大）；【二次驗證 一致】有沒有反應 第一次 30、第二次 30（0.6 秒後再量也有變）"
+    _r = t._move("e", 1.5, 1.5, 1.5)
+    check("長按有反應 → 累計歸零、記時間", t._e_fail == 0 and t._e_last_ok and "連續" not in _r, (t._e_fail, t._e_last_ok))
+    t._changed = lambda before, noise=None: "畫面變化 0（沒變＝可能被擋；等 1.2 秒再看也沒變）"
+    _r1 = t._move("e", 1.5, 1.5, 1.5); _r2 = t._move("e", 1.5, 1.5, 1.5)
+    check("沒反應兩次還不標", "連續" not in _r2 and t._e_fail == 2, _r2[-120:])
+    _r3 = t._move("e", 1.5, 1.5, 1.5)
+    check("第三次起標「已連續 3 次沒反應、最後一次有反應是 HH:MM」", "已連續 3 次沒反應" in _r3 and "最後一次有反應是" in _r3, _r3[-200:])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

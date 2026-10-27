@@ -889,8 +889,17 @@ class Tools(ExtraTools):
             out += self._nomove_note("沒變" in out or "看不出" in out)
         if k == "e" and ("沒變" in out or "看不出" in out) and "有反應**" not in out:
             out += self._eta_note()
+            # 10/27 21:2x 第 82 輪：19:46 撿眼藥水後到 21:20 長按 E 連 9 次都沒反應（攝影機、百葉窗 ×5、門 8 ×2、已關閉門），每次各自回「沒反應」他就換個目標再按。
+            #   跨輪累計、帶最後一次有反應的時間（只給讀數，跟第 61 輪「全沒反應累計」同一種做法；原因他自己對照）
+            self._e_fail = getattr(self, "_e_fail", 0) + 1
+            if self._e_fail >= 3:
+                lo = getattr(self, "_e_last_ok", None)
+                out += (f"；（**長按 E 已連續 {self._e_fail} 次沒反應**" + (f"，最後一次有反應是 {lo}" if lo else "，這次啟動後還沒有一次有反應")
+                        + "；看看那時候跟現在有什麼不一樣——站的位置、手上拿的東西、畫面上的字）")
         elif k == "e" and ("有反應" in out or "任務字變了" in out):
             # 10/26 16:5x 使用者：「會去互動的東西都要拍照記錄」→ 按了有反應就提醒（只告訴）
+            self._e_fail = 0
+            self._e_last_ok = datetime.now().strftime("%H:%M")
             out += "（使用者交代：按了有反應的東西要 記長相 拍下來、再 記互動物 寫怎麼用，之後 找長相／走過去 直接用照片）"
         return f"按 {k} {d:.1f} 秒；" + out
 
