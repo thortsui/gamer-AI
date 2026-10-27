@@ -9,7 +9,7 @@
 先標未實作，目錄有列、叫了回「未實作」。
 """
 import json
-import os
+import os, shutil
 import re
 import subprocess
 import sys
@@ -1021,8 +1021,131 @@ class ExtraTools:
             have = True
         return "" if have else f"（使用者交代：互動的東西／標點都要拍照——還沒有「{name}」的長相，接著 記長相({name},編號或 x1,y1,x2,y2) 把它框起來存照片）"
 
-    def mem_interact(self, 名稱="", 功能="", 用法=""):
-        return self._append("互動物.md", f"{名稱}｜功能:{功能}｜用法:{用法}") + self._look_reminder(名稱)
+    def _mem_remove(self, fname, name):
+        """第 85 輪：把 fname 裡名稱欄（「- MM/DD HH:MM 名稱｜…」）等於 name 的行全刪掉 → 刪了幾條。"""
+        p = os.path.join(self.mdir, fname)
+        try:
+            lines = open(p, encoding="utf-8").read().splitlines()
+        except OSError:
+            return 0
+        keep, n = [], 0
+        for l in lines:
+            m = re.match(r"-\s*\d\d/\d\d \d\d:\d\d (.+?)｜", l)
+            if m and m.group(1).strip() == name:
+                n += 1
+                continue
+            keep.append(l)
+        if n:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(NL.join(keep) + (NL if keep else ""))
+        return n
+
+    def mem_interact(self, 名稱="", 功能="", 用法="", 整理=""):
+        name = str(名稱).strip()
+        # 10/28 00:4x 第 85 輪（使用者：他也需要定期整理自己的記憶）：功能 寫 刪除＝刪同名全部；整理 有寫＝同名舊的全部換成這一條
+        if str(功能).strip() == "刪除":
+            n = self._mem_remove("互動物.md", name)
+            return f"刪掉「{name}」的 {n} 條互動物" if n else f"互動物 裡沒有「{name}」這個名稱"
+        if str(整理).strip():
+            n = self._mem_remove("互動物.md", name)
+            return (self._append("互動物.md", f"{name}｜功能:{功能}｜用法:{用法}")
+                    + (f"（同名舊的 {n} 條已換成這一條）" if n else "（之前沒有同名的，直接記下）") + self._look_reminder(name))
+        return self._append("互動物.md", f"{name}｜功能:{功能}｜用法:{用法}") + self._look_reminder(name)
+
+    # ---------------- 第 85 輪：整理記憶（10/28 00:4x 使用者「他也需要定期去整理自己的記憶」）
+    #   程式只做機械的事：列出 互動物 同名多條、準則 同一對象太多條或照做多半✗、長相 清單；留哪條、刪哪條他自己決定。每兩小時面板提示一次。
+    TIDY_EVERY_SEC = 2 * 3600
+
+    def _tidy_load(self):
+        try:
+            return json.load(open(os.path.join(self.mdir, "整理紀錄.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _mem_counts(self):
+        return {"準則": len(self._rules_load()), "互動物": len(self._mem_lines("互動物.md", tail=100000)),
+                "長相": len([n for n in self._look_names() if n != "自己"])}
+
+    def tidy_hint(self):
+        """主迴圈每輪叫：上次整理超過兩小時、而且之後有新增 → 面板提示（只提示，不替他整理）。"""
+        try:
+            st = self._tidy_load()
+            if time.time() - st.get("時間戳", 0) < self.TIDY_EVERY_SEC:
+                return ""
+            c = self._mem_counts()
+            base = st.get("數量") or {}
+            add = {k: c[k] - base.get(k, 0) for k in c}
+            if st and all(v <= 0 for v in add.values()):
+                return ""
+            when = st.get("時間") or "還沒整理過"
+            return (f"【整理記憶】上次整理：{when}；之後新增 準則 {add['準則']}、互動物 {add['互動物']}、長相 {add['長相']} 條"
+                    f"（現在共 準則 {c['準則']}、互動物 {c['互動物']}、長相 {c['長相']}）。每兩小時整理一次：叫 整理記憶 看哪些同名、重複、矛盾——留哪條、刪哪條你自己決定" + NL * 2)
+        except Exception as e:  # noqa: BLE001
+            return f"【整理記憶】提示出錯：{e}" + NL * 2
+
+    def mem_tidy(self, 類別=""):
+        kind = str(類別).strip() or "全部"
+        if kind not in ("全部", "互動物", "準則", "長相"):
+            return "整理記憶 的類別只有 互動物／準則／長相，不寫＝全部"
+        out = []
+        c = self._mem_counts()
+        if kind in ("全部", "互動物"):
+            groups = {}
+            for l in self._mem_lines("互動物.md", tail=100000):
+                m = re.match(r"(\d\d/\d\d \d\d:\d\d) (.+?)｜(.*)$", l)
+                if m:
+                    groups.setdefault(m.group(2).strip(), []).append((m.group(1), m.group(3)))
+            dup = sorted(((n, v) for n, v in groups.items() if len(v) >= 2), key=lambda x: -len(x[1]))
+            if dup:
+                lines = [f"「{n}」記了 {len(v)} 條：" + "；".join(f"{t} {x[:70]}" for t, x in v[-4:]) for n, v in dup[:8]]
+                out.append(f"互動物 共 {c['互動物']} 條、{len(dup)} 個名稱記了 2 條以上（說法可能前後矛盾）：" + NL + NL.join(lines) + NL
+                           + "→ 留一條：記互動物(名稱,功能,用法,整理) 會把同名舊的全部換成這一條；都不對就 記互動物(名稱,刪除)")
+            else:
+                out.append(f"互動物 共 {c['互動物']} 條，沒有同名重複")
+        if kind in ("全部", "準則"):
+            rules = self._rules_load()
+            by = {}
+            for r in rules:
+                by.setdefault(r.get("對象", ""), []).append(r)
+            many = sorted(((k, v) for k, v in by.items() if len(v) >= 4), key=lambda x: -len(x[1]))
+            bad = [r for r in rules if r.get("照做✗", 0) >= 3 and r.get("照做✗", 0) > 2 * r.get("照做✓", 0)]
+            txt = f"準則 共 {len(rules)} 條（{len(by)} 個對象）"
+            if many:
+                lines = [f"「{k}」{len(v)} 條：" + "；".join(f"{r.get('準則', '')[:40]}（✓{r.get('照做✓', 0)} ✗{r.get('照做✗', 0)}）" for r in v[-5:]) for k, v in many[:6]]
+                txt += f"；{len(many)} 個對象有 4 條以上：" + NL + NL.join(lines) + NL + "→ 要併成一條：記準則(對象,更正:一條新的) 會把那個對象的舊準則全換掉"
+            if bad:
+                txt += NL + f"照做多半 ✗ 的 {len(bad)} 條：" + "；".join(f"{r.get('對象', '')}｜{r.get('準則', '')[:40]}（✓{r.get('照做✓', 0)} ✗{r.get('照做✗', 0)}）" for r in bad[:6]) + NL + "→ 不對的就 記準則(對象,更正:…)"
+            out.append(txt)
+        if kind in ("全部", "長相"):
+            names = [n for n in self._look_names() if n != "自己"]
+            lines = []
+            for n in names:
+                fs = self._look_files(n)
+                d = os.path.basename(fs[-1]) if fs else ""
+                lines.append(f"{n}（{len(fs)} 張、最近 {d[:2]}/{d[2:4]} {d[5:7]}:{d[7:9]}）" if len(d) >= 9 else n)
+            out.append(f"長相 共 {len(names)} 樣：" + "、".join(lines) + NL
+                       + "→ 名字要讓自己下次分得出是哪一個（走過去(門框) 會配到名字裡有「門框」的照片）；不要的 忘長相(名稱)、要換名就重新 記長相(新名稱,目標)")
+        st = {"時間": datetime.now().strftime("%m/%d %H:%M"), "時間戳": time.time(), "數量": c}
+        try:
+            with open(os.path.join(self.mdir, "整理紀錄.json"), "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False, indent=1)
+            self._append("整理紀錄.md", f"整理記憶({kind})｜準則 {c['準則']}、互動物 {c['互動物']}、長相 {c['長相']}")
+        except OSError:
+            pass
+        return "整理記憶（程式只列出來，怎麼留、怎麼刪你自己決定）：" + NL + NL.join(out)
+
+    def mem_look_forget(self, 名稱=""):
+        name = re.sub(r"[\\/:*?\"<>|\s]+", "", str(名稱))[:20]
+        if not name:
+            return "忘長相 要給 名稱，例：忘長相(中央生物)"
+        d = os.path.join(self._look_dir(), name)
+        if not os.path.isdir(d):
+            return f"沒有記過「{name}」的長相；記過的有：" + "、".join(n for n in self._look_names() if n != "自己")
+        n = len(self._look_files(name))
+        dst_dir = os.path.join(self.mdir, "長相_已忘")
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.move(d, os.path.join(dst_dir, name + "_" + datetime.now().strftime("%m%d_%H%M%S")))
+        return f"「{name}」的 {n} 張照片收起來了（移到 長相_已忘，之後 找長相／走過去 不會再用它）"
 
     def mem_touch(self, 名稱="", 功能="", 用法=""):
         return self._append("觸碰物.md", f"{名稱}｜站上去:{功能}｜{用法}")

@@ -5162,6 +5162,7 @@ def main():
                  + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
                  + ((tools.items_panel(last_seen) + NL) if tools.items_panel(last_seen) else "")
                  + tools.rules_panel(last_seen) + NL * 2
+                 + tools.tidy_hint()                                  # 第 85 輪：每兩小時提示整理記憶
                  + f"（前面每一輪的細節不放面板：這個大任務共 {len(history)} 輪都存在檔案裡，真的要找用 查紀錄(關鍵字)）" + NL * 2
                  + (f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
                     "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))

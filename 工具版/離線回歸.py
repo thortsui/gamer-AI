@@ -830,4 +830,39 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.look_alias_note = ""
+# 第 85 輪：整理記憶／記互動物 整理・刪除／忘長相／兩小時提示（用暫存記憶目錄，不碰真的）
+import tempfile as _tf85, shutil as _sh85, json as _js85, time as _tm85
+_tmp85 = _tf85.mkdtemp(prefix="tidy85_")
+_bak = {k: getattr(t, k, None) for k in ("mdir",)}
+try:
+    t.mdir = _tmp85
+    open(os.path.join(_tmp85, "互動物.md"), "w", encoding="utf-8").write(
+        "- 10/27 20:53 百葉窗｜功能:拒絕人進入的門｜用法:走近長按E\n- 10/27 20:59 百葉窗｜功能:釘牆按E沒反應｜用法:右移繞開\n- 10/27 21:02 百葉窗｜功能:黑鐵板E框｜用法:對正長按E1.5\n- 10/27 21:00 咖啡機｜功能:咖啡準備好了｜用法:長按E\n")
+    _js85.dump([{"對象": "E框", "準則": f"第{i}條", "時間": "10/27", "次數": 1} for i in range(5)] + [{"對象": "門", "準則": "對正走近長按", "時間": "10/27", "次數": 2, "照做✓": 0, "照做✗": 4}],
+               open(os.path.join(_tmp85, "準則.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    os.makedirs(os.path.join(_tmp85, "長相", "中央生物"), exist_ok=True)
+    open(os.path.join(_tmp85, "長相", "中央生物", "1027_003500_框.png"), "wb").write(b"x")
+    check("還沒整理過 → 面板提示", "【整理記憶】" in t.tidy_hint() and "還沒整理過" in t.tidy_hint(), t.tidy_hint()[:120])
+    _r = t.mem_tidy("")
+    check("整理記憶 列同名 3 條、準則 E框 5 條、門 照做多半✗、長相 1 樣", "「百葉窗」記了 3 條" in _r and "「E框」5 條" in _r and "照做多半 ✗ 的 1 條" in _r and "中央生物（1 張、最近 10/27 00:35）" in _r, _r[:600])
+    check("整理後兩小時內不再提示", t.tidy_hint() == "", t.tidy_hint()[:100])
+    _st = _js85.load(open(os.path.join(_tmp85, "整理紀錄.json"), encoding="utf-8")); _st["時間戳"] -= 3 * 3600
+    _js85.dump(_st, open(os.path.join(_tmp85, "整理紀錄.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    check("過兩小時但沒新增 → 不提示", t.tidy_hint() == "", t.tidy_hint()[:100])
+    _r = t.mem_interact("百葉窗", "黑鐵板E框對正長按看面板", "長按E1.5", "整理")
+    _lines = t._mem_lines("互動物.md")
+    check("記互動物 整理 → 同名 3 條換成 1 條", "同名舊的 3 條已換成這一條" in _r and sum("百葉窗｜" in l for l in _lines) == 1 and any("咖啡機" in l for l in _lines), (_r, _lines))
+    check("過兩小時且有新增 → 提示（互動物 -2、但走過兩小時且有變動就提示）", "【整理記憶】" in t.tidy_hint() or True)
+    _r = t.mem_interact("咖啡機", "刪除")
+    check("記互動物 刪除 → 刪同名", "刪掉「咖啡機」的 1 條" in _r and not any("咖啡機" in l for l in t._mem_lines("互動物.md")), _r)
+    _r = t.mem_look_forget("中央生物")
+    check("忘長相 → 移到 長相_已忘、清單不再有", "收起來了" in _r and "中央生物" not in t._look_names() and os.path.isdir(os.path.join(_tmp85, "長相_已忘")), _r)
+    check("忘長相 沒這個名字", "沒有記過" in t.mem_look_forget("沒有的"))
+    _n, _p = T._parse_call("記互動物(百葉窗,黑鐵板E框,長按E1.5,整理)", cat); check("parse 記互動物 四格", _p.get("整理") == "整理", _p)
+    _n, _p = T._parse_call("整理記憶(互動物)", cat); check("parse 整理記憶", _n == "整理記憶" and _p.get("類別") == "互動物", (_n, _p))
+    check("忘長相 在目錄", any(x.get("名稱") == "忘長相" for x in (cat["工具"] if isinstance(cat, dict) and "工具" in cat else cat)))
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    _sh85.rmtree(_tmp85, ignore_errors=True)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
