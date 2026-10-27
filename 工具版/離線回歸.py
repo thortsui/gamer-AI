@@ -716,4 +716,17 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 79 輪：轉 ≥10 度走分段路（有閉環補轉）；<10 度照舊單拖
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "_turn_chunks", "_look", "_rep_flag", "_chunk_unsure", "_seg_ok")}
+try:
+    t.live, t.image_path = True, None; t._rep_flag = False; t._chunk_unsure = False; t._seg_ok = [True]
+    t._turn_chunks = lambda d: (19.0, "第1段 +20→實測 +19（特徵點）", 20.0, False, 1)
+    t._look = lambda *a, **k: "單拖路"
+    _r = t.look_turn(20)
+    check("轉(20) 走分段路並判一致", "分段轉" in _r and "一致" in _r and "單拖路" not in _r, _r[:200])
+    _r = t.look_turn(5)
+    check("轉(5) 仍走單拖路", _r.startswith("單拖路"), _r[:80])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
