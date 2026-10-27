@@ -525,11 +525,17 @@ _bak = {k: getattr(t, k, None) for k in ("desc_items", "desc_at")}
 try:
     _items = [{"編號": 1, "名稱": "右側牆面（拍照）", "x": 0.91, "y": 0.20, "種類": "互動提示"}, {"編號": 2, "名稱": "白鹿角色", "x": 0.22, "y": 0.48, "種類": "場景"},
               {"編號": 3, "名稱": "招牌", "x": 0.90, "y": 0.20, "種類": "場景"}]
-    _note = t._mark_task_frame(_items, ["「拍照」(0.91,0.21)", "「輪班 1」(0.50,0.03)"])
-    check("任務框區同位置有字 → 釘", _items[0].get("釘") and "「拍照」" in _note and "不是場景" in _note, (_items[0], _note))
+    _note = t._mark_task_frame(_items, ["「拍照」(0.91,0.21)", "「輪班 1」(0.50,0.03)"], ["拍照"])
+    check("任務框區同位置有任務字 → 釘", _items[0].get("釘") and "「拍照」" in _note and "不是場景" in _note, (_items[0], _note))
     check("同區沒對到字的不標（第 3 項對到同一個字也標）", not _items[1].get("釘") and _items[2].get("釘"), _items)
-    check("OCR 沒字 → 不標、空說明", t._mark_task_frame([{"編號": 1, "名稱": "x", "x": 0.9, "y": 0.2, "種類": "互動提示"}], []) == "")
-    check("不在任務框區不標", t._mark_task_frame([{"編號": 1, "名稱": "x", "x": 0.5, "y": 0.2, "種類": "互動提示"}], ["「拍照」(0.50,0.20)"]) == "")
+    check("OCR 沒字 → 不標、空說明", t._mark_task_frame([{"編號": 1, "名稱": "x", "x": 0.9, "y": 0.2, "種類": "互動提示"}], [], ["拍照"]) == "")
+    check("不在任務框區不標", t._mark_task_frame([{"編號": 1, "名稱": "x", "x": 0.5, "y": 0.2, "種類": "互動提示"}], ["「拍照」(0.50,0.20)"], ["拍照"]) == "")
+    # 第 71 輪：OCR 的字跟任務字不同（大廳踏板「0/5」、選單玩家名）→ 不標；沒有任務字 → 不標；OCR 抖動「拍昭」仍算同字
+    _i71 = [{"編號": 5, "名稱": "遠處角色", "x": 0.86, "y": 0.30, "種類": "場景"}]
+    check("同區但 OCR 字不是任務字 → 不標", t._mark_task_frame(_i71, ["「0/5」(0.86,0.26)", "「briana」(0.86,0.31)"], ["列印徽章"]) == "" and not _i71[0].get("釘"), _i71)
+    check("沒有任務字 → 不標", t._mark_task_frame(_i71, ["「拍照」(0.86,0.30)"], []) == "" and not _i71[0].get("釘"), _i71)
+    check("OCR 抖動 拍昭 vs 任務字 拍照 → 仍標", t._mark_task_frame(_i71, ["「拍昭」(0.86,0.30)"], ["拍照"]) != "" and _i71[0].get("釘"), _i71)
+    check("主迴圈會塞 tools.task_current", "tools.task_current = list(tw.current)" in open("工具版/tool_agent.py", encoding="utf-8").read())
     t.desc_items, t.desc_at = _items, _tm70.time()
     _r = t._resolve_target("1")
     check("走過去 釘住的編號 → 不接、說是 HUD", isinstance(_r, str) and "任務框" in _r and "無效" in _r, _r)

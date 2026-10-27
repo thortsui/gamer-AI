@@ -5005,6 +5005,7 @@ def main():
             continue
         task_words = top_right_words(im) if live else []      # 10/19：裁右上任務列放大讀，進面板＋stats
         _, task_ev = tw.update(task_words)
+        tools.task_current = list(tw.current)                 # 第 71 輪：描述畫面 只把跟任務字同字的右上點標成 HUD
         content = [{"type": "image_url", "image_url": {"url": img_uri(im)}}]
         ask_txt, ask_imgs = tools.claude_panel()          # 10/23 實驗：問Claude 的回答（附圖的前兩輪附上）
         tools.extra_images = list(ask_imgs) + list(tools.extra_images)

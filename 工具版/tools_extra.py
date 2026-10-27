@@ -93,6 +93,7 @@ class ExtraTools:
     # → 不思考（快思）、逐行短格式（JSON 太長要 45 秒；逐行約 13 秒）、整個工具（含 OCR）限 20 秒，時間到就用已經收到的行
     DESC_LIMIT = 25.0            # 11:4x 加了深度（前方＋每項幾個身高）字變多，20 秒會截掉最後幾行
     desc_items = []          # 描述畫面給的點：[{"編號","名稱","x","y","種類"}]（走過去／追蹤 用）
+    task_current = []        # 第 71 輪：主迴圈每輪塞進來的「目前認定的任務字」（TaskWords.current），描述畫面標釘用
     DESC_KEYS = ("類型", "視角", "自己", "擋住", "前方", "互動提示", "場景", "介面", "道具欄")
 
     def see_describe(self, 重點="", image=None):
@@ -185,13 +186,13 @@ class ExtraTools:
         # 10/27 09:2x 第 70 輪：09:09 描述員把右上任務框的「拍照」(0.91,0.20) 列成「互動提示｜右側牆面」，他接著 走過去(1) 走向 HUD 字兩步全找不到
         #   （10/26～27 描述畫面 108 次有 6 次這樣；視角移動到 對那一區 25 次都量到「釘在畫面上」）
         #   → 落在右上任務框區（x≥0.78、y≤0.37，TaskWords 同一區）又跟 OCR 讀到的字同位置的點，標成「任務框的字、不是場景」，走過去／追蹤 不接
-        pinned_note = self._mark_task_frame(items, ocr)
+        pinned_note = self._mark_task_frame(items, ocr, getattr(self, "task_current", None))
         if pinned_note:
             for k in ("互動提示", "場景"):
                 if k in d:
                     for it in items:
                         if it.get("釘") and f"[{it['編號']}]" in d[k]:
-                            d[k] = d[k].replace(f"[{it['編號']}]", f"[{it['編號']}]（右上任務框的字、不是場景）", 1)
+                            d[k] = d[k].replace(f"[{it['編號']}]", f"[{it['編號']}]（右上任務框的任務字、不是場景）", 1)
         self.desc_items, self.desc_at = items, time.time()
         kind = d.get("類型", "？")
         prev = self.last_desc
@@ -215,8 +216,14 @@ class ExtraTools:
         return NL.join(lines)
 
     @staticmethod
-    def _mark_task_frame(items, ocr):
-        """第 70 輪：描述畫面的點落在右上任務框區（x≥0.78、y≤0.37）、而且 OCR 在同位置（差 ≤0.08）讀到字 → 標 釘=True、名稱加註；回說明（沒有回空字串）。"""
+    def _mark_task_frame(items, ocr, task_current=None):
+        """第 70 輪：描述畫面的點落在右上任務框區（x≥0.78、y≤0.37）、而且 OCR 在同位置（差 ≤0.08）讀到字 → 標 釘=True、名稱加註；回說明（沒有回空字串）。
+        第 71 輪（10/27 10:13）：Roblox 選單開著時 (0.86,0.30) 的「遠處角色」被標成任務框的字（那裡是玩家列表的字）；大廳踏板上方的「0/5」(0.86,0.26) 也在這區、
+        但 確認是否是UI 量到它會跟著轉＝場景裡的字 → 只有 OCR 讀到的字跟「目前認定的任務字」是同一個字才標，沒有任務字就不標。"""
+        import tool_agent as T
+        cur = [T.TaskWords.norm(t) for t in (task_current or []) if T.TaskWords.norm(t)]
+        if not cur:
+            return ""
         words = []
         for o in ocr or []:
             m = re.search(r"「(.*?)」\((\d?\.\d+|\d),(\d?\.\d+|\d)\)", str(o))
@@ -226,14 +233,15 @@ class ExtraTools:
         for it in items:
             if not (it["x"] >= 0.78 and it["y"] <= 0.37):
                 continue
-            near = [w for w in words if abs(w[1] - it["x"]) <= 0.08 and abs(w[2] - it["y"]) <= 0.08]
+            near = [w for w in words if abs(w[1] - it["x"]) <= 0.08 and abs(w[2] - it["y"]) <= 0.08
+                    and T.TaskWords.norm(w[0]) and any(T.TaskWords.same(T.TaskWords.norm(w[0]), c) for c in cur)]
             if near:
                 it["釘"] = True
-                it["名稱"] = (it["名稱"] + "（右上任務框的字）")[:40]
+                it["名稱"] = (it["名稱"] + f"（右上任務框的任務字「{near[0][0]}」）")[:40]
                 hit.append(f"[{it['編號']}]「{near[0][0]}」({it['x']:.2f},{it['y']:.2f})")
         if not hit:
             return ""
-        return ("⚑ " + "、".join(hit) + " 在右上任務框那一區、跟程式讀到的任務字同位置＝釘在畫面上的字（HUD），不是場景裡的東西；"
+        return ("⚑ " + "、".join(hit) + " 在右上任務框那一區、跟目前認定的任務字同一個字＝釘在畫面上的任務字（HUD），不是場景裡的東西；"
                 "走過去／視角移動到 對它無效（之前每次轉過去都量到它還在原位）。要找場景裡的東西：看 場景 那幾項、或 讀字 找 E 提示")
 
     # ---------------- 追蹤描述畫面給的點（20:xx 使用者：「追蹤是要去使用他前面畫面描述去追蹤那個點」）
