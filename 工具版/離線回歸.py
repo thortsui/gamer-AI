@@ -865,4 +865,29 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     _sh85.rmtree(_tmp85, ignore_errors=True)
+# 第 86 輪：鏡頭實測轉到七成以上、目標仍在原位（相似度 ≥0.85）→ 判釘在畫面上、轉回；轉不夠仍要 0.95
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_locate", "_feat_deg", "_turn_chunks", "_words", "_verify_dump", "_pitch_from_vshift", "_landmark_turn", "_scene_deg", "_repetitive", "_comp_deg")}
+try:
+    t.live, t.image_path = True, None; t.pitch_acc = 0.0; t.pitch_unknown = False
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0
+    _dr86 = []; t._drag = lambda dx, dy, fy=0.5, fx=None: _dr86.append((dx, dy))
+    t._words = lambda im_: {}; t._verify_dump = lambda *a, **k: None; t._pitch_from_vshift = lambda a, b: (None, "")
+    t._landmark_turn = lambda *a, **k: (None, "沒標點"); t._scene_deg = lambda a, b: (None, ""); t._repetitive = lambda a: (False, ""); t._comp_deg = lambda: 0.0
+    _ratio86 = [1.0]
+    t._turn_chunks = lambda deg: (deg * _ratio86[0], "第1段", deg, False, 1)
+    t._feat_deg = lambda a, b, want=None: (None, None, 0, 0.0, "")
+    def _loc86(patch, im_, near=None, second=False):
+        if near and abs(near[0] - 0.41) < 0.01:          # 在原位找：還在原位、相似度 0.88
+            return (0.41, 0.40, 0.88)
+        return None                                        # 中央附近找不到
+    t._locate = _loc86
+    _r = t.look_at(0.41, 0.42)
+    check("鏡頭實測轉滿、目標仍在原位 0.88 → 判釘在畫面上、轉回、不說已對準", "釘在畫面上的東西" in _r and "已對準" not in _r and "沒跟著動" in _r and len(_dr86) >= 1, _r[:400])
+    _dr86.clear(); _ratio86[0] = 0.5
+    _r = t.look_at(0.41, 0.42)
+    check("鏡頭只轉到一半 → 0.88 不算釘住（門檻仍 0.95）", "釘在畫面上的東西" not in _r, _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.pitch_acc = 0.0; t.pitch_unknown = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

@@ -3546,13 +3546,20 @@ class Tools(ExtraTools):
         GOOD = 0.85                        # 18:4x：0.6 太鬆，認錯的位置也拿來補轉
         # 10/26 21:0x 第 54 輪：20:56 送 +11 鏡頭幾乎沒轉（這局常只轉到 0～50%），E框 的字當然還在原位 → 被判「釘在畫面上的 UI」還把鏡頭轉回去；
         #   20:55 同一個 E框 才剛對準過。釘住的判斷要先確定鏡頭真的轉了（分段實測 ≥ 要的四成；單拖用特徵點量）
+        f_chk = None
         if chunk_meas is not None:
             cam_moved = self.diff(before, after) >= 8 and chunk_meas[2] >= 1 and abs(chunk_meas[0]) >= 0.4 * abs(yaw_calc)
             turn_ratio = abs(chunk_meas[0]) / abs(yaw_calc) if (chunk_meas[2] >= 1 and yaw_calc) else 1.0
+            turn_measured = chunk_meas[2] >= 1
         else:
             f_chk = self._feat_deg(before, after, want=yaw)[0] if (abs(yaw) >= 5 and self.live and not self.image_path) else None
             cam_moved = self.diff(before, after) >= 8 and (f_chk is None or abs(f_chk) >= 0.4 * abs(yaw))
             turn_ratio = abs(f_chk) / abs(yaw) if (f_chk is not None and yaw) else 1.0
+            turn_measured = f_chk is not None
+        # 10/28 01:0x 第 86 輪：00:58 視角移動到(0.41,0.42) 轉 −14（特徵點實測 −14）目標還在 (0.41,0.40) 相似度 0.88 → 釘住要 ≥0.95 沒判到、
+        #   補轉又找不到、第 72 輪用特徵點說「補轉到位、已對準」——其實是角色身上釘著的 E 框。10/26～28 「轉完目標沒動」12 次有 7 次沒判釘住。
+        #   → 鏡頭有量到、而且轉到要的七成以上時，釘住的相似度門檻降到 GOOD（0.85）；量不到或轉不夠仍要 0.95（第 54／57 輪的顧慮）
+        pin_sim = GOOD if (turn_measured and turn_ratio >= 0.7) else 0.95
         # 10/26 23:0x 第 57 輪：20:56／22:32／22:56 三次，鏡頭只轉到要的四～五成、E框 的字自然只移一半，還是被判「釘在畫面上」；下一輪同一目標就對準了。
         #   釘住＝「照實際轉了的度數算應該移多少、卻幾乎沒移」，預期位移要乘上實測÷要的（0.3～1）
         turn_ratio = max(0.3, min(1.0, turn_ratio))
@@ -3568,7 +3575,7 @@ class Tools(ExtraTools):
         # 背後的場景變了，相似度掉到 0.5～0.6 → 回「沒對準、再微調」，每次又往上轉 22 度，最後鏡頭對著天花板
         # → 影像比不出來時，再用字比：目標附近的字轉完還在原位＝釘在畫面上；釘住就把鏡頭轉回原方向
         pin_word = ""
-        if not (pinned and pinned[2] >= 0.95) and abs(yaw) >= 8 and cam_moved:
+        if not (pinned and pinned[2] >= pin_sim) and abs(yaw) >= 8 and cam_moved:
             import difflib
             def words2(im):              # 整張讀＋右上任務框放大讀（半透明框在亮背景上整張讀常讀不到）
                 d = dict(self._words(im))
@@ -3585,17 +3592,18 @@ class Tools(ExtraTools):
                                  if abs(x2 - xy[0]) < 0.03 and abs(y2 - xy[1]) < 0.03
                                  and self._pin_ok(x2 - xy[0], y2 - xy[1], exp_dx, exp_dy)
                                  and (w2 == w or difflib.SequenceMatcher(None, w, w2).ratio() >= 0.6)), "")
-        if (pinned and pinned[2] >= 0.95) or pin_word:
+        if (pinned and pinned[2] >= pin_sim) or pin_word:
             try:
-                self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜目標釘在畫面上沒動（{'相似' + format(pinned[2], '.2f') if pinned and pinned[2] >= 0.95 else '字「' + pin_word + '」'}）")
+                self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜目標釘在畫面上沒動（{'相似' + format(pinned[2], '.2f') if pinned and pinned[2] >= pin_sim else '字「' + pin_word + '」'}）")
             except Exception:  # noqa: BLE001
                 pass
             self._drag(-yaw * self.dx_deg, pitch * self.dy_deg)          # 轉回原方向，免得越轉越偏
             self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc - pitch))
-            how = (f"那一塊還在原位 ({pinned[0]:.2f},{pinned[1]:.2f})（相似度 {pinned[2]:.2f}）" if pinned and pinned[2] >= 0.95
+            how = (f"那一塊還在原位 ({pinned[0]:.2f},{pinned[1]:.2f})（相似度 {pinned[2]:.2f}）" if pinned and pinned[2] >= pin_sim
                    else f"那裡的字「{pin_word}」轉完還在原位")
-            return ("；".join(out) + f"；轉完{how}＝它是釘在畫面上的東西（面板、海報、HUD、任務框、提示框），不是場景，"
-                    "轉頭不會讓它移到中央；**已把鏡頭轉回原本的方向**，沒有補轉。要對準場景裡的東西；不確定哪裡是 UI 就叫 確認是否是UI")
+            return ("；".join(out) + f"；轉完{how}＝它是釘在畫面上的東西（面板、海報、HUD、任務框、提示框、角色身上的 E 框），不是場景，"
+                    + (f"鏡頭實測轉了 {turn_ratio * abs(yaw_calc):+.0f} 度它卻沒跟著動；" if (turn_measured and pin_sim < 0.95) else "")
+                    + "轉頭不會讓它移到中央；**已把鏡頭轉回原本的方向**，沒有補轉。要對準場景裡的東西；不確定哪裡是 UI 就叫 確認是否是UI")
         loc1 = self._locate(patch, after, near=(0.5, ay, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
         bad_comp = False
@@ -4986,12 +4994,28 @@ def main():
     ap.add_argument("--no-small-update", action="store_true",
                     help="10/23 使用者「切換任務的更新先暫時關掉」：不做 出現變動就重新想任務／定期小任務更新（10/22 停 43 次共 105 分鐘沒人操作）")
     ap.add_argument("--steps", type=int, default=0, help="每輪排幾步（10/18 12:5x 使用者「改成 預測兩步驟」→ 2）；0＝看 --plan3")
+    # 10/28 01:1x 使用者實驗「context 順序差異：重要的事情在頭／中／尾，看哪個任務成功率最高」
+    ap.add_argument("--ctx-order", default="頭", choices=["頭", "中", "尾"], help="面板裡最重要那塊（大任務／小任務／任務字／上一輪結果）放頭、中、尾")
+    ap.add_argument("--ctx-rotate", type=int, default=0, help="每 N 分鐘輪流 頭→中→尾（0＝固定用 --ctx-order）；每輪紀錄寫 順序 欄")
     # 10/24 使用者：模型比較實驗（haiku／sonnet／sonnet 自由搜尋 各一小時，其他一模一樣）→ claude_brain.py
     ap.add_argument("--brain", default="", help="空＝本地 8888；haiku／sonnet＝每次叫大腦開一個新的 claude -p")
     ap.add_argument("--brain-search", action="store_true", help="--brain 時多給 WebSearch／WebFetch")
     ap.add_argument("--brain-native", action="store_true",
                     help="10/24 使用者「原生的Claude 不要洗掉」：保留 Claude Code 原本 system＋原生工具、整段同一個 session")
     args = ap.parse_args()
+    _ctx_t0 = time.time()
+    _ctx_last = [None]
+
+    def ctx_order_now():
+        """10/28 實驗：--ctx-rotate N → 每 N 分鐘輪流 頭→中→尾；否則固定 --ctx-order。換了就印一行。"""
+        if args.ctx_rotate > 0:
+            o = ("頭", "中", "尾")[int((time.time() - _ctx_t0) // (args.ctx_rotate * 60)) % 3]
+        else:
+            o = args.ctx_order
+        if o != _ctx_last[0]:
+            print(f"   [順序實驗] 最重要那塊放「{o}」（{datetime.now().strftime('%H:%M')}）", flush=True)
+            _ctx_last[0] = o
+        return o
     if args.brain:
         import claude_brain
         claude_brain.setup(args.brain, args.brain_search,
@@ -5150,22 +5174,32 @@ def main():
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
         last_seen = (history[-1].get("看到", "") if history else "")
         disp_txt = tools.dispatch_panel()
-        panel = ((disp_txt + NL * 2) if disp_txt else "") + ((ask_txt + NL * 2) if ask_txt else "") + ("【開工數值】" + tools.startup_text() + NL
-                 + "【大任務】（一個段落；目標）" + big_txt + NL
-                 + "【前面完成的小任務】" + NL + tools.small_lines() + NL
-                 + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
-                 + tw.panel(task_ev, big, acted=_acted_last(history)) + NL
-                 + tools.persp_text() + NL
-                 + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
-                 + plan_txt + watch_txt + NL
-                 + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL
-                 + "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
-                 + ((tools.items_panel(last_seen) + NL) if tools.items_panel(last_seen) else "")
-                 + tools.rules_panel(last_seen) + NL * 2
-                 + tools.tidy_hint()                                  # 第 85 輪：每兩小時提示整理記憶
-                 + f"（前面每一輪的細節不放面板：這個大任務共 {len(history)} 輪都存在檔案裡，真的要找用 查紀錄(關鍵字)）" + NL * 2
-                 + (f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
-                    "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"]))
+        # 10/28 01:1x 使用者實驗：最重要那塊（大任務／小任務／任務字／上一輪結果）放 頭／中／尾，其他段落順序不變
+        key_txt = ("【這一輪最重要的：大任務、小任務、任務字、上一輪結果】" + NL
+                   + "【大任務】（一個段落；目標）" + big_txt + NL
+                   + "【前面完成的小任務】" + NL + tools.small_lines() + NL
+                   + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
+                   + tw.panel(task_ev, big, acted=_acted_last(history)) + NL
+                   + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL)
+        rest_a = ("【開工數值】" + tools.startup_text() + NL
+                  + tools.persp_text() + NL
+                  + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
+                  + plan_txt + watch_txt + NL)
+        rest_b1 = "【工具回傳】（上一輪你叫的工具）" + NL + (tool_returns or "（上一輪沒叫工具）") + NL * 2
+        rest_b2 = (((tools.items_panel(last_seen) + NL) if tools.items_panel(last_seen) else "")
+                   + tools.rules_panel(last_seen) + NL * 2
+                   + tools.tidy_hint()                                  # 第 85 輪：每兩小時提示整理記憶
+                   + f"（前面每一輪的細節不放面板：這個大任務共 {len(history)} 輪都存在檔案裡，真的要找用 查紀錄(關鍵字)）" + NL * 2)
+        ctx_order = ctx_order_now()
+        if ctx_order == "中":
+            body = rest_a + rest_b1 + key_txt + NL + rest_b2
+        elif ctx_order == "尾":
+            body = rest_a + rest_b1 + rest_b2 + key_txt + NL
+        else:
+            body = key_txt + NL + rest_a + rest_b1 + rest_b2
+        panel = ((disp_txt + NL * 2) if disp_txt else "") + ((ask_txt + NL * 2) if ask_txt else "") + body + (
+            f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
+            "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
         content.append({"type": "text", "text": panel})
         t0 = time.time()
         LIVE.update({"輪": rnd, "階段": "想", "開始": t0, "做": []})
@@ -5291,7 +5325,7 @@ def main():
             f.write(json.dumps({"時間": datetime.now().strftime("%H:%M:%S"), "輪": rnd, "秒": round(dt, 1),
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
-                                "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev,
+                                "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},
