@@ -731,4 +731,28 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 81 輪：水平儀擋住時再送被擋的那段驗證；鏡頭動了＝放行、拉回水平儀；沒動＝真的到極限
+_sent81 = []
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_feat_deg", "_locate", "_verify_dump", "_words", "_pitch_from_vshift", "pitch_acc", "pitch_unknown", "vrange_px")}
+try:
+    t.live, t.image_path = True, None; t.pitch_unknown = False; t.vrange_px = 0; t._turn_hist = []
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent81.append((dx, dy)); t._verify_dump = lambda *a, **k: None; t._words = lambda im_: {}
+    t._feat_deg = lambda a, b, want=None: (None, None, 0, 0.0, "")
+    t._locate = lambda patch, im_, near=None, second=False: (0.5, 0.5, 0.9) if (near and abs(near[0] - 0.5) < 1e-6) else None
+    _p81 = t._angles_to(0.5, 0.3, im.width, im.height)[1]          # 要抬頭約十幾度
+    t.pitch_acc = t._pitch_lim() - 1.0                              # 水平儀以為快到上限
+    t._pitch_from_vshift = lambda a, b: (0.8 * _p81, "")           # 鏡頭其實有動
+    _r = t.look_at(0.5, 0.3)
+    check("擋住→再送驗證→鏡頭動了＝放行、拉回水平儀", "累計錯了" in _r and "已照原本要的" in _r and t.pitch_acc <= 0.6 * t._pitch_lim() + abs(_p81) + 0.1, (_r[:260], t.pitch_acc))
+    _n_drags = len(_sent81)
+    check("多送了被擋的那段（兩次拖曳）", _n_drags >= 2 and abs(_sent81[1][1]) > 0, _sent81)
+    _sent81.clear(); t.pitch_acc = t._pitch_lim() - 1.0
+    t._pitch_from_vshift = lambda a, b: (0.0, "")                   # 鏡頭沒動
+    _r = t.look_at(0.5, 0.3)
+    check("擋住→再送驗證→鏡頭沒動＝真的到極限", "真的到極限" in _r and "累計錯了" not in _r, _r[:260])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

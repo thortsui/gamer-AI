@@ -3494,6 +3494,24 @@ class Tools(ExtraTools):
             lim_note += self._comp_note(comp)
             self._drag(yaw_send * self.dx_deg, -pitch * self.dy_deg)
         after = self._settled()
+        if abs(pitch - pitch0) >= 1 and self.live and not self.image_path and not getattr(self, "pitch_unknown", False):
+            # 10/27 20:3x 第 81 輪：20:28～20:33 連三輪「上下只能 ±45、只轉了 +0／+1、原本要 +8／+15／+3」、補轉上下也 +0 → 目標一直在 y 0.40 對不準。
+            #   水平儀累計常錯（第 68 輪後仍會漂）→ 擋住時不直接信它：把被擋掉的那一段也送出去、量上下位移；鏡頭真的動了＝累計錯了、放行並把水平儀拉回；
+            #   沒動＝真的到極限（只是多送一次、遊戲到極限不會再轉）
+            rest = pitch0 - pitch
+            b2 = after
+            self._drag(0, -rest * self.dy_deg)
+            after = self._settled()
+            m2, _m2t = self._pitch_from_vshift(b2, after)
+            if m2 is not None and (m2 > 0) == (rest > 0) and abs(m2) >= 0.5 * abs(rest):
+                _L = self._pitch_lim()
+                self.pitch_acc = max(-0.6 * _L, min(0.6 * _L, self.pitch_acc))
+                pitch = pitch0
+                lim_note = (f"（水平儀以為已到 ±{self.PITCH_LIM:.0f} 度極限、擋掉 {rest:+.0f} 度；再送 {rest:+.0f} 度驗證量到鏡頭動了 {m2:+.0f} 度＝累計錯了，"
+                            f"已照原本要的 {pitch0:+.0f} 度轉、水平儀拉回限制內）")
+            else:
+                lim_note = (f"（上下只能 ±{self.PITCH_LIM:.0f} 度，上下只轉了 {pitch:+.0f} 度、原本要 {pitch0:+.0f} 度；再送 {rest:+.0f} 度驗證、鏡頭"
+                            + ("沒動" if (m2 is None or abs(m2) < 0.5 * abs(rest)) else "反向") + "＝真的到極限" + self.LEVEL_HINT + "）")
         # 10/27 07:2x 第 68 輪：水平儀原本累計「送出的」上下度數；07:03～07:17 六輪 視角移動到 都「上下只轉了 +0、原本要 +15」——
         #   累計早就到 +45 擋住了，畫面其實是水平的（遊戲會把第三人稱鏡頭拉回）。改：量得到上下位移就累計量到的，量不出才累計送出的
         mp = None
