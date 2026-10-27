@@ -664,6 +664,7 @@ class ExtraTools:
         #   相似三角：走了 t 秒放大 r 倍 → 從現在位置還要 t/(r−1) 秒（跟 量比例 同一條公式，不用走路速度、不用描述員估身高）
         walked = 0.0           # 真的走了幾秒（畫面有變的步才算）
         eta_last = None
+        total_est = None       # 第 77 輪：從起點到目標的總秒數（算 eta 當下的 走了＋還要；之後再走幾步它都不變）
         desc_h = None          # 描述畫面估的「幾個身高」（有的話走完回頭校準走路速度）
         _mn = re.match(r"\[(\d+)\]", name)
         if _mn:
@@ -711,6 +712,7 @@ class ExtraTools:
             eta_txt = ""
             if size >= 1.15 and walked > 0:
                 eta_last = walked / (size - 1.0)
+                total_est = walked + eta_last
                 eta_txt = f"、走了 {walked:.1f} 秒放大 {size:.2f} 倍＝還要約 {eta_last:.1f} 秒"
             log.append(f"第{i + 1}步 在 ({x:.2f},{y:.2f}) 大小 {size:.1f} 倍（相似度 {sc:.2f}）" + eta_txt)
             words = self._words(im)
@@ -731,18 +733,19 @@ class ExtraTools:
             reason = "走滿 8 步"
         self._append("刻度樣本.md", f"走過去 {name}｜{len(log)} 步｜停：{reason[:50]}")
         extra = ("；路上冒出的字（沒因此停）：" + "、".join(f"「{w}」" for w in seen_new[:5])) if seen_new else ""
-        extra += self._walk_speed_note(desc_h, walked, eta_last, name)
+        extra += self._walk_speed_note(desc_h, walked, total_est, name)
         return (self._pop_look_how() + f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}{extra}。現在的畫面下一輪給你"
                 + ("；到了就試 長按(e,1.5) 或 讀字" if "面前" in reason or "字" in reason else ""))
 
     _walk_speed_samples = []
 
-    def _walk_speed_note(self, desc_h, walked, eta_last, name):
-        """第 74 輪：描述畫面估這個目標「約 h 個身高」、走過去量到從起點要 walked+eta 秒 → 走路速度＝h÷秒（身高/秒），
-        最近 5 筆取中位寫進 startup["速度"]（描述畫面的距離之後用它換成秒）。走不到 0.8 秒或放大太少（eta 不可靠）不算。"""
-        if not desc_h or eta_last is None or walked < 0.8:
+    def _walk_speed_note(self, desc_h, walked, total, name):
+        """第 74 輪：描述畫面估這個目標「約 h 個身高」、走過去量到從起點要 total 秒 → 走路速度＝h÷秒（身高/秒），
+        最近 5 筆取中位寫進 startup["速度"]（描述畫面的距離之後用它換成秒）。走不到 0.8 秒或放大太少（eta 不可靠）不算。
+        10/27 15:2x 第 77 輪：15:21 第 1 步算出還要 1.2 秒（走了 0.4）、後面兩步跟丟又走了 0.8 秒，原本用「走了 1.2＋還要 1.2＝2.4 秒」算速度——
+        還要 1.2 是第 1 步當下的，再走 0.8 秒後只剩 0.4；改用算 eta 當下的 走了＋還要（＝從起點到目標的總秒數，之後不變）。"""
+        if not desc_h or total is None or walked < 0.8:
             return ""
-        total = walked + eta_last
         if total <= 0:
             return ""
         v = float(desc_h) / total

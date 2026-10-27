@@ -674,4 +674,26 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 77 輪：走路速度用「算 eta 當下的 走了＋還要」，後面跟丟的步不加進去
+import time as _tm77
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_key", "_trk_find", "_words", "_new_word_checker", "desc_items", "desc_at", "_pop_look_how", "_append", "_walk_speed_samples")}
+try:
+    t.live, t.image_path = True, None; t._walk_speed_samples = []; t.startup.pop("速度", None)
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0
+    t._drag = lambda dx, dy, fy=0.5: None; t._key = lambda k, d: None; t._words = lambda im_: {}; t._new_word_checker = lambda im_: (lambda w: False)
+    t._pop_look_how = lambda: ""; t._append = lambda *a, **k: None
+    _n77 = [0]
+    def _tf77(g, tpl, near=None, r=0.3, scales=(1.0,)):
+        _n77[0] += 1
+        return (0.5, 0.5, 0.9, 1.25) if _n77[0] <= 1 else (0.5, 0.5, 0.4, 1.0)   # 第 1 步找到（目標在中央、不用先轉）、之後跟丟
+    t._trk_find = _tf77
+    t.desc_items = [{"編號": 2, "名稱": "櫃檯電腦", "x": 0.5, "y": 0.55, "種類": "場景", "身高": 4.0}]; t.desc_at = _tm77.time()
+    _r = t.move_track("2")
+    import re as _re77
+    _m77 = _re77.search(r"從起點要 ([0-9.]+) 秒", _r)
+    check("跟丟後的步不加進總秒數（0.4＋1.6＝2.0）", _m77 and abs(float(_m77.group(1)) - 2.0) < 0.15, _r[-260:])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.startup.pop("速度", None)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
