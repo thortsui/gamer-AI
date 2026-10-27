@@ -746,14 +746,18 @@ class ExtraTools:
                         tpl2 = self._trk_crop(g, 0.5, y, int(0.09 * GW), int(0.12 * GH))
                         sd2 = float(_np2.asarray(tpl2, dtype=_np2.float32).std())
                         selfy = self._trk_self_frac(g, 0.5, y)
-                        if sd2 >= 8.0 and selfy < 0.3:
+                        # 10/28 04:0x 第 92 輪：重切 4 次有 3 次（01:27 y0.55、04:00／04:02 y0.68）切到他自己的角色（第三人稱中央那個；找自己 的遮罩
+                        #   03:54 框到 (0.30,0.19) 不是他），第 88 輪走 3 步才停。第三人稱時中央 y≥0.45 那塊幾乎都是自己 → 只有目標在角色頭上方（y<0.45）才重切
+                        third = "第三" in str(self.startup.get("人稱", ""))
+                        if sd2 >= 8.0 and selfy < 0.3 and (y < 0.45 or not third):
                             tpl, h0 = tpl2, tpl2.shape[0]
                             reanch = True
                             log.append(f"轉正 {yaw:+.0f}→實測 {turned:+.0f}，照角度它應該就在正中央，但原本切的長相在中央只像 {s_:.2f}（轉過來的東西長相會變）"
                                        "→ 改用現在正中央那塊當它的長相")
                         else:
-                            log.append(f"轉正 {yaw:+.0f}→實測 {turned:+.0f}，原本的長相在中央只像 {s_:.2f}；中央那塊"
-                                       + ("是你自己的角色" if selfy >= 0.3 else "沒紋理") + "、不能拿來當它的長相，走一步再找")
+                            why = ("是你自己的角色" if selfy >= 0.3 else
+                                   (f"在第三人稱 y {y:.2f} 的高度、多半是你自己的角色" if (third and y >= 0.45) else "沒紋理"))
+                            log.append(f"轉正 {yaw:+.0f}→實測 {turned:+.0f}，原本的長相在中央只像 {s_:.2f}；中央那塊{why}、不拿來當它的長相，走一步再找")
                     elif f and f[2] >= 0.5:
                         log.append(f"轉完最像的一塊相似度只有 {f[2]:.2f}、不算找到（可能認錯）")
             before = im

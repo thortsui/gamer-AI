@@ -964,4 +964,34 @@ finally:
     T.top_right_words = _bak_trw
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 92 輪：第三人稱、目標 y≥0.45 → 轉正後不從中央重切長相
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_key", "_trk_find", "_words", "_new_word_checker", "desc_items", "desc_at", "_pop_look_how", "_append", "_walk_speed_samples", "_turn_chunks", "_trk_self_frac", "self_mask")}
+_bak_p92 = t.startup.get("人稱")
+try:
+    t.live, t.image_path = True, None; t._walk_speed_samples = []; t.self_mask = None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0
+    t._drag = lambda dx, dy, fy=0.5: None; t._key = lambda k, d: None; t._words = lambda im_: {}; t._new_word_checker = lambda im_: (lambda w: False)
+    t._pop_look_how = lambda: ""; t._append = lambda *a, **k: None; t._trk_self_frac = lambda g, x, y, fw=0.09, fh=0.12: 0.0
+    t._turn_chunks = lambda deg: (deg, "第1段", deg, False, 1)
+    _c92 = [0]
+    def _tf92(g, tpl, near=None, r=0.3, scales=(1.0,)):
+        _c92[0] += 1
+        return (0.5, 0.68, 0.45, 1.0) if _c92[0] == 1 else (0.5, 0.68, 0.9, 1.25)
+    t._trk_find = _tf92
+    t.startup["人稱"] = "第三人稱"
+    _r = t.move_track("0.2,0.68")
+    check("第三人稱、目標 y 0.68 → 不重切、說多半是自己", "多半是你自己的角色" in _r and "改用現在正中央那塊" not in _r, _r[:300])
+    _c92[0] = 0
+    _r = t.move_track("0.2,0.30")
+    check("第三人稱、目標 y 0.30（頭上方）→ 仍可重切", "改用現在正中央那塊" in _r or "沒紋理" in _r, _r[:300])
+    _c92[0] = 0; t.startup["人稱"] = "第一人稱"
+    _r = t.move_track("0.2,0.68")
+    check("第一人稱 → y 0.68 仍可重切", "改用現在正中央那塊" in _r or "沒紋理" in _r, _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    if _bak_p92 is None:
+        t.startup.pop("人稱", None)
+    else:
+        t.startup["人稱"] = _bak_p92
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
