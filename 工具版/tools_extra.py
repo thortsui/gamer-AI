@@ -353,7 +353,7 @@ class ExtraTools:
             return float(m.group(1)), float(m.group(2)), f"({float(m.group(1)):.2f},{float(m.group(2)):.2f})"
         mn = re.fullmatch(r"\[?(\d+)\]?", q)
         # 2x:xx 測試：上次描述的編號在畫面換了之後還被拿來用（座標是舊的）→ 描述 60 秒內才算數；名字先用照片在現在的畫面找
-        age = time.time() - getattr(self, "desc_at", 0)
+        age = time.time() - (getattr(self, "desc_at", 0) or 0)
         fresh = self.desc_items if age <= 60 else []
         it = None
         if mn:
@@ -384,7 +384,12 @@ class ExtraTools:
                     self.look_how = f"{name} 在 ({f['x']:.2f},{f['y']:.2f})，{f['法']}" + self.look_alias_note
                     self.look_alias_note = ""
                     return f["x"], f["y"], name
-                return f"畫面上用照片找不到「{name}」（記了 {len(self._look_files(name))} 張）；轉頭看看，或先 描述畫面"
+                # 10/27 23:0x 第 84 輪：10/25～27 「用照片找不到」10 次有 7 次是他寫的名字被換成記過的長相（走過去(門框)→「右側開門框」、
+                #   走過去(正中央走廊開口)→「中央生物」），回傳只說找不到「右側開門框」，他不知道自己的字被換掉、同一招再試（22:46／22:52）→ 照實說出換名
+                self.look_alias_note = ""
+                how = (f"你寫的「{q}」不是描述畫面的編號、我拿記過的長相「{name}」的照片在畫面上找：" if name != q else "")
+                return (f"{how}畫面上用照片找不到「{name}」（記了 {len(self._look_files(name))} 張）；"
+                        "要走到現在畫面上的東西：先 描述畫面 用編號，或給座標 走過去(x,y)")
         known = [n for n in self._look_names() if n != "自己"]
         known_txt = ("；記過的長相有：" + "、".join(known) + "（用這些名字）") if known else ""
         if not self.desc_items:
@@ -436,17 +441,27 @@ class ExtraTools:
             return []
 
     def _look_name(self, q):
-        if not str(q).strip():
+        q = str(q).strip()
+        if not q:
             return None
         names = self._look_names()
-        hit = next((n for n in names if n == q), None) or next((n for n in names if q in n or n in q), None)
-        if hit or not q:
+        hit = next((n for n in names if n == q), None)
+        if hit:
             return hit
+        # 第 84 輪：一個字（走過去(門)）不拿去配照片；包含關係配到的也要說出換名（原本這條沒說）
+        if len(q) >= 2:
+            hit = next((n for n in names if q in n or n in q), None)
+            if hit:
+                self.look_alias_note = f"（你寫的「{q}」當成記過的長相「{hit}」）"
+                return hit
+        else:
+            return None
         # 10/23 16:44：他叫 走過去(發光藍踏板)，記的長相叫「配對踏板」→ 對不上就放棄了。
         #   兩個名字有 2 個字以上相同的一段、而且只對得上一個長相 → 當成那個（回傳會說）
-        def common(a, b):
-            return max((k for k in range(2, min(len(a), len(b)) + 1) for i in range(len(a) - k + 1) if a[i:i + k] in b), default=0)
-        cands = [n for n in names if n != "自己" and common(q, n) >= 2]
+        # 第 84 輪：相同的那段要包含他寫的最後兩個字（中文的東西名在尾巴）：「正中央走廊開口」跟「中央生物」只共「中央」→ 不配；
+        #   「E框編號」跟「門框E框瞬間移動」只共「E框」→ 不配；「發光藍踏板」跟「配對踏板」共「踏板」→ 配
+        tail = q[-2:]
+        cands = [n for n in names if n != "自己" and tail in n]
         if len(cands) == 1:
             self.look_alias_note = f"（你寫的「{q}」當成記過的長相「{cands[0]}」）"
             return cands[0]

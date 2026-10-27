@@ -809,4 +809,25 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.startup.pop("速度", None)
+# 第 84 輪：名稱換成記過的長相要說出來；一個字不配；尾兩字才配
+_bak = {k: getattr(t, k, None) for k in ("_look_names", "_look_find", "_look_files", "grab", "desc_items", "live", "image_path")}
+try:
+    t._look_names = lambda: ["右側開門框", "中央生物", "配對踏板", "門框E框瞬間移動", "自己"]
+    t._look_find = lambda name, im_: None; t._look_files = lambda name: ["a.png"]; t.grab = lambda: im; t.desc_items = []; t.desc_at = 0
+    t.look_alias_note = ""
+    check("走過去(門) 一個字不配照片", t._look_name("門") is None and t.look_alias_note == "")
+    check("正中央走廊開口 不配 中央生物", t._look_name("正中央走廊開口") is None)
+    check("E框編號 不配 門框E框瞬間移動", t._look_name("E框編號") is None)
+    check("發光藍踏板 → 配對踏板（尾兩字）", t._look_name("發光藍踏板") == "配對踏板" and "發光藍踏板" in t.look_alias_note, t.look_alias_note)
+    t.look_alias_note = ""
+    check("門框 → 右側開門框（包含）且有換名說明", t._look_name("門框") == "右側開門框" and "當成記過的長相" in t.look_alias_note, t.look_alias_note)
+    _r = t._resolve_target("門框")
+    check("照片找不到時說出「你寫的 門框 …拿 右側開門框 照片找」", isinstance(_r, str) and "你寫的「門框」" in _r and "右側開門框" in _r and "描述畫面" in _r, _r)
+    check("找不到後換名說明已清掉", t.look_alias_note == "")
+    _r = t._resolve_target("配對踏板")
+    check("同名找不到 不多加換名那句", isinstance(_r, str) and "你寫的" not in _r and "找不到「配對踏板」" in _r, _r)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.look_alias_note = ""
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
