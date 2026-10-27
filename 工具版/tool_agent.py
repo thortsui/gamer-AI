@@ -3525,6 +3525,7 @@ class Tools(ExtraTools):
         loc1 = self._locate(patch, after, near=(0.5, ay, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1
         bad_comp = False
+        comp_ok = False         # 第 72 輪：補轉後找不到目標、但特徵點量到補轉到位
         if loc1 and loc1[2] >= GOOD and (abs(loc1[0] - 0.5) > 0.2 or abs(loc1[1] - ay) > 0.2) and max(abs(yaw), abs(pitch)) >= 5:   # 10/26 16:5x：純上下轉（yaw 0）也要擋（16:46 送上下 −16、「找到」在 (0.27,0.57)、補轉 −32 跑到 (0.76,0.23)）
             # 10/26 11:2x 第 42 輪：11:09 送 +15 度，「找到」目標在 (0.27,0.77)（離中央 23%／27%＝差了 30 多度），補轉 −32/−17 更偏。
             #   轉完目標理應在中央附近；差超過 20% 畫面就是認錯（大廳人多、地磚同款），不拿它補轉，改用特徵點量實際轉了幾度
@@ -3537,11 +3538,30 @@ class Tools(ExtraTools):
                 y2, p2 = self._angles_to(loc1[0], loc1[1], W, H)
                 p2 -= self._angles_to(0.5, ay, W, H)[1] if ay != 0.5 else 0
                 p2 = self._pitch_room(p2)
+                before2 = after
                 self._drag(y2 * self.dx_deg, -p2 * self.dy_deg)
                 self.pitch_acc = max(-89.0, min(89.0, self.pitch_acc + p2))
                 after = self._settled()
                 final = self._locate(patch, after, near=(0.5, ay, 0.3))
-                out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度" + (f" → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）" if final else ""))
+                if final and final[2] >= GOOD:
+                    out.append(f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度 → 現在在 ({final[0]:.2f},{final[1]:.2f})（相似度 {final[2]:.2f}）")
+                else:
+                    # 10/27 10:5x 第 72 輪：10:48／10:50 第一次找到目標在 (0.40,0.51)／(0.60,0.52)，補轉 -15／+16 後「現在在 (0.32,0.20) 相似度 0.76」——
+                    #   0.76 低於門檻、根本不算找到（多半已到中央被自己角色擋住），原本卻把那個位置當真印出來、然後「沒有完全對準」（10/25～27 六次都這樣）
+                    #   → 補轉後找不到就老實說找不到，改用特徵點量補轉本身轉了幾度：到位＝目標應在中央（跟第一次轉找不到時的做法一樣）
+                    fm = self._feat_deg(before2, after, want=y2)[0] if (abs(y2) >= 3 and self.live and not self.image_path) else None
+                    lost = (f"偏了，補轉 左右 {y2:+.0f}、上下 {p2:+.0f} 度 → 補轉後在中央附近找不到它"
+                            + (f"（最像的一塊 ({final[0]:.2f},{final[1]:.2f}) 相似度只有 {final[2]:.2f}、不算找到；" if final else "（")
+                            + "轉到中央常被你自己的角色擋住）")
+                    if fm is not None and abs(fm - y2) <= max(5.0, 0.15 * abs(y2)):
+                        comp_ok = True
+                        out.append(lost + f"→ 特徵點量補轉實際轉了 {fm:+.0f} 度（送 {y2:+.0f}）＝補轉到位，目標應該就在正中央；"
+                                   + self._cmp("視角移動到 補轉特徵點實測", f"{y2:+.0f}", f"{fm:+.0f}", True, "度"))
+                    elif fm is not None:
+                        out.append(lost + f"→ 特徵點量補轉只轉了 {fm:+.0f} 度（送 {y2:+.0f}），不算對準；"
+                                   + self._cmp("視角移動到 補轉特徵點實測", f"{y2:+.0f}", f"{fm:+.0f}", False, "度"))
+                    else:
+                        out.append(lost + "→ 補轉轉了幾度也量不出，不算對準；看下一張畫面確認")
                 d1 = abs(loc1[0] - 0.5) + abs(loc1[1] - ay)
                 d2 = (abs(final[0] - 0.5) + abs(final[1] - ay)) if (final and final[2] >= GOOD) else None
                 if (final and final[2] >= GOOD and abs(final[0] - loc1[0]) < 0.05 and abs(final[1] - loc1[1]) < 0.06
@@ -3561,7 +3581,7 @@ class Tools(ExtraTools):
                     out.append(f"補轉後反而更偏（離中央 {d1:.2f}→{d2:.2f}）＝第一次找到的那塊可能認錯；**已轉回補轉前**，這次沒對準，看下一張畫面再對")
         else:
             final = None
-        ok = bool(final and final[2] >= GOOD and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - ay) <= 0.08) and not bad_comp
+        ok = (bool(final and final[2] >= GOOD and abs(final[0] - 0.5) <= 0.05 and abs(final[1] - ay) <= 0.08) or comp_ok) and not bad_comp
         if bad_comp:
             pass
         elif not (loc1 and loc1[2] >= GOOD):

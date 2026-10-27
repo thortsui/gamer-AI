@@ -544,4 +544,38 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 72 輪：補轉後找不到目標（相似度 < 0.85）→ 老實說找不到、用特徵點量補轉到位與否
+_sent = []; _loc_calls = []
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_settled", "diff", "_shift", "_drag", "_feat_deg", "_locate", "_verify_dump", "_words", "_pitch_from_vshift")}
+try:
+    t.live, t.image_path = True, None; t._turn_hist = []
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.1, "")
+    t._drag = lambda dx, dy, fy=0.5: _sent.append(dx / t.dx_deg)
+    t._verify_dump = lambda *a, **k: None; t._words = lambda im_: {}; t._pitch_from_vshift = lambda a, b: (None, "")
+    t._feat_deg = lambda a, b, want=None: (0.95 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    def _loc72(patch, im_, near=None, second=False):
+        if near and abs(near[0] - 0.5) < 1e-6:
+            _loc_calls.append(1)
+            return (0.40, 0.51, 0.89) if len(_loc_calls) == 1 else (0.32, 0.20, 0.76)
+        return (near[0], near[1], 0.3) if near else None
+    t._locate = _loc72
+    _yaw72 = t._angles_to(0.44, 0.5, im.width, im.height)[0]
+    _r = t.look_at(0.44, 0.5)
+    check("補轉後相似度 0.76 → 不印成找到、說找不到", "補轉後在中央附近找不到它" in _r and "相似度只有 0.76" in _r and "現在在 (0.32,0.20)（相似度 0.76）" not in _r, _r[-400:])
+    check("特徵點量補轉到位 → 已對準", "補轉到位" in _r and "已對準正中央" in _r, _r[-300:])
+    _sent.clear(); _loc_calls.clear(); _n72 = [0]
+    def _fd72(a, b, want=None):
+        _n72[0] += 1
+        return (0.95 * _sent[-1], 0.0, 100, 0.9, "特徵點") if _n72[0] == 1 else (None, None, 0, 0.0, "量不出")
+    t._feat_deg = _fd72
+    _r = t.look_at(0.44, 0.5)
+    check("補轉量不出 → 不算對準", "補轉轉了幾度也量不出" in _r and "沒有完全對準" in _r, _r[-300:])
+    _sent.clear(); _loc_calls.clear()
+    t._feat_deg = lambda a, b, want=None: (0.3 * _sent[-1], 0.0, 100, 0.9, "特徵點") if len(_sent) >= 2 else (0.95 * _sent[-1], 0.0, 100, 0.9, "特徵點")
+    _r = t.look_at(0.44, 0.5)
+    check("補轉只轉到 30% → 不算對準", "補轉只轉了" in _r and "沒有完全對準" in _r, _r[-300:])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._turn_hist = []; t.pitch_acc = 0.0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
