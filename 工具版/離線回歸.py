@@ -578,4 +578,27 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t._turn_hist = []; t.pitch_acc = 0.0
+# 第 73 輪：整張沒變、底部道具欄變了 → 有反應
+from PIL import ImageDraw as _ID73
+_im_a = im.copy(); _im_b = im.copy()
+_W73, _H73 = _im_b.size
+_ID73.Draw(_im_b).rectangle((int(_W73 * 0.46), int(_H73 * 0.90), int(_W73 * 0.54), int(_H73 * 0.98)), fill=(255, 220, 0))   # 道具欄多一格
+check("道具欄那一帶變化 ≥10、整張 <2", t._hotbar_diff(_im_a, _im_b) >= 10 and t.diff(_im_a, _im_b) < 2, (round(t._hotbar_diff(_im_a, _im_b), 1), round(t.diff(_im_a, _im_b), 1)))
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "grab", "_changed_px", "_task_note")}
+try:
+    t.live, t.image_path = True, None
+    t.grab = lambda: _im_b; t._task_note = lambda b: ""
+    t._changed_px = lambda before, noise=None: "畫面變化 1（沒變＝可能被擋；等 1.2 秒再看也沒變）；【二次驗證 一致】有沒有反應 第一次 1、第二次 1（兩次都看不出反應）"
+    _r = t._changed(_im_a, 0.0)
+    check("整張沒變但道具欄變了 → 改寫成有反應", "底部道具欄變了＝**有反應**" in _r and "以道具欄為準" in _r and "沒變＝可能被擋" not in _r, _r)
+    t.grab = lambda: _im_a
+    _r = t._changed(_im_a, 0.0)
+    check("道具欄也沒變 → 照舊沒反應", "沒變＝可能被擋" in _r and "道具欄" not in _r, _r)
+    t.grab = lambda: _im_b
+    t._changed_px = lambda before, noise=None: "畫面變化 40（比背景大）"
+    _r = t._changed(_im_a, 0.0)
+    check("整張已變 40 → 道具欄變化不另外標（dh < 3×d）", "道具欄" not in _r, _r)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

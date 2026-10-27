@@ -459,7 +459,40 @@ class Tools(ExtraTools):
                 out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（畫面變化小，但右上任務字變了＝**有反應**）", out)
                 out = out.replace("（兩次都看不出反應）", "（像素看不出，但任務字變了，以任務字為準＝有反應）")
             out += tn
+            hn = self._hotbar_note(before, out) if TOOLFIX else ""
+            if hn and ("看不出" in out or "沒變" in out):
+                out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（畫面整體沒變，但底部道具欄變了＝**有反應**）", out)
+                out = out.replace("（兩次都看不出反應）", "（像素整體看不出，但道具欄變了，以道具欄為準＝有反應）")
+            out += hn
         return out
+
+    HOTBAR_BOX = (0.30, 0.86, 0.70, 1.0)     # 底部道具欄那一帶（10/18 起道具欄都在這裡）
+
+    def _hotbar_diff(self, before, after):
+        """底部道具欄那一帶的變化量（跟 diff 同一種算法、只算那一塊）。"""
+        if before is None or after is None:
+            return 0.0
+        W, H = before.size
+        x0, y0, x1, y1 = self.HOTBAR_BOX
+        box = (int(W * x0), int(H * y0), int(W * x1), int(H * y1))
+        a = before.crop(box).convert("L").resize((160, 40))
+        b = after.crop(box).convert("L").resize((160, 40))
+        pa, pb = a.tobytes(), b.tobytes()
+        return sum(abs(x - y) for x, y in zip(pa, pb)) / len(pa)
+
+    def _hotbar_note(self, before, out):
+        """10/27 12:2x 第 73 輪：12:15 對中央「E 咳嗽糖漿」長按 E，整張畫面變化 1 回「沒變＝可能被擋」；12:21 道具欄卻從 2 格變 3 格（第 3 格黃瓶湯匙）＝
+        其實撿到了。撿東西只有底部道具欄那一小塊會變、整張平均幾乎是 0 → 按完另外量道具欄那一帶，變得比整張明顯多就寫出來（只給讀數）。"""
+        try:
+            after = self.grab()
+            dh = self._hotbar_diff(before, after)
+        except Exception:  # noqa: BLE001
+            return ""
+        m = re.search(r"畫面變化 (\d+)", out)
+        d = float(m.group(1)) if m else 0.0
+        if dh >= 10 and dh >= 3 * d:
+            return f"；⚑ 底部道具欄那一帶變了（那一帶變化 {dh:.0f}、整張畫面才 {d:.0f}）＝多半有反應：撿到／用掉東西或道具格數變了，看道具欄"
+        return ""
 
     def _task_note(self, before):
         """10/20 05:3x：長按 E 蓋印，右上任務字當場「蓋印表格→拍照」，回傳卻寫「畫面變化 4＝看不出有反應」，他檢討成「E 沒反應」
