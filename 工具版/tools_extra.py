@@ -182,6 +182,16 @@ class ExtraTools:
                     parts.append(part.strip())
             if parts:
                 d[k] = "；".join(parts)
+        # 10/27 09:2x 第 70 輪：09:09 描述員把右上任務框的「拍照」(0.91,0.20) 列成「互動提示｜右側牆面」，他接著 走過去(1) 走向 HUD 字兩步全找不到
+        #   （10/26～27 描述畫面 108 次有 6 次這樣；視角移動到 對那一區 25 次都量到「釘在畫面上」）
+        #   → 落在右上任務框區（x≥0.78、y≤0.37，TaskWords 同一區）又跟 OCR 讀到的字同位置的點，標成「任務框的字、不是場景」，走過去／追蹤 不接
+        pinned_note = self._mark_task_frame(items, ocr)
+        if pinned_note:
+            for k in ("互動提示", "場景"):
+                if k in d:
+                    for it in items:
+                        if it.get("釘") and f"[{it['編號']}]" in d[k]:
+                            d[k] = d[k].replace(f"[{it['編號']}]", f"[{it['編號']}]（右上任務框的字、不是場景）", 1)
         self.desc_items, self.desc_at = items, time.time()
         kind = d.get("類型", "？")
         prev = self.last_desc
@@ -197,10 +207,34 @@ class ExtraTools:
             lines.append("（距離已換算成走路秒數" + (f"；走路速度還沒校準、用預設 {v:g} 身高/秒，量比例 鎖到描述畫面有給距離的東西就會校準" if is_default else f"；走路速度實測 {v:g} 身高/秒") + "）")
         if items:
             lines.append("→ 要走去其中一個：走過去(編號)；要每輪盯著：追蹤(編號)")
+        if pinned_note:
+            lines.append(pinned_note)
         if self.desc_changed:
             lines.append("⚑ " + self.desc_changed)
         self._append("畫面描述.md", " ｜ ".join(lines[1:])[:700])
         return NL.join(lines)
+
+    @staticmethod
+    def _mark_task_frame(items, ocr):
+        """第 70 輪：描述畫面的點落在右上任務框區（x≥0.78、y≤0.37）、而且 OCR 在同位置（差 ≤0.08）讀到字 → 標 釘=True、名稱加註；回說明（沒有回空字串）。"""
+        words = []
+        for o in ocr or []:
+            m = re.search(r"「(.*?)」\((\d?\.\d+|\d),(\d?\.\d+|\d)\)", str(o))
+            if m:
+                words.append((m.group(1), float(m.group(2)), float(m.group(3))))
+        hit = []
+        for it in items:
+            if not (it["x"] >= 0.78 and it["y"] <= 0.37):
+                continue
+            near = [w for w in words if abs(w[1] - it["x"]) <= 0.08 and abs(w[2] - it["y"]) <= 0.08]
+            if near:
+                it["釘"] = True
+                it["名稱"] = (it["名稱"] + "（右上任務框的字）")[:40]
+                hit.append(f"[{it['編號']}]「{near[0][0]}」({it['x']:.2f},{it['y']:.2f})")
+        if not hit:
+            return ""
+        return ("⚑ " + "、".join(hit) + " 在右上任務框那一區、跟程式讀到的任務字同位置＝釘在畫面上的字（HUD），不是場景裡的東西；"
+                "走過去／視角移動到 對它無效（之前每次轉過去都量到它還在原位）。要找場景裡的東西：看 場景 那幾項、或 讀字 找 E 提示")
 
     # ---------------- 追蹤描述畫面給的點（20:xx 使用者：「追蹤是要去使用他前面畫面描述去追蹤那個點」）
     # 不用訓練、任何遊戲通用：在那個點切一小塊圖當目標，之後每張畫面用影像比對找它（cv2 matchTemplate）
@@ -271,6 +305,9 @@ class ExtraTools:
                 h = n.split("（")[0].strip().split(" ")[0].strip("[]（）() ")
                 return h if len(h) >= 2 else None
             it = next((i for i in fresh if i["名稱"] and (q in i["名稱"] or (_head(i["名稱"]) and _head(i["名稱"]) in q))), None)   # 10/25 審查：空名稱不比
+        if it and it.get("釘"):                         # 第 70 輪：右上任務框的字不是場景，走過去／追蹤 不接
+            return (f"[{it['編號']}]{it['名稱']} 是右上任務框裡的字（釘在畫面上的 HUD），不是場景裡的東西；走過去／追蹤 對它無效。"
+                    "要找場景裡的東西：用 描述畫面 的 場景 項目、或 讀字 找 E 提示再 走過去(x,y)")
         if it:
             return it["x"], it["y"], f"[{it['編號']}]{it['名稱']}"
         if q and not mn:                                 # 20:xx 記過長相的東西：直接拿照片在現在的畫面找

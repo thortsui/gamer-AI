@@ -519,4 +519,23 @@ import inspect as _insp69
 for _fn in ("look_slow", "walk_until"):
     _src = _insp69.getsource(getattr(T.Tools, _fn))
     check(f"{_fn} 有 seen_new 初始化", "seen_new = []" in _src and "prompt_like" in _src, _fn)
+# 第 70 輪：描述畫面落在右上任務框區、OCR 同位置有字的點 → 標釘、走過去不接
+import time as _tm70
+_bak = {k: getattr(t, k, None) for k in ("desc_items", "desc_at")}
+try:
+    _items = [{"編號": 1, "名稱": "右側牆面（拍照）", "x": 0.91, "y": 0.20, "種類": "互動提示"}, {"編號": 2, "名稱": "白鹿角色", "x": 0.22, "y": 0.48, "種類": "場景"},
+              {"編號": 3, "名稱": "招牌", "x": 0.90, "y": 0.20, "種類": "場景"}]
+    _note = t._mark_task_frame(_items, ["「拍照」(0.91,0.21)", "「輪班 1」(0.50,0.03)"])
+    check("任務框區同位置有字 → 釘", _items[0].get("釘") and "「拍照」" in _note and "不是場景" in _note, (_items[0], _note))
+    check("同區沒對到字的不標（第 3 項對到同一個字也標）", not _items[1].get("釘") and _items[2].get("釘"), _items)
+    check("OCR 沒字 → 不標、空說明", t._mark_task_frame([{"編號": 1, "名稱": "x", "x": 0.9, "y": 0.2, "種類": "互動提示"}], []) == "")
+    check("不在任務框區不標", t._mark_task_frame([{"編號": 1, "名稱": "x", "x": 0.5, "y": 0.2, "種類": "互動提示"}], ["「拍照」(0.50,0.20)"]) == "")
+    t.desc_items, t.desc_at = _items, _tm70.time()
+    _r = t._resolve_target("1")
+    check("走過去 釘住的編號 → 不接、說是 HUD", isinstance(_r, str) and "任務框" in _r and "無效" in _r, _r)
+    _r = t._resolve_target("2")
+    check("走過去 場景編號 照常", not isinstance(_r, str) and _r[2].startswith("[2]"), _r)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
