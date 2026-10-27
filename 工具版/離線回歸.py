@@ -1029,4 +1029,15 @@ try:
     check("15 分鐘前的估計 → 不提示", "量到鏡頭上下歪" not in t.persp_text())
 finally:
     t._pitch_est = _bak95
+# 第 96 輪：最近 3 分鐘拖曳比例 <50% → 面板【拖曳】讀數
+_bak96 = list(getattr(t, "_turn_hist", []))
+try:
+    t._turn_hist = []
+    t._turn_record(-20, -6); t._turn_record(-20, -4); t._turn_record(+30, +9)
+    check("拖曳比例 27% → 面板提示", "【拖曳】最近 3 分鐘拖曳只轉到送出的 27%" in t.persp_text(), t.persp_text()[-200:])
+    t._turn_hist = []
+    t._turn_record(-20, -19); t._turn_record(+30, +28)
+    check("比例正常 → 不提示", "【拖曳】" not in t.persp_text())
+finally:
+    t._turn_hist = _bak96
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
