@@ -1019,4 +1019,14 @@ _t, _e = _tw94.update([("治療的病人數", 0.95, 0.27)]); _t, _e2 = _tw94.upd
 check("排行榜字 x≥0.95 → 不算任務字換", _e is None and _e2 is None and _tw94.current == ["在電腦上註冊"], (_e, _e2, _tw94.current))
 _t, _e = _tw94.update([("列印徽章", 0.91, 0.21)])
 check("x 0.91 真任務字 照舊換", _e is not None and _e["新"] == "列印徽章", _e)
+# 第 95 輪：特徵點量到鏡頭俯仰 ≥50 度 → 面板【人稱】那行帶出來（10 分鐘內）
+import time as _tm95
+_bak95 = getattr(t, "_pitch_est", None)
+try:
+    t._pitch_est = (_tm95.time() - 60, 75.0)
+    check("俯仰 75 度 1 分鐘前 → 面板提示", "量到鏡頭上下歪了約 75 度" in t.persp_text() and "修水平" in t.persp_text(), t.persp_text()[-160:])
+    t._pitch_est = (_tm95.time() - 900, 75.0)
+    check("15 分鐘前的估計 → 不提示", "量到鏡頭上下歪" not in t.persp_text())
+finally:
+    t._pitch_est = _bak95
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

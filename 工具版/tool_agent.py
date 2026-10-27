@@ -1577,6 +1577,14 @@ class Tools(ExtraTools):
             return None, None, 0, 0.0, f"特徵點法失敗：{str(e)[:60]}"
         self._feat_vert = (f"（鏡頭正低頭／抬頭約 {_diag.get('俯仰估計')} 度看，畫面是繞著轉的；照旋轉軸算左右轉了 {yaw:+.0f} 度）"
                            if (_diag or {}).get("繞垂直軸") else "")
+        # 10/28 07:2x 第 95 輪：06:37／07:19／07:20 特徵點量到鏡頭俯仰 69／75／77 度（水平儀累計只到 ±45 就當極限），他看著地板和自己
+        #   45 分鐘、「中央被自己角色擋」「走量不出」連發、從沒叫 修水平 → 記下最近一次 ≥50 度的估計，面板【人稱】那行帶出來
+        try:
+            _t = (_diag or {}).get("俯仰估計")
+            if (_diag or {}).get("繞垂直軸") and _t is not None and abs(float(_t)) >= 50:
+                self._pitch_est = (time.time(), float(_t))
+        except (TypeError, ValueError):
+            pass
         self._feat_how = "ORB"
         self._feat_bad = ""
         self._feat_note = ""
@@ -2285,6 +2293,10 @@ class Tools(ExtraTools):
         if should and now and should not in now and now in ("第一人稱", "第三人稱"):
             # 10/26 14:3x 使用者：「叫他不要去捲鏡頭」→ 不再提示用 捲 切人稱；照現在的人稱玩
             head += "｜不一樣，但使用者 10/26 交代：**不要捲鏡頭**，照現在的人稱玩就好"
+        pe = getattr(self, "_pitch_est", None)                  # 第 95 輪
+        if pe and time.time() - pe[0] <= 600:
+            head += (f"｜【鏡頭俯仰】特徵點 {datetime.fromtimestamp(pe[0]).strftime('%H:%M')} 量到鏡頭上下歪了約 {abs(pe[1]):.0f} 度（水平儀累計只有 {self.pitch_acc:+.0f}）"
+                     "＝畫面大半是地板／天花板和你自己、前面看不到；要看前面用 修水平")
         return head
 
     # ---- 10/19 10:5x 使用者：「他需要知道自己在第幾人稱，需要三個：這個工具可以確保第幾人稱、是否畫面中間有東西、
