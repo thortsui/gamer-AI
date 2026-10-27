@@ -890,4 +890,25 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.pitch_acc = 0.0; t.pitch_unknown = False
+# 第 88 輪：走過去 盯到的那塊連 3 步位置大小都沒變 → 停、說不是場景裡的目標
+import time as _tm88
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_key", "_trk_find", "_words", "_new_word_checker", "desc_items", "desc_at", "_pop_look_how", "_append", "_walk_speed_samples", "_turn_chunks", "_trk_self_frac", "self_mask")}
+try:
+    t.live, t.image_path = True, None; t._walk_speed_samples = []; t.self_mask = None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0
+    t._drag = lambda dx, dy, fy=0.5: None; t._key = lambda k, d: None; t._words = lambda im_: {}; t._new_word_checker = lambda im_: (lambda w: False)
+    t._pop_look_how = lambda: ""; t._append = lambda *a, **k: None; t._trk_self_frac = lambda g, x, y, fw=0.09, fh=0.12: 0.0
+    t._trk_find = lambda g, tpl, near=None, r=0.3, scales=(1.0,): (0.50, 0.55, 0.9, 1.0)       # 每步都在同一處、大小不變
+    _r = t.move_track("0.5,0.55")
+    check("走過去 連 3 步位置大小沒變 → 第 3 步停、說不是場景裡的目標", "第3步" in _r and "第4步" not in _r and "不會隨你走路變大" in _r and "找自己" in _r, _r[:400])
+    _n88 = [0]
+    def _tf88(g, tpl, near=None, r=0.3, scales=(1.0,)):
+        _n88[0] += 1
+        return (0.50, 0.55, 0.9, 1.2)                      # 每步放大 1.2 倍 → 照常走
+    t._trk_find = _tf88
+    _r = t.move_track("0.5,0.55")
+    check("每步都在變大 → 不誤停", "不會隨你走路變大" not in _r and ("到面前" in _r or "走滿 8 步" in _r), _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

@@ -704,6 +704,8 @@ class ExtraTools:
         #   相似三角：走了 t 秒放大 r 倍 → 從現在位置還要 t/(r−1) 秒（跟 量比例 同一條公式，不用走路速度、不用描述員估身高）
         walked = 0.0           # 真的走了幾秒（畫面有變的步才算）
         eta_last = None
+        trail = []             # 第 88 輪：最近幾步 (x, y, size)，連 3 步位置大小都沒變＝盯到的不是場景裡的東西
+        reanch = False
         total_est = None       # 第 77 輪：從起點到目標的總秒數（算 eta 當下的 走了＋還要；之後再走幾步它都不變）
         desc_h = None          # 描述畫面估的「幾個身高」（有的話走完回頭校準走路速度）
         _mn = re.match(r"\[(\d+)\]", name)
@@ -741,6 +743,7 @@ class ExtraTools:
                         selfy = self._trk_self_frac(g, 0.5, y)
                         if sd2 >= 8.0 and selfy < 0.3:
                             tpl, h0 = tpl2, tpl2.shape[0]
+                            reanch = True
                             log.append(f"轉正 {yaw:+.0f}→實測 {turned:+.0f}，照角度它應該就在正中央，但原本切的長相在中央只像 {s_:.2f}（轉過來的東西長相會變）"
                                        "→ 改用現在正中央那塊當它的長相")
                         else:
@@ -780,6 +783,18 @@ class ExtraTools:
                 total_est = walked + eta_last
                 eta_txt = f"、走了 {walked:.1f} 秒放大 {size:.2f} 倍＝還要約 {eta_last:.1f} 秒"
             log.append(f"第{i + 1}步 在 ({x:.2f},{y:.2f}) 大小 {size:.1f} 倍（相似度 {sc:.2f}）" + eta_txt)
+            # 10/28 01:3x 第 88 輪：01:21 走過去(0.42,0.28) 第 2～6 步都在 (0.52,0.59) 大小 1.2、01:27 走過去(0.7,0.55) 轉正後改用中央那塊，
+            #   8 步都在 (0.50,0.55) 大小 1.0～1.1——盯到的是他自己的角色（第三人稱、找自己 沒跑所以沒遮罩），走 3.2 秒還說「還要 11.6 秒」。
+            #   → 連 3 步位置差 ≤0.03、大小變化 ≤3%、而且真的有在走（畫面有變）＝那塊不會隨走路變大，不是場景裡的目標，停下照實說
+            trail.append((x, y, size))
+            if len(trail) >= 3:
+                xs, ys, ss = zip(*trail[-3:])
+                if max(xs) - min(xs) <= 0.03 and max(ys) - min(ys) <= 0.03 and (max(ss) - min(ss)) <= 0.03 * max(ss):
+                    reason = (f"盯著的那塊連 3 步（走了 1.2 秒）位置 ({x:.2f},{y:.2f}) 和大小 {size:.1f} 倍都沒變＝它不會隨你走路變大，"
+                              "不是場景裡的目標——多半是你自己的角色（第三人稱中央那個）或釘在畫面上的東西，也可能它非常遠"
+                              + ("；而且這塊是轉正之後從正中央重切的、更可能就是你自己" if reanch else "")
+                              + "。先 找自己 讓程式記住自己的樣子，或 描述畫面 用編號再走")
+                    break
             words = self._words(im)
             new = [w for w in words if is_new(w)]
             # 10/27 01:5x 第 63 輪：10/26～27 因「跳出原本沒有的字」停下 23 次，全是 OCR 雜訊／玩家名／理智警語／招牌（「公室」「火焰 ;」「, ~ aoye 8」），

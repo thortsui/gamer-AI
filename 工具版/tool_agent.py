@@ -4997,6 +4997,7 @@ def main():
     # 10/28 01:1x 使用者實驗「context 順序差異：重要的事情在頭／中／尾，看哪個任務成功率最高」
     ap.add_argument("--ctx-order", default="頭", choices=["頭", "中", "尾"], help="面板裡最重要那塊（大任務／小任務／任務字／上一輪結果）放頭、中、尾")
     ap.add_argument("--ctx-rotate", type=int, default=0, help="每 N 分鐘輪流 頭→中→尾（0＝固定用 --ctx-order）；每輪紀錄寫 順序 欄")
+    ap.add_argument("--ctx-t0", default="", help="輪流的起算時刻 HH:MM（重啟後沿用原本的時程用；不寫＝啟動時刻）")
     # 10/24 使用者：模型比較實驗（haiku／sonnet／sonnet 自由搜尋 各一小時，其他一模一樣）→ claude_brain.py
     ap.add_argument("--brain", default="", help="空＝本地 8888；haiku／sonnet＝每次叫大腦開一個新的 claude -p")
     ap.add_argument("--brain-search", action="store_true", help="--brain 時多給 WebSearch／WebFetch")
@@ -5004,6 +5005,13 @@ def main():
                     help="10/24 使用者「原生的Claude 不要洗掉」：保留 Claude Code 原本 system＋原生工具、整段同一個 session")
     args = ap.parse_args()
     _ctx_t0 = time.time()
+    if args.ctx_t0:
+        try:
+            _h, _m = [int(x) for x in args.ctx_t0.split(":")]
+            _d = datetime.now().replace(hour=_h, minute=_m, second=0, microsecond=0)
+            _ctx_t0 = _d.timestamp() if _d.timestamp() <= time.time() else _ctx_t0
+        except ValueError:
+            pass
     _ctx_last = [None]
 
     def ctx_order_now():
