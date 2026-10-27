@@ -3698,6 +3698,7 @@ class Tools(ExtraTools):
         turned = 0
         reason = ""
         pending = set()
+        seen_new = []
         for i in range(120):                      # 120 × 3 度 = 一圈
             self._drag(step_px, 0)
             turned += 3
@@ -3711,15 +3712,23 @@ class Tools(ExtraTools):
             cand = {re.sub(r"[\s,，、.．:：/／|｜%$\-—_~]+", "", w): w for w in words if is_new(w)}
             new = [cand[k] for k in cand if k in pending]       # 連續兩步都讀到才算新字
             pending = set(cand.keys())
-            if new:
-                reason = "跳出原本沒有的字（UI）：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:5])
+            # 10/27 08:3x 第 69 輪：10/26～27 慢慢轉 29 次有 21 次被「新字」停下（中位 33 度），字全是 HUD／對話／OCR 雜訊（AM、保安、+1 雨水、一膚）
+            #   → 跟第 63 輪 走過去 一樣：只有像 E 提示的字才停，其他記著、轉完一起回報
+            prompt_like = [w for w in new if re.search(r"(^|[\s\[（(])E([\s\]）)]|$)|長按|按 ?E", str(w))]
+            if prompt_like:
+                reason = "跳出像 E 提示的字：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in prompt_like[:5])
                 break
+            for w in new[:3]:
+                if w not in seen_new:
+                    seen_new.append(w)
             if d_step >= 35:
                 reason = f"畫面大幅變動（這 3 度前後差 {d_step:.0f}）"
                 break
             prev = cur
         else:
             reason = "轉滿 360 度沒有新字、也沒有大變動"
+        if seen_new:
+            reason += "；路上冒出的字（沒因此停）：" + "、".join(f"「{w}」" for w in seen_new[:5])
         self._append("刻度樣本.md", f"慢慢轉{'右' if sign > 0 else '左'} {turned} 度｜停：{reason[:60]}")
         return (f"慢慢轉{'右' if sign > 0 else '左'}：轉了 {turned} 度（每次 3 度）後停下，原因：{reason}。"
                 "現在的畫面下一輪給你；要繼續就再叫一次")
@@ -3743,6 +3752,7 @@ class Tools(ExtraTools):
         is_new = self._new_word_checker(start)
         import pydirectinput
         prev, diffs, pending, reason = start, [], set(), ""
+        seen_new = []          # 第 69 輪
         t0 = time.time()
         self._fg_ok()
         pydirectinput.keyDown(k)
@@ -3769,14 +3779,20 @@ class Tools(ExtraTools):
                 cand = {re.sub(r"[\s,，、.．:：/／|｜%$\-—_~]+", "", w): w for w in words if is_new(w)}
                 new = [cand[x] for x in cand if x in pending]
                 pending = set(cand.keys())
-                if new:
-                    reason = "跳出原本沒有的字（UI）：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in new[:5])
+                prompt_like = [w for w in new if re.search(r"(^|[\s\[（(])E([\s\]）)]|$)|長按|按 ?E", str(w))]   # 第 69 輪：同 慢慢轉
+                if prompt_like:
+                    reason = "跳出像 E 提示的字：" + "、".join(f"「{w}」({words[w][0]:.2f},{words[w][1]:.2f})" for w in prompt_like[:5])
                     break
+                for w in new[:3]:
+                    if w not in seen_new:
+                        seen_new.append(w)
                 if time.time() - t0 >= limit:
                     reason = f"走滿 {limit:.0f} 秒沒有大變化、沒有新字"
                     break
         finally:
             pydirectinput.keyUp(k)
+        if seen_new:
+            reason += "；路上冒出的字（沒因此停）：" + "、".join(f"「{w}」" for w in seen_new[:5])
         el = time.time() - t0
         total = self.diff(start, self.grab())
         return (f"走到有變化：按著 {k} 往{name}走了 {el:.1f} 秒後放開，原因：{reason}。"

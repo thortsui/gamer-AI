@@ -514,4 +514,9 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.pitch_acc = 0.0; t._turn_hist = []
+# 第 69 輪：慢慢轉／走到有變化 兩個函式都定義了 seen_new（靜態檢查）
+import inspect as _insp69
+for _fn in ("look_slow", "walk_until"):
+    _src = _insp69.getsource(getattr(T.Tools, _fn))
+    check(f"{_fn} 有 seen_new 初始化", "seen_new = []" in _src and "prompt_like" in _src, _fn)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
