@@ -194,6 +194,7 @@ class ExtraTools:
                         if it.get("釘") and f"[{it['編號']}]" in d[k]:
                             d[k] = d[k].replace(f"[{it['編號']}]", f"[{it['編號']}]（右上任務框的任務字、不是場景）", 1)
         self.desc_items, self.desc_at = items, time.time()
+        self.desc_born = self.desc_at          # 第 78 輪：描述的原始時間（換算只能把有效期延到描述後 120 秒）
         self.desc_wh = im.size
         self.desc_shift_log = []
         kind = d.get("類型", "？")
@@ -248,6 +249,7 @@ class ExtraTools:
 
     desc_wh = (1920, 991)
     desc_shift_log = []
+    desc_born = 0.0
 
     def _shift_desc_items(self, turn_yaw, turn_pitch):
         """第 76 輪：鏡頭轉了 turn_yaw（右＋）／turn_pitch（上＋）度 → 把描述畫面的每個點用同一個針孔模型換算到轉完後的畫面位置。
@@ -262,17 +264,22 @@ class ExtraTools:
             yaw, pitch = self._angles_to(it["x"], it["y"], W, H)
             ny, npit = yaw - turn_yaw, pitch - turn_pitch
             old = (it["x"], it["y"])
+            was_out = bool(it.get("出畫面"))
             if abs(ny) >= 80 or abs(npit) >= 80:
                 it["出畫面"] = True
-                self.desc_shift_log.append((it["編號"], it["名稱"], old, old, True))
+                if not was_out:
+                    self.desc_shift_log.append((it["編號"], it["名稱"], old, old, True))
                 continue
             u = math.tan(math.radians(ny)) / (2 * th)
             fx = 0.5 + u
             fy = 0.5 - math.tan(math.radians(npit)) * math.sqrt(1 + (2 * u * th) ** 2) / (2 * tv)
             it["x"], it["y"] = round(fx, 3), round(fy, 3)
             it["出畫面"] = not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0)
-            self.desc_shift_log.append((it["編號"], it["名稱"], old, (it["x"], it["y"]), it["出畫面"]))
-        self.desc_at = time.time()          # 換算過的點視為新的（60 秒內可用）
+            if not (was_out and it["出畫面"]):       # 10/27 15:5x 第 78 輪：早就出畫面的點不再每次列（15:51 印出「藍布簾 (-0.32,0.35)→出畫面」）
+                self.desc_shift_log.append((it["編號"], it["名稱"], old, (it["x"], it["y"]), it["出畫面"]))
+        # 第 78 輪：換算只延長有效期到描述後 120 秒——原本每拖一次就算新的，走了好幾個房間之後 走過去(編號) 還會拿 15 分鐘前的點
+        if time.time() - (self.desc_born or 0) < 120:
+            self.desc_at = time.time()
 
     def _pop_desc_shift(self):
         """把剛才換算的描述畫面點整理成一句（給 視角移動到 的回傳），拿完清空。"""

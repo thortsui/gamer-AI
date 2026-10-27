@@ -654,7 +654,7 @@ _bak = {k: getattr(t, k, None) for k in ("desc_items", "desc_at", "desc_wh", "de
 try:
     t.desc_wh = (1920, 991); t.desc_shift_log = []
     t.desc_items = [{"編號": 4, "名稱": "門", "x": 0.05, "y": 0.35, "種類": "場景"}, {"編號": 1, "名稱": "床", "x": 0.70, "y": 0.15, "種類": "場景"}]
-    t.desc_at = _tm76.time() - 50
+    t.desc_at = _tm76.time() - 50; t.desc_born = _tm76.time() - 50
     _y4 = t._angles_to(0.05, 0.35, 1920, 991)[0]
     t._shift_desc_items(_y4, 0.0)            # 往門的方向轉到正對它
     _d4 = next(i for i in t.desc_items if i["編號"] == 4); _d1 = next(i for i in t.desc_items if i["編號"] == 1)
@@ -663,7 +663,7 @@ try:
     check("換算後點視為新的（desc_at 更新）", _tm76.time() - t.desc_at < 5)
     _n = t._pop_desc_shift()
     check("視角移動到 回傳附換算說明", "已照轉的角度換算" in _n and "[4]門" in _n and t._pop_desc_shift() == "", _n)
-    t.desc_items = [{"編號": 2, "名稱": "櫃子", "x": 0.5, "y": 0.5, "種類": "場景"}]; t.desc_at = _tm76.time()
+    t.desc_items = [{"編號": 2, "名稱": "櫃子", "x": 0.5, "y": 0.5, "種類": "場景"}]; t.desc_at = _tm76.time(); t.desc_born = _tm76.time()
     t._shift_desc_items(90.0, 0.0)
     _r = t._resolve_target("2")
     check("轉 90 度後點出畫面 → 走過去 不接、說已不在畫面上", isinstance(_r, str) and "不在畫面上" in _r, _r)
@@ -696,4 +696,24 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.startup.pop("速度", None)
+# 第 78 輪：換算只延長到描述後 120 秒；已出畫面的點不重複列
+import time as _tm78
+_bak = {k: getattr(t, k, None) for k in ("desc_items", "desc_at", "desc_wh", "desc_shift_log", "desc_born")}
+try:
+    t.desc_wh = (1920, 991); t.desc_shift_log = []
+    t.desc_items = [{"編號": 1, "名稱": "藍布簾", "x": 0.15, "y": 0.35, "種類": "場景"}]
+    t.desc_born = _tm78.time() - 200; t.desc_at = _tm78.time() - 200
+    t._shift_desc_items(30.0, 0.0)
+    check("描述超過 120 秒 → 換算不延長有效期", _tm78.time() - t.desc_at > 150, t.desc_at)
+    t.desc_born = _tm78.time() - 30; t.desc_at = _tm78.time() - 30
+    t._shift_desc_items(30.0, 0.0)
+    check("描述 30 秒內 → 換算延長有效期", _tm78.time() - t.desc_at < 5)
+    t.desc_shift_log = []
+    t.desc_items = [{"編號": 1, "名稱": "藍布簾", "x": 0.15, "y": 0.35, "種類": "場景"}]; t.desc_born = _tm78.time()
+    t._shift_desc_items(60.0, 0.0); _n1 = len(t.desc_shift_log)
+    t._shift_desc_items(20.0, 0.0); _n2 = len(t.desc_shift_log)
+    check("第一次轉出畫面有列、之後再轉不重複列", _n1 == 1 and _n2 == 1 and t.desc_items[0].get("出畫面"), (_n1, _n2, t.desc_items[0]))
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
