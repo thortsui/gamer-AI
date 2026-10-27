@@ -342,6 +342,8 @@ class ExtraTools:
                 best = ((x0 + loc[0] + tw / 2) / W, (y0 + loc[1] + th / 2) / H, float(mx), sc)
         return best
 
+    DESC_FRESH_SEC = 120      # 第 89 輪：描述畫面的編號幾秒內可用（原 60）
+
     def _resolve_target(self, 目標="", y=""):
         import tool_agent as T
         q = str(目標).strip()
@@ -353,8 +355,11 @@ class ExtraTools:
             return float(m.group(1)), float(m.group(2)), f"({float(m.group(1)):.2f},{float(m.group(2)):.2f})"
         mn = re.fullmatch(r"\[?(\d+)\]?", q)
         # 2x:xx 測試：上次描述的編號在畫面換了之後還被拿來用（座標是舊的）→ 描述 60 秒內才算數；名字先用照片在現在的畫面找
+        # 10/28 02:0x 第 89 輪：慢想一輪 50～170 秒，這輪 描述畫面 下一輪 走過去(編號) 幾乎必定超過 60 秒——10/26～28 被「描述過期」擋 18 次
+        #   （61～77 秒 10 次、108～177 秒 6 次），13 次下一輪又重描述、白繞一輪；第 78／80 輪的座標換算本來就有效到 120 秒 → 改 120 秒一致；
+        #   走過去 第 1 步本來就會在畫面上找那一塊、找不到會停，所以不怕拿到舊的
         age = time.time() - (getattr(self, "desc_at", 0) or 0)
-        fresh = self.desc_items if age <= 60 else []
+        fresh = self.desc_items if age <= self.DESC_FRESH_SEC else []
         it = None
         if mn:
             if self.desc_items and not fresh:

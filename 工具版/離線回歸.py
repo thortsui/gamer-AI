@@ -911,4 +911,17 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 89 輪：描述畫面的編號 120 秒內可用（原 60）
+import time as _tm89
+_bak = {k: getattr(t, k, None) for k in ("desc_items", "desc_at")}
+try:
+    t.desc_items = [{"編號": 1, "名稱": "門框", "x": 0.3, "y": 0.45, "種類": "場景"}]
+    t.desc_at = _tm89.time() - 90
+    check("描述 90 秒前 → 編號還能用", not isinstance(t._resolve_target("1"), str), t._resolve_target("1"))
+    t.desc_at = _tm89.time() - 130
+    _r = t._resolve_target("1")
+    check("描述 130 秒前 → 擋下、說幾秒前", isinstance(_r, str) and "秒前" in _r, _r)
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
