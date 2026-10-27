@@ -461,8 +461,8 @@ class Tools(ExtraTools):
             out += tn
             hn = self._hotbar_note(before, out) if TOOLFIX else ""
             if hn and ("看不出" in out or "沒變" in out):
-                out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（畫面整體沒變，但底部道具欄變了＝**有反應**）", out)
-                out = out.replace("（兩次都看不出反應）", "（像素整體看不出，但道具欄變了，以道具欄為準＝有反應）")
+                out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（畫面整體沒變，但底部那一帶變了＝**有反應**）", out)
+                out = out.replace("（兩次都看不出反應）", "（像素整體看不出，但畫面下方那一帶變了，以它為準＝有反應）")
             out += hn
         return out
 
@@ -491,7 +491,7 @@ class Tools(ExtraTools):
         m = re.search(r"畫面變化 (\d+)", out)
         d = float(m.group(1)) if m else 0.0
         if dh >= 10 and dh >= 3 * d:
-            return f"；⚑ 底部道具欄那一帶變了（那一帶變化 {dh:.0f}、整張畫面才 {d:.0f}）＝多半有反應：撿到／用掉東西或道具格數變了，看道具欄"
+            return f"；⚑ 底部那一帶（道具欄／提示字）變了（那一帶變化 {dh:.0f}、整張畫面才 {d:.0f}）＝多半有反應：道具格數變、撿到／用掉東西、或提示字換了（例：E 開啟→E 關閉），看畫面下方"
         return ""
 
     def _task_note(self, before):
@@ -1107,6 +1107,12 @@ class Tools(ExtraTools):
         if self.dx_deg:
             y = self.yaw_acc + dx / self.dx_deg
             self.yaw_acc = (y + 180) % 360 - 180
+            # 10/27 15:0x 第 76 輪：描述畫面給的點在鏡頭轉過之後位置就不對了（15:03 視角移動到(0.05,0.35) 轉了 49 度、接著 走過去(4) 還拿 (0.05,0.35) 去盯＝盯到空牆「沒有紋理」；
+            #   10/25～27 轉頭後接 走過去(編號) 15 次有 9 次這樣或已過期）→ 每次拖曳都把描述畫面的點照送出的角度換算到新位置（只是座標換算、不是新的辨識）
+            try:
+                self._shift_desc_items(dx / self.dx_deg, (-dy / self.dy_deg) if self.dy_deg else 0.0)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _drag_staged(self, dx, stages=3, fy=None, pause=0.3):
         """10/26 03:0x 使用者：「每出 10 度就中斷掉轉頭來量測，去頭去尾只取中間那段算一度要多少像素」
@@ -1149,6 +1155,12 @@ class Tools(ExtraTools):
         if self.dx_deg:
             y = self.yaw_acc + dx / self.dx_deg
             self.yaw_acc = (y + 180) % 360 - 180
+            # 10/27 15:0x 第 76 輪：描述畫面給的點在鏡頭轉過之後位置就不對了（15:03 視角移動到(0.05,0.35) 轉了 49 度、接著 走過去(4) 還拿 (0.05,0.35) 去盯＝盯到空牆「沒有紋理」；
+            #   10/25～27 轉頭後接 走過去(編號) 15 次有 9 次這樣或已過期）→ 每次拖曳都把描述畫面的點照送出的角度換算到新位置（只是座標換算、不是新的辨識）
+            try:
+                self._shift_desc_items(dx / self.dx_deg, (-dy / self.dy_deg) if self.dy_deg else 0.0)
+            except Exception:  # noqa: BLE001
+                pass
         return frames
 
     def _mid_sample(self, px):
@@ -3685,6 +3697,9 @@ class Tools(ExtraTools):
             out.insert(1, redrag)
         out.append(("**已對準正中央**" if ay == 0.5 else f"**已對準：左右正中、上下在 {ay:.2f}（第三人稱對到自己頭頂上方，免得被自己擋；往前走一樣會走向它）**")
                    if ok else "沒有完全對準；看下一張畫面，再用 視角移動到 或 轉 微調")
+        _dsn = self._pop_desc_shift()
+        if _dsn:
+            out.append(_dsn)
         try:
             self._append("刻度樣本.md", f"視角移動到({fx:.2f},{fy:.2f})｜算 左右{yaw:+.0f} 上下{pitch:+.0f}｜結果 "
                          + (f"({final[0]:.2f},{final[1]:.2f}) 相似{final[2]:.2f}" if (final and final[2] >= GOOD) else "找不到") + f"｜{'對準' if ok else '沒對準'}")

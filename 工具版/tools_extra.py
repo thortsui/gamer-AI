@@ -194,6 +194,8 @@ class ExtraTools:
                         if it.get("釘") and f"[{it['編號']}]" in d[k]:
                             d[k] = d[k].replace(f"[{it['編號']}]", f"[{it['編號']}]（右上任務框的任務字、不是場景）", 1)
         self.desc_items, self.desc_at = items, time.time()
+        self.desc_wh = im.size
+        self.desc_shift_log = []
         kind = d.get("類型", "？")
         prev = self.last_desc
         if prev and prev.get("類型") and kind != "？" and prev["類型"] != kind:
@@ -243,6 +245,47 @@ class ExtraTools:
             return ""
         return ("⚑ " + "、".join(hit) + " 在右上任務框那一區、跟目前認定的任務字同一個字＝釘在畫面上的任務字（HUD），不是場景裡的東西；"
                 "走過去／視角移動到 對它無效（之前每次轉過去都量到它還在原位）。要找場景裡的東西：看 場景 那幾項、或 讀字 找 E 提示")
+
+    desc_wh = (1920, 991)
+    desc_shift_log = []
+
+    def _shift_desc_items(self, turn_yaw, turn_pitch):
+        """第 76 輪：鏡頭轉了 turn_yaw（右＋）／turn_pitch（上＋）度 → 把描述畫面的每個點用同一個針孔模型換算到轉完後的畫面位置。
+        跑出畫面的點標 出畫面=True（走過去／追蹤 會說它已經不在畫面上）。只是座標換算，不重新辨識。"""
+        import math
+        if not self.desc_items or (abs(turn_yaw) < 0.5 and abs(turn_pitch) < 0.5):
+            return
+        W, H = self.desc_wh or (1920, 991)
+        tv = math.tan(math.radians(self.V_FOV / 2))
+        th = tv * W / H
+        for it in self.desc_items:
+            yaw, pitch = self._angles_to(it["x"], it["y"], W, H)
+            ny, npit = yaw - turn_yaw, pitch - turn_pitch
+            old = (it["x"], it["y"])
+            if abs(ny) >= 80 or abs(npit) >= 80:
+                it["出畫面"] = True
+                self.desc_shift_log.append((it["編號"], it["名稱"], old, old, True))
+                continue
+            u = math.tan(math.radians(ny)) / (2 * th)
+            fx = 0.5 + u
+            fy = 0.5 - math.tan(math.radians(npit)) * math.sqrt(1 + (2 * u * th) ** 2) / (2 * tv)
+            it["x"], it["y"] = round(fx, 3), round(fy, 3)
+            it["出畫面"] = not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0)
+            self.desc_shift_log.append((it["編號"], it["名稱"], old, (it["x"], it["y"]), it["出畫面"]))
+        self.desc_at = time.time()          # 換算過的點視為新的（60 秒內可用）
+
+    def _pop_desc_shift(self):
+        """把剛才換算的描述畫面點整理成一句（給 視角移動到 的回傳），拿完清空。"""
+        lg = self.desc_shift_log
+        if not lg:
+            return ""
+        first, last = {}, {}
+        for n, name, old, new, outp in lg:          # 同一點多次拖曳：起點取第一次、終點取最後一次
+            first.setdefault(n, (name, old))
+            last[n] = (new, outp)
+        self.desc_shift_log = []
+        parts = [f"[{n}]{first[n][0][:8]} ({first[n][1][0]:.2f},{first[n][1][1]:.2f})→" + ("出畫面" if last[n][1] else f"({last[n][0][0]:.2f},{last[n][0][1]:.2f})") for n in sorted(first)]
+        return "描述畫面的點已照轉的角度換算到現在的畫面（座標換算、不是重新辨識；走過去(編號) 直接用）：" + "、".join(parts[:6])
 
     # ---------------- 追蹤描述畫面給的點（20:xx 使用者：「追蹤是要去使用他前面畫面描述去追蹤那個點」）
     # 不用訓練、任何遊戲通用：在那個點切一小塊圖當目標，之後每張畫面用影像比對找它（cv2 matchTemplate）
@@ -313,6 +356,9 @@ class ExtraTools:
                 h = n.split("（")[0].strip().split(" ")[0].strip("[]（）() ")
                 return h if len(h) >= 2 else None
             it = next((i for i in fresh if i["名稱"] and (q in i["名稱"] or (_head(i["名稱"]) and _head(i["名稱"]) in q))), None)   # 10/25 審查：空名稱不比
+        if it and it.get("出畫面"):                     # 第 76 輪：轉頭後換算到畫面外
+            return (f"[{it['編號']}]{it['名稱']} 在上次描述之後鏡頭轉過了，照角度換算它現在已經不在畫面上（約在 ({it['x']:.2f},{it['y']:.2f})）；"
+                    "先轉回去或重新 描述畫面")
         if it and it.get("釘"):                         # 第 70 輪：右上任務框的字不是場景，走過去／追蹤 不接
             return (f"[{it['編號']}]{it['名稱']} 是右上任務框裡的字（釘在畫面上的 HUD），不是場景裡的東西；走過去／追蹤 對它無效。"
                     "要找場景裡的東西：用 描述畫面 的 場景 項目、或 讀字 找 E 提示再 走過去(x,y)")
