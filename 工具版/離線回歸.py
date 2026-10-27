@@ -628,4 +628,24 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.startup.pop("速度", None)
+# 第 75 輪：點擊有反應不歸零全沒反應累計、不蓋掉最後有反應的動作；點擊沒反應照算
+_bak = {k: getattr(t, k) for k in ("live", "image_path", "_changed", "grab", "_grab_noise", "_fg_ok", "_cursor_pos")}
+try:
+    t.live, t.image_path = True, None
+    t.grab = lambda: im; t._grab_noise = lambda: (im, 0.0); t._fg_ok = lambda: None; t._cursor_pos = lambda: None
+    t._dead_n, t._dead_since, t._last_ok = 6, "13:16", ("13:14", "長按 e")
+    import pydirectinput as _pdi75
+    _bak_pdi = (_pdi75.moveTo, _pdi75.mouseDown, _pdi75.mouseUp)
+    _pdi75.moveTo = lambda *a, **k: None; _pdi75.mouseDown = lambda *a, **k: None; _pdi75.mouseUp = lambda *a, **k: None
+    t._changed = lambda before, noise=None: "畫面變化 29（比背景大）"
+    _r = t._do_click(0.67, 0.88)
+    check("點擊有反應 → 累計不歸零、最後有反應動作不變", t._dead_n == 6 and t._last_ok == ("13:14", "長按 e") and "全沒反應" not in _r, (t._dead_n, t._last_ok, _r[:120]))
+    t._changed = lambda before, noise=None: "畫面變化 0（沒變＝可能被擋；等 1.2 秒再看也沒變）"
+    _r = t._do_click(0.50, 0.83)
+    check("點擊沒反應 → 累計 +1、讀數帶最後有反應動作 長按 e", t._dead_n == 7 and "連續 7 個動作全沒反應" in _r and "長按 e（13:14）" in _r, (t._dead_n, _r[-160:]))
+finally:
+    _pdi75.moveTo, _pdi75.mouseDown, _pdi75.mouseUp = _bak_pdi
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t._dead_n, t._dead_since, t._last_ok = 0, "", None
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

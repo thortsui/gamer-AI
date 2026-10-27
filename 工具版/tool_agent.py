@@ -3974,7 +3974,12 @@ class Tools(ExtraTools):
         else:
             print(f"   [dry-run] 點 ({fx:.2f},{fy:.2f})")
         r = f"點了 ({fx:.2f},{fy:.2f})；" + self._changed(before, noise)
-        return r + self._dead_mark("沒變" in r or "看不出" in r, act=f"點 ({fx:.2f},{fy:.2f})")
+        # 10/27 13:3x 第 75 輪：13:20／13:32 點「ESC 繼續」關 Roblox 選單有反應，把「從 13:16 起連續 N 個動作全沒反應、最後有反應的動作：長按 e（13:14）」
+        #   歸零並蓋成「點 (0.67,0.88)」，之後走路還是 0——關選單的點擊跟 esc 一樣是 UI 操作，不代表遊戲吃輸入（第 65 輪 esc 已排除）
+        #   → 點擊沒反應照樣算進累計；點擊有反應不歸零、不蓋掉最後有反應的動作
+        if "沒變" in r or "看不出" in r:
+            return r + self._dead_mark(True, act=f"點 ({fx:.2f},{fy:.2f})")
+        return r
 
     def click_text(self, 字=""):
         """點字：10:5x 統計 56 次只找到 14 次（找到的全對），42 次是 OCR 讀歪（「亻呆安」「你的況很要」）
