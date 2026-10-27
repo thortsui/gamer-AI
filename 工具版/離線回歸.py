@@ -703,8 +703,10 @@ try:
     t.desc_wh = (1920, 991); t.desc_shift_log = []
     t.desc_items = [{"編號": 1, "名稱": "藍布簾", "x": 0.15, "y": 0.35, "種類": "場景"}]
     t.desc_born = _tm78.time() - 200; t.desc_at = _tm78.time() - 200
+    t.desc_shift_log = []; _x_before = t.desc_items[0]["x"]
     t._shift_desc_items(30.0, 0.0)
     check("描述超過 120 秒 → 換算不延長有效期", _tm78.time() - t.desc_at > 150, t.desc_at)
+    check("描述超過 120 秒 → 不換算、不列（第 80 輪）", t.desc_items[0]["x"] == _x_before and not t.desc_shift_log and t._pop_desc_shift() == "", (t.desc_items[0], t.desc_shift_log))
     t.desc_born = _tm78.time() - 30; t.desc_at = _tm78.time() - 30
     t._shift_desc_items(30.0, 0.0)
     check("描述 30 秒內 → 換算延長有效期", _tm78.time() - t.desc_at < 5)

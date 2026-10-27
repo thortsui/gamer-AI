@@ -257,6 +257,10 @@ class ExtraTools:
         import math
         if not self.desc_items or (abs(turn_yaw) < 0.5 and abs(turn_pitch) < 0.5):
             return
+        if time.time() - (self.desc_born or 0) >= 120:
+            # 10/27 17:0x 第 80 輪：16:35 在手術室描述的桌子／櫃子，16:58 死後回大廳每次轉頭還印「[1]桌子 (0.34,0.58)→(0.34,0.32)」——
+            #   描述超過 120 秒的點早就過期（走過去(編號) 也不接），不再換算、不再列
+            return
         W, H = self.desc_wh or (1920, 991)
         tv = math.tan(math.radians(self.V_FOV / 2))
         th = tv * W / H
