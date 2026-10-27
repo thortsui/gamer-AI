@@ -614,6 +614,15 @@ class ExtraTools:
         is_new = self._new_word_checker(im)
         seen_new = []          # 第 63 輪：路上冒出的、不像 E 提示的字（走完一起回報、不因此停）
         log, reason, lost = [], "", 0
+        # 10/27 12:4x 第 74 輪（使用者：距離用移動速度當單位、再用大小變化量）：每步已經量到目標放大幾倍、只印倍數沒換算。
+        #   相似三角：走了 t 秒放大 r 倍 → 從現在位置還要 t/(r−1) 秒（跟 量比例 同一條公式，不用走路速度、不用描述員估身高）
+        walked = 0.0           # 真的走了幾秒（畫面有變的步才算）
+        eta_last = None
+        desc_h = None          # 描述畫面估的「幾個身高」（有的話走完回頭校準走路速度）
+        _mn = re.match(r"\[(\d+)\]", name)
+        if _mn:
+            _it = next((it for it in self.desc_items if it.get("編號") == int(_mn.group(1))), None)
+            desc_h = _it.get("身高") if _it else None
         for i in range(8):
             yaw, _ = self._angles_to(x, 0.5, im.width, im.height)
             if abs(yaw) >= 3:
@@ -638,6 +647,7 @@ class ExtraTools:
             if self.diff(before, im) < 2:
                 reason = "走了畫面沒變＝前面被擋住"
                 break
+            walked += 0.4
             f = self._trk_find(g, tpl, near=(x, y), r=0.25, scales=(1.0, 1.1, 1.2, 1.35))
             jumped = bool(f) and (abs(f[0] - x) > 0.2 or abs(f[1] - y) > 0.2)      # 走 0.4 秒它不可能在畫面上跳 20% 以上＝認到別的東西
             if not f or f[2] < 0.6 or jumped:
@@ -652,7 +662,11 @@ class ExtraTools:
             nw, nh = min(int(0.4 * GW), int(tpl.shape[1] * k)), min(int(0.45 * GH), int(tpl.shape[0] * k))
             tpl = self._trk_crop(g, x, y, nw, nh)
             size = tpl.shape[0] / h0
-            log.append(f"第{i + 1}步 在 ({x:.2f},{y:.2f}) 大小 {size:.1f} 倍（相似度 {sc:.2f}）")
+            eta_txt = ""
+            if size >= 1.15 and walked > 0:
+                eta_last = walked / (size - 1.0)
+                eta_txt = f"、走了 {walked:.1f} 秒放大 {size:.2f} 倍＝還要約 {eta_last:.1f} 秒"
+            log.append(f"第{i + 1}步 在 ({x:.2f},{y:.2f}) 大小 {size:.1f} 倍（相似度 {sc:.2f}）" + eta_txt)
             words = self._words(im)
             new = [w for w in words if is_new(w)]
             # 10/27 01:5x 第 63 輪：10/26～27 因「跳出原本沒有的字」停下 23 次，全是 OCR 雜訊／玩家名／理智警語／招牌（「公室」「火焰 ;」「, ~ aoye 8」），
@@ -671,8 +685,28 @@ class ExtraTools:
             reason = "走滿 8 步"
         self._append("刻度樣本.md", f"走過去 {name}｜{len(log)} 步｜停：{reason[:50]}")
         extra = ("；路上冒出的字（沒因此停）：" + "、".join(f"「{w}」" for w in seen_new[:5])) if seen_new else ""
+        extra += self._walk_speed_note(desc_h, walked, eta_last, name)
         return (self._pop_look_how() + f"走過去「{name}」：" + "；".join(log) + f"。停下原因：{reason}{extra}。現在的畫面下一輪給你"
                 + ("；到了就試 長按(e,1.5) 或 讀字" if "面前" in reason or "字" in reason else ""))
+
+    _walk_speed_samples = []
+
+    def _walk_speed_note(self, desc_h, walked, eta_last, name):
+        """第 74 輪：描述畫面估這個目標「約 h 個身高」、走過去量到從起點要 walked+eta 秒 → 走路速度＝h÷秒（身高/秒），
+        最近 5 筆取中位寫進 startup["速度"]（描述畫面的距離之後用它換成秒）。走不到 0.8 秒或放大太少（eta 不可靠）不算。"""
+        if not desc_h or eta_last is None or walked < 0.8:
+            return ""
+        total = walked + eta_last
+        if total <= 0:
+            return ""
+        v = float(desc_h) / total
+        if not (0.5 <= v <= 10.0):
+            return f"；（描述畫面估它約 {desc_h:g} 身高、走過去量到從起點要 {total:.1f} 秒 → 每秒 {v:.1f} 身高，不合理、不拿來校準）"
+        self._walk_speed_samples = (self._walk_speed_samples + [round(v, 2)])[-5:]
+        med = sorted(self._walk_speed_samples)[len(self._walk_speed_samples) // 2]
+        self.startup["速度"] = f"約 {med:g} 身高/秒"
+        return (f"；走路速度校準：描述畫面估它約 {desc_h:g} 身高、走過去量到從起點要 {total:.1f} 秒 → 每秒 {v:.1f} 身高"
+                f"（{len(self._walk_speed_samples)} 筆取中位 {med:g}，之後描述畫面的距離都用它換成秒）")
 
     # ---------------- 學習
     def _log_date(self):

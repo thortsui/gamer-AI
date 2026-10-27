@@ -601,4 +601,31 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 74 輪：走過去 每步用「走了幾秒＋放大幾倍」算還要幾秒；描述畫面有給身高就校準走路速度
+import time as _tm74
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_key", "_trk_find", "_words", "_new_word_checker", "desc_items", "desc_at", "_pop_look_how", "_append", "_walk_speed_samples")}
+try:
+    t.live, t.image_path = True, None; t._walk_speed_samples = []; t.startup.pop("速度", None)
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0
+    t._drag = lambda dx, dy, fy=0.5: None; t._key = lambda k, d: None; t._words = lambda im_: {}; t._new_word_checker = lambda im_: (lambda w: False)
+    t._pop_look_how = lambda: ""; t._append = lambda *a, **k: None
+    _n74 = [0]
+    def _tf74(g, tpl, near=None, r=0.3, scales=(1.0,)):
+        _n74[0] += 1
+        return (0.5, 0.5, 0.9, 1.25)          # 每步目標再放大 1.25 倍
+    t._trk_find = _tf74
+    t.desc_items = [{"編號": 1, "名稱": "藍發光方板", "x": 0.5, "y": 0.55, "種類": "場景", "身高": 3.0}]; t.desc_at = _tm74.time()
+    _r = t.move_track("1")
+    check("走過去 每步印還要約幾秒", "還要約" in _r and "放大" in _r, _r[:400])
+    check("有描述身高 → 走路速度校準寫進 startup", "走路速度校準" in _r and "身高/秒" in t.startup.get("速度", ""), (_r[-300:], t.startup.get("速度")))
+    t.startup.pop("速度", None); t._walk_speed_samples = []
+    t.desc_items = [{"編號": 1, "名稱": "藍發光方板", "x": 0.5, "y": 0.55, "種類": "場景", "身高": None}]; t.desc_at = _tm74.time()
+    _r = t.move_track("1")
+    check("沒描述身高 → 不校準、仍印還要約", "走路速度校準" not in _r and "還要約" in _r and "速度" not in t.startup, _r[-200:])
+    _r = t.move_track("0.5,0.55")
+    check("給座標的也印還要約", "還要約" in _r, _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.startup.pop("速度", None)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
