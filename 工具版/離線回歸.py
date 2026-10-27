@@ -771,4 +771,42 @@ try:
 finally:
     for k, v in _bak.items():
         setattr(t, k, v)
+# 第 83 輪：走過去 轉正 ≥10 度走分段實測路；轉準了但原本長相在中央找不到 → 改用中央那塊當長相；轉不夠照實說
+import time as _tm83
+import numpy as _np83
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_key", "_trk_find", "_words", "_new_word_checker", "desc_items", "desc_at", "_pop_look_how", "_append", "_walk_speed_samples", "_turn_chunks", "_trk_self_frac", "self_mask")}
+try:
+    t.live, t.image_path = True, None; t._walk_speed_samples = []; t.startup.pop("速度", None); t.self_mask = None
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0
+    _dr83, _tc83 = [], []
+    t._drag = lambda dx, dy, fy=0.5: _dr83.append(dx); t._key = lambda k, d: None; t._words = lambda im_: {}; t._new_word_checker = lambda im_: (lambda w: False)
+    t._pop_look_how = lambda: ""; t._append = lambda *a, **k: None; t._trk_self_frac = lambda g, x, y, fw=0.09, fh=0.12: 0.0
+    _ratio83 = [1.0]
+    def _tc(deg):
+        _tc83.append(deg); return (deg * _ratio83[0], "第1段", deg, False, 1)
+    t._turn_chunks = _tc
+    _calls83 = [0]
+    def _tf83(g, tpl, near=None, r=0.3, scales=(1.0,)):
+        _calls83[0] += 1
+        return (0.5, 0.45, 0.45, 1.0) if _calls83[0] == 1 else (0.5, 0.45, 0.9, 1.25)   # 轉完原本長相只像 0.45，之後都找得到
+    t._trk_find = _tf83
+    _g83 = t._trk_gray(im); _sdc = float(_np83.asarray(t._trk_crop(_g83, 0.5, 0.45, int(0.09 * _g83.shape[1]), int(0.12 * _g83.shape[0])), dtype=_np83.float32).std())
+    _r = t.move_track("0.2,0.45")
+    check("走過去 目標偏左 → 轉正走分段實測路（不是單次拖）", len(_tc83) == 1 and _tc83[0] < -10 and not _dr83, (_tc83, _dr83))
+    check("轉準了、原本長相只像 0.45 → 改用中央那塊（或中央沒紋理就說）", ("改用現在正中央那塊" in _r) if _sdc >= 8 else ("沒紋理" in _r), (_sdc, _r[:300]))
+    check("換長相後第 1 步找得到、繼續走", "第1步 在 (0.50,0.45)" in _r, _r[:300])
+    _tc83.clear(); _calls83[0] = 0; _ratio83[0] = 0.5
+    _r = t.move_track("0.2,0.45")
+    check("轉只到一半 → 照實說「只實測到」、不換長相", "只實測到" in _r and "改用" not in _r, _r[:300])
+    _tc83.clear(); _dr83.clear(); _calls83[0] = 0; _ratio83[0] = 1.0
+    _r = t.move_track("0.44,0.45")
+    check("偏 <10 度 → 仍單次拖、不走分段", not _tc83 and len(_dr83) == 1, (_tc83, _dr83))
+    _tc83.clear(); _dr83.clear(); _calls83[0] = 0
+    t._trk_self_frac = lambda g, x, y, fw=0.09, fh=0.12: 0.6
+    _r = t.move_track("0.2,0.45")
+    check("中央那塊是自己的角色 → 不換長相、說出來", "是你自己的角色" in _r and "改用" not in _r, _r[:300])
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.startup.pop("速度", None)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

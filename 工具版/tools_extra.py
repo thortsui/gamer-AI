@@ -644,6 +644,20 @@ class ExtraTools:
             w["x"], w["y"] = x, y
         return "；".join(out)
 
+    def _trk_self_frac(self, g, x, y, fw=0.09, fh=0.12):
+        """第 83 輪：畫面 (x,y) 那一塊有多少比例是自己的角色（找自己 的遮罩 240×124；沒遮罩回 0）。"""
+        if getattr(self, "self_mask", None) is None:
+            return 0.0
+        import numpy as np
+        from PIL import Image
+        H, W = g.shape
+        m = np.asarray(Image.fromarray(self.self_mask.astype(np.uint8) * 255).resize((W, H), Image.NEAREST)) > 0
+        pw, ph = max(1, int(fw * W)), max(1, int(fh * H))
+        x0 = int(max(0, min(W - pw, x * W - pw / 2)))
+        y0 = int(max(0, min(H - ph, y * H - ph / 2)))
+        sub = m[y0:y0 + ph, x0:x0 + pw]
+        return float(sub.mean()) if sub.size else 0.0
+
     def move_track(self, 目標="", y=""):
         """走過去：盯著描述畫面給的點（或座標），程式自己 轉正→走一小步→再找它，到面前／出現新字／被擋／找不到 就停。"""
         r = self._resolve_target(目標, y)
@@ -684,7 +698,16 @@ class ExtraTools:
         for i in range(8):
             yaw, _ = self._angles_to(x, 0.5, im.width, im.height)
             if abs(yaw) >= 3:
-                self._drag(yaw * self.dx_deg, 0)
+                # 10/27 22:2x 第 83 輪：10/26～27 走過去 92 次起走、26 次第 1 步就跟丟（28%）；目標偏離中央 ≥15 度的 8/29 跟丟。
+                #   轉正原本一次拖、不量（22:12 送 -29 只轉到 -22）；離線用今天 573 組轉段前後圖：轉準了之後拿原本位置切的長相在中央找，只有 79% ≥0.6
+                #   （轉過來的東西長相會變）→ ①≥10 度改走 視角移動到 同一條分段實測＋補轉路；②轉準了（實測跟要的差 ≤5 度或 20%）但原本長相在中央找不到
+                #   → 照角度它應該就在正中央，改用現在正中央那塊當它的長相（中央那塊沒紋理或是自己的角色就不換）；轉不夠就照實說、不換
+                turned = None
+                if abs(yaw) >= 10 and hasattr(self, "_turn_chunks"):
+                    _m, _parts, _done, _stopped, _lm = self._turn_chunks(yaw)
+                    turned = _m if _lm else None
+                else:
+                    self._drag(yaw * self.dx_deg, 0)
                 im = self._settled()
                 g = self._trk_gray(im)
                 f = self._trk_find(g, tpl, near=(0.5, y), r=0.2)
@@ -692,7 +715,23 @@ class ExtraTools:
                     x, y = f[0], f[1]
                 else:
                     x = 0.5                               # 轉到中間被自己的角色擋住常找不到：當作已轉正，走一步再找
-                    if f and f[2] >= 0.5:
+                    s_ = f[2] if f else 0.0
+                    turn_ok = turned is not None and abs(turned - yaw) <= max(5.0, 0.2 * abs(yaw))
+                    if turned is not None and not turn_ok:
+                        log.append(f"轉正 {yaw:+.0f} 度只實測到 {turned:+.0f}、它多半還沒到正中央（原本的長相在中央只像 {s_:.2f}）")
+                    elif turn_ok and i == 0:
+                        import numpy as _np2
+                        tpl2 = self._trk_crop(g, 0.5, y, int(0.09 * GW), int(0.12 * GH))
+                        sd2 = float(_np2.asarray(tpl2, dtype=_np2.float32).std())
+                        selfy = self._trk_self_frac(g, 0.5, y)
+                        if sd2 >= 8.0 and selfy < 0.3:
+                            tpl, h0 = tpl2, tpl2.shape[0]
+                            log.append(f"轉正 {yaw:+.0f}→實測 {turned:+.0f}，照角度它應該就在正中央，但原本切的長相在中央只像 {s_:.2f}（轉過來的東西長相會變）"
+                                       "→ 改用現在正中央那塊當它的長相")
+                        else:
+                            log.append(f"轉正 {yaw:+.0f}→實測 {turned:+.0f}，原本的長相在中央只像 {s_:.2f}；中央那塊"
+                                       + ("是你自己的角色" if selfy >= 0.3 else "沒紋理") + "、不能拿來當它的長相，走一步再找")
+                    elif f and f[2] >= 0.5:
                         log.append(f"轉完最像的一塊相似度只有 {f[2]:.2f}、不算找到（可能認錯）")
             before = im
             self._key("w", 0.4)
