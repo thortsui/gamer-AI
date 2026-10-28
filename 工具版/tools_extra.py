@@ -1432,13 +1432,28 @@ class ExtraTools:
         """面板只給指標：幾條準則＋畫面上看到你記過的東西（內容要 查準則 才叫出來）。"""
         rules = self._rules_load()
         names = {r["對象"] for r in rules}
+        # 10/28 10:5x 第 100 輪：購買道具付費面板 10/27 跳出 5 輪、10/28 12 輪（06:07～10:54）；他 10/17、10/26、10/28 08:39、08:51 四次記互動物
+        #   「拿電擊槍E框｜長按跳付費視窗不能按」，08:52、10:54 照樣按。原因：這裡只在互動物「全名」是看到欄的子字串時才提（「拿電擊槍E框」對不上
+        #   看到的 E框「拿電擊槍」），而且只說「先 查準則」、不給內容。→ 名稱去掉尾巴的 E框／框／機台 也比對；他自己寫「不能按／不能買／付費／跳視窗」的
+        #   那幾筆，直接把他寫的那行放面板（引用他的紀錄、不替他決定）
+        warn = {}
         for l in self._mem_lines("互動物.md"):
-            m = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", l).split("｜")[0].strip()
+            body = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", l)
+            m = body.split("｜")[0].strip()
             if 2 <= len(m) <= 8:
                 names.add(m)
+            core = re.sub(r"(的?E框|框|機台|機器|提示)$", "", m)
+            if (m and m in str(seen)) or (len(core) >= 2 and core in str(seen)):
+                if re.search(r"不能按|不能買|不要按|別按|付費|購買|跳.{0,3}(視窗|面板)", body.split("｜", 1)[-1]):
+                    d = re.match(r"^(\d\d/\d\d \d\d:\d\d)", l)
+                    warn.setdefault(m, [body, []])[1].append(d.group(1) if d else "")
         here = sorted({n for n in names if n and n in str(seen)})[:6]
+        warn_txt = ""
+        if warn:
+            warn_txt = NL + "【你記過不能按的】" + "；".join(
+                f"{body}（你 {'、'.join(dict.fromkeys(x for x in ds if x))} 記的）" for _, (body, ds) in list(warn.items())[:3])
         return (f"【準則】{len(rules)} 條準則＋{len(self.reviews)} 條這個大任務的檢討（不放面板；要做某件事前用 查準則(對象或情況) 叫出來，舊的輪用 查紀錄(關鍵字)）"
-                + (f"｜畫面上有你記過的：{'、'.join(here)} → 要碰之前先 查準則" if here else ""))
+                + (f"｜畫面上有你記過的：{'、'.join(here)} → 要碰之前先 查準則" if here else "") + warn_txt)
 
     # ---------------- 突發狀況與工作流（2026-10-19 07:5x 使用者：「新增工具：突發狀況——出現不合預期的情況時使用，
     # 用於在突然出現不符合預期的時候可以去思考這個情況是否符合工作流的合理性」「如果符合就先加入工作流的可能事項」

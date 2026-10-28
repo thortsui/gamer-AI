@@ -1090,4 +1090,17 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.pitch_acc = 0.0; t.pitch_unknown = False
+# 第 100 輪：看到欄有他記過「不能按」的互動物（名稱去尾巴比對）→ 面板直接放他寫的那行
+_bak100 = t._mem_lines
+try:
+    _ml100 = ["10/17 16:13 拿電擊槍E框｜功能:長按跳付費視窗不能按｜用法:繞開不碰", "10/28 08:51 拿電擊槍E框｜功能:長按E跳購買視窗不能按｜用法:關掉視窗後走正前看E提示",
+              "10/18 04:01 電擊槍｜功能:準備就緒E框可互動｜用法:中央0.52藍框黃閃電", "10/22 11:59 藍椅E框｜功能:拿電擊槍｜用法:走過去站定看E提示再長按E"]
+    t._mem_lines = lambda f, tail=400: (_ml100 if f == "互動物.md" else _bak100(f, tail=tail))
+    _r = t.rules_panel("中央黑貓角色擋中央，E框「拿電擊槍」在(0.60,0.56)")
+    check("看到 E框「拿電擊槍」→ 面板放他記的「拿電擊槍E框｜不能按」兩筆日期", "【你記過不能按的】" in _r and "拿電擊槍E框｜功能:長按跳付費視窗不能按" in _r and "10/17 16:13、10/28 08:51" in _r, _r[-300:])
+    check("「藍椅E框｜功能:拿電擊槍」沒寫不能按 → 不列", "藍椅" not in _r, _r[-300:])
+    _r = t.rules_panel("左側櫃檯文件E框、中央貓角色")
+    check("畫面沒有電擊槍 → 不列", "【你記過不能按的】" not in _r, _r[-200:])
+finally:
+    t._mem_lines = _bak100
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
