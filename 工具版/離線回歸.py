@@ -1103,4 +1103,12 @@ try:
     check("畫面沒有電擊槍 → 不列", "【你記過不能按的】" not in _r, _r[-200:])
 finally:
     t._mem_lines = _bak100
+# 第 101 輪：工具範例全是正面、成功的寫法（沒有失敗情境、少用「不要」）
+import json as _js101, re as _re101
+_cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "工具目錄.json"), encoding="utf-8"))
+_ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
+_bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
+check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
+check("範例總數不變（421）", len(_ex101) == 421, len(_ex101))
+check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
