@@ -25,6 +25,8 @@ raw = '{"看到":"x","下兩步":[{"做":"走(0.8)","結果應該是:往前"}]}'
 from play_agent import parse_json_loose
 check("repair_json", "下兩步" in parse_json_loose(T.repair_json(raw)))
 shot = os.path.join(HERE, "..", "專案", "動物醫院", "記憶", "畫面")
+if not os.path.isdir(shot):                         # 10/29 記憶清空重學：測試圖改用封存那份
+    shot = os.path.join(HERE, "..", "專案", "動物醫院", "_舊記憶_1029", "記憶", "畫面")
 im = None
 for f in sorted(os.listdir(shot))[-3:] if os.path.isdir(shot) else []:
     try:
