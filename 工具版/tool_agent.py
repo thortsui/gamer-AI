@@ -4872,6 +4872,54 @@ TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請"
             "扮演")
 
 
+class ThinkWatch:
+    """第 102 輪（10/29）：他想的那 30～100 秒裡畫面還在跑——10/29 死 3 次只有 1 次看到死亡畫面（另 2 次在想的時候死、
+    下一輪直接是大廳）。想的時候背景每 EVERY 秒截一次，畫面跟上一張差很多才整張 OCR，讀到 DEATH_RE 的字就記下，下一輪面板照實寫。"""
+    EVERY = 4.0
+
+    def __init__(self, tools):
+        self.tools, self.hits, self._stop, self._th = tools, [], None, None
+
+    def start(self):
+        import threading
+        self.hits, self._stop = [], threading.Event()
+        self._th = threading.Thread(target=self._run, daemon=True)
+        self._th.start()
+
+    def stop(self):
+        if self._stop:
+            self._stop.set()
+            self._th.join(timeout=5)
+        return list(self.hits)
+
+    def _run(self):
+        import numpy as np
+        last = None
+        while not self._stop.wait(self.EVERY):
+            try:
+                im = self.tools.grab()
+                if im is None:
+                    continue
+                g = np.asarray(im.convert("L").resize((64, 36)), dtype=float)
+                if last is not None and float(np.abs(g - last).mean()) < 12:
+                    continue                                # 畫面沒大變就不讀字
+                last = g
+                import local_text
+                txt = " ".join(str(r[1]) for r in (local_text._win_read_once(im) or []))
+                m = re.search(Tools.DEATH_RE, txt, re.I)
+                if m and not any(h[1] == m.group(0) for h in self.hits):
+                    self.hits.append((datetime.now().strftime("%H:%M:%S"), m.group(0), txt[:60]))
+            except Exception:  # noqa: BLE001
+                continue
+
+    @staticmethod
+    def panel(hits):
+        if not hits:
+            return ""
+        return ("【你上一輪在想的時候，畫面出現過】（程式每 4 秒截一次；你上一輪那張截圖看不到）"
+                + "；".join(f"{t} 讀到「{w}」（整句：{s}）" for t, w, s in hits) + NL)
+
+
 def top_right_words(im):
     """10/19 任務字整併：只裁畫面右緣任務列（x 0.78～1、y 0.06～0.48）放大兩倍再 OCR（10/18 整張讀多是海報／招牌亂碼）；
     去掉 HUD、純英文招牌、少於 3 個中文字的。回 [(字, x, y)]，座標換回整張畫面比例、由上往下排。"""
@@ -5232,6 +5280,7 @@ def main():
             os.replace(state_path + ".tmp", state_path)
         except OSError as e:
             print(f"   存檔失敗：{e}")
+    think_watch, think_hits = ThinkWatch(tools), []   # 第 102 輪
     prev = None         # 上一輪的 原因／預期／做了（12:1x 使用者：三件事＋不符就檢討）
     missed_review = False
     match_stat = {"符合": 0, "不符": 0, "不符沒檢討": 0}
@@ -5307,7 +5356,8 @@ def main():
                    + "【前面完成的小任務】" + NL + tools.small_lines() + NL
                    + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
                    + tw.panel(task_ev, big, acted=_acted_last(history)) + NL
-                   + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind + NL)
+                   + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind
+                   + ThinkWatch.panel(think_hits) + NL)
         rest_a = ("【開工數值】" + tools.startup_text() + NL
                   + tools.persp_text() + NL
                   + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
@@ -5330,9 +5380,11 @@ def main():
         content.append({"type": "text", "text": panel})
         t0 = time.time()
         LIVE.update({"輪": rnd, "階段": "想", "開始": t0, "做": []})
+        think_watch.start()                               # 第 102 輪：想的時候背景看有沒有死亡字
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
                                           time.time() + args.deadline, 0.2, effort=(tools.effort_override or args.effort))
         dt = time.time() - t0
+        think_hits = think_watch.stop()
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
         o = parse_json_loose(repair_json(raw)) or {}

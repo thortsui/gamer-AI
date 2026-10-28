@@ -1113,4 +1113,25 @@ _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|�
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
 check("範例總數不變（421）", len(_ex101) == 421, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
+# 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
+import local_text as _lt102, numpy as _np102
+_imgs102 = [Image.new("RGB", (320, 180), (200, 200, 200)), Image.new("RGB", (320, 180), (10, 10, 10))]
+class _FT102:
+    n = 0
+    def grab(self):
+        self.n += 1
+        return _imgs102[self.n % 2]
+_bak102 = _lt102._win_read_once
+try:
+    _lt102._win_read_once = lambda im: [(None, "你死了 精神狀況惡化", 1.0)] if im.getpixel((0, 0))[0] < 50 else [(None, "輪班 1", 1.0)]
+    T.ThinkWatch.EVERY = 0.05
+    _w102 = T.ThinkWatch(_FT102()); _w102.start(); _tm.sleep(0.5); _h102 = _w102.stop()
+    check("想的時候畫面出現「你死了」→ 記一筆（同字不重複）", len(_h102) == 1 and _h102[0][1] == "你死了", _h102)
+    check("面板照實寫出現過的死亡字", "【你上一輪在想的時候，畫面出現過】" in T.ThinkWatch.panel(_h102) and "你死了" in T.ThinkWatch.panel(_h102))
+    check("沒出現就不加面板", T.ThinkWatch.panel([]) == "")
+    _lt102._win_read_once = lambda im: [(None, "輪班 1", 1.0)]
+    _w102 = T.ThinkWatch(_FT102()); _w102.start(); _tm.sleep(0.3)
+    check("沒有死亡字 → 不記", _w102.stop() == [])
+finally:
+    _lt102._win_read_once = _bak102; T.ThinkWatch.EVERY = 4.0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
