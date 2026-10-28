@@ -3633,6 +3633,17 @@ class Tools(ExtraTools):
             cam_moved = self.diff(before, after) >= 8 and (f_chk is None or abs(f_chk) >= 0.4 * abs(yaw))
             turn_ratio = abs(f_chk) / abs(yaw) if (f_chk is not None and yaw) else 1.0
             turn_measured = f_chk is not None
+            # 10/28 09:5x 第 99 輪：純上下的 視角移動到（10/26～28 45 次、其中對底部道具欄咖啡杯 (0.50,0.85～0.90) 5 次）從沒做釘住判定（下面只看 |yaw|≥8），
+            #   10/27 19:32／22:38 鏡頭低頭 26～29 度看地板、工具還回「一致、已對準」；09:49 修水平後他又對 (0.50,0.90) 低頭 29 度看地板。
+            #   → 純上下也量：上下位移換算的度數當「鏡頭真的轉了多少」，量不出就不判釘（不敢盲轉回）
+            if abs(yaw) < 3 and abs(pitch) >= 8 and self.live and not self.image_path:
+                _pm0, _ = self._pitch_from_vshift(before, after)
+                if _pm0 is not None:
+                    cam_moved = self.diff(before, after) >= 8 and abs(_pm0) >= 0.4 * abs(pitch)
+                    turn_ratio = abs(_pm0) / abs(pitch)
+                    turn_measured = True
+                else:
+                    cam_moved = False
         # 10/28 01:0x 第 86 輪：00:58 視角移動到(0.41,0.42) 轉 −14（特徵點實測 −14）目標還在 (0.41,0.40) 相似度 0.88 → 釘住要 ≥0.95 沒判到、
         #   補轉又找不到、第 72 輪用特徵點說「補轉到位、已對準」——其實是角色身上釘著的 E 框。10/26～28 「轉完目標沒動」12 次有 7 次沒判釘住。
         #   → 鏡頭有量到、而且轉到要的七成以上時，釘住的相似度門檻降到 GOOD（0.85）；量不到或轉不夠仍要 0.95（第 54／57 輪的顧慮）
@@ -3642,7 +3653,8 @@ class Tools(ExtraTools):
         turn_ratio = max(0.3, min(1.0, turn_ratio))
         # 19:53：中央蓋著動物新聞海報（釘在畫面上的面板），他要對準的那塊在海報上 → 轉完原地相似度 1.00，又補轉越補越偏
         # 第 56 輪：22:32 送 -6 度（預期位移才 4% 畫面）這局鏡頭常只轉一半，E框 的字移 1～2% 就被判「釘在畫面上」→ 送出 ≥8 度才判
-        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (abs(yaw) >= 8 and cam_moved) else None
+        big = max(abs(yaw), abs(pitch)) >= 8                  # 第 99 輪：純上下 ≥8 度也判
+        pinned = self._locate(patch, after, near=(fx, fy, 0.03)) if (big and cam_moved) else None
         exp_dx, exp_dy = (0.5 - fx) * turn_ratio, (ay - fy) * turn_ratio      # 第 57 輪：照實際轉到的比例算預期位移
         if pinned and not self._pin_ok(pinned[0] - fx, pinned[1] - fy, exp_dx, exp_dy):
             # 10/25 03:2x 第 8 輪：對 (0.54,0.52) 只轉 6 度、預期位移才 4%，那塊東西移到 (0.51,0.50)（跟著景物動）卻被當「釘住」轉回去
@@ -3652,7 +3664,7 @@ class Tools(ExtraTools):
         # 背後的場景變了，相似度掉到 0.5～0.6 → 回「沒對準、再微調」，每次又往上轉 22 度，最後鏡頭對著天花板
         # → 影像比不出來時，再用字比：目標附近的字轉完還在原位＝釘在畫面上；釘住就把鏡頭轉回原方向
         pin_word = ""
-        if not (pinned and pinned[2] >= pin_sim) and abs(yaw) >= 8 and cam_moved:
+        if not (pinned and pinned[2] >= pin_sim) and big and cam_moved:
             import difflib
             def words2(im):              # 整張讀＋右上任務框放大讀（半透明框在亮背景上整張讀常讀不到）
                 d = dict(self._words(im))
@@ -3679,7 +3691,7 @@ class Tools(ExtraTools):
             how = (f"那一塊還在原位 ({pinned[0]:.2f},{pinned[1]:.2f})（相似度 {pinned[2]:.2f}）" if pinned and pinned[2] >= pin_sim
                    else f"那裡的字「{pin_word}」轉完還在原位")
             return ("；".join(out) + f"；轉完{how}＝它是釘在畫面上的東西（面板、海報、HUD、任務框、提示框、角色身上的 E 框），不是場景，"
-                    + (f"鏡頭實測轉了 {turn_ratio * abs(yaw_calc):+.0f} 度它卻沒跟著動；" if (turn_measured and pin_sim < 0.95) else "")
+                    + (f"鏡頭實測{'上下' if abs(yaw) < 3 else ''}轉了 {turn_ratio * (abs(yaw_calc) if abs(yaw) >= 3 else abs(pitch)):+.0f} 度它卻沒跟著動；" if (turn_measured and pin_sim < 0.95) else "")
                     + "轉頭不會讓它移到中央；**已把鏡頭轉回原本的方向**，沒有補轉。要對準場景裡的東西；不確定哪裡是 UI 就叫 確認是否是UI")
         loc1 = self._locate(patch, after, near=(0.5, ay, 0.3)) if (patch.width >= 8 and patch.height >= 8) else None
         final = loc1

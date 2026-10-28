@@ -1062,4 +1062,32 @@ finally:
     for k, v in _bak.items():
         setattr(t, k, v)
     t.pitch_acc = 0.0; t.pitch_unknown = False
+# 第 99 輪：純上下 視角移動到（對底部道具欄 (0.50,0.90)）鏡頭量到有低頭、那塊仍在原位 → 判釘在畫面上、轉回
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_locate", "_feat_deg", "_words", "_verify_dump", "_pitch_from_vshift", "_landmark_verify", "_shift", "_hud_task_word_at", "_eprompt_note", "_append")}
+try:
+    t.live, t.image_path = True, None; t.pitch_acc = 0.0; t.pitch_unknown = False; t._rep_flag = False
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.0, "")
+    _dr99 = []; t._drag = lambda dx, dy, fy=0.5, fx=None: _dr99.append((round(dx), round(dy)))
+    t._words = lambda im_: {}; t._verify_dump = lambda *a, **k: None; t._append = lambda *a, **k: None
+    t._feat_deg = lambda a, b, want=None: (None, None, 0, 0.0, ""); t._hud_task_word_at = lambda im_, fx, fy: ""; t._eprompt_note = lambda: ""
+    t._landmark_verify = lambda b, a, want, sh, pitch=0.0: (None, "沒標點", None)
+    def _loc99(patch, im_, near=None, second=False):
+        if near and abs(near[1] - 0.90) < 0.01:          # 在原位找：咖啡杯還在 (0.50,0.90)
+            return (0.50, 0.90, 0.92)
+        return None
+    t._locate = _loc99
+    t._pitch_from_vshift = lambda a, b: (-25.0, "景物上下移了 -30% 畫面高")
+    _r = t.look_at(0.50, 0.90)
+    check("純上下 -29 度、量到低頭 25、那塊仍在原位 0.92 → 判釘在畫面上、轉回、不說已對準",
+          "釘在畫面上的東西" in _r and "已對準" not in _r and "上下轉了" in _r and len(_dr99) == 2 and _dr99[1][1] < 0, (_r[:400], _dr99))
+    _dr99.clear(); t._pitch_from_vshift = lambda a, b: (-1.0, "景物上下移了 -1% 畫面高")
+    _r = t.look_at(0.50, 0.90)
+    check("純上下、上下位移只量到 -1（鏡頭沒動或量不準）→ 不判釘、照舊不一致", "釘在畫面上的東西" not in _r and "不一致" in _r and len(_dr99) == 1, (_r[:300], _dr99))
+    _dr99.clear(); t._pitch_from_vshift = lambda a, b: (None, "兩側遠景都看不出上下移")
+    _r = t.look_at(0.50, 0.90)
+    check("純上下、上下位移量不出 → 不判釘、不轉回", "釘在畫面上的東西" not in _r and len(_dr99) == 1, (_r[:300], _dr99))
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.pitch_acc = 0.0; t.pitch_unknown = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
