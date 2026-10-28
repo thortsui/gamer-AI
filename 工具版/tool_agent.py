@@ -3783,8 +3783,22 @@ class Tools(ExtraTools):
                     ok = False
                     out.append(head + f"→ 量到約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f}），但 {self.REP_NOTE}")
                 elif lm_deg is not None and abs(yaw) >= 3:
+                    # 10/28 09:2x 第 98 輪：3～9 度的小拖曳（dx 8～23 像素）兩天用特徵點量到 12 次、中位只轉到 30%、一半 ≤30%（08:49 −6→0、08:56 +6→0、09:06 +9→+2），
+                    #   單拖路沒閉環。只做一件事：量到不到一半就「再送一次剩下的」（不乘比例、最多再送一次、不超過原本要的量），再量一次照實加總
+                    retry_txt = ""
+                    if abs(yaw) < 10 and (lm_deg == 0 or (lm_deg > 0) == (yaw > 0)) and abs(lm_deg) < 0.5 * abs(yaw):
+                        gap = max(-abs(yaw), min(abs(yaw), yaw - lm_deg))
+                        _b2 = after
+                        self._drag(gap * self.dx_deg, 0)
+                        after = self._settled()
+                        lm2, lm2_txt, _sc2 = self._landmark_verify(_b2, after, gap, self._shift(_b2, after, self.diff(_b2, after))[0], pitch=0.0)
+                        if lm2 is not None:
+                            retry_txt = f"（小角度第一次只轉到 {lm_deg:+.0f}、再送一次剩下的 {gap:+.0f} 度→實測 {lm2:+.0f}）"
+                            lm_deg = lm_deg + lm2
+                        else:
+                            retry_txt = f"（小角度第一次只轉到 {lm_deg:+.0f}、再送一次剩下的 {gap:+.0f} 度→量不出、不算）"
                     ok = abs(lm_deg - yaw) <= max(5.0, 0.15 * abs(yaw))
-                    out.append(head + f"→ 量實際轉了幾度：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）"
+                    out.append(head + f"→ 量實際轉了幾度：{lm_txt}；你實際轉了約 {lm_deg:+.0f} 度（要轉 {yaw:+.0f} 度）" + retry_txt
                                + (f"；整張位移換算 ≈ {scene_deg:+.0f} 度" if (scene_deg is not None and not getattr(self, "_feat_used", False)) else ""))
                     self._turn_record(yaw_send, lm_deg)
                     out.append(self._cmp("視角移動到 特徵點實測" if getattr(self, "_feat_used", False) else "視角移動到 標點實測", f"{yaw:+.0f}", f"{lm_deg:+.0f}", ok, "度")

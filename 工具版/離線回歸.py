@@ -1040,4 +1040,26 @@ try:
     check("比例正常 → 不提示", "【拖曳】" not in t.persp_text())
 finally:
     t._turn_hist = _bak96
+# 第 98 輪：小角度單拖只轉到不到一半 → 再送一次剩下的、不乘比例
+_bak = {k: getattr(t, k, None) for k in ("live", "image_path", "grab", "_settled", "diff", "_drag", "_locate", "_landmark_verify", "_shift", "_words", "_verify_dump", "_pitch_from_vshift", "_feat_deg", "_hud_task_word_at", "_eprompt_note", "_comp_deg", "_comp_note")}
+try:
+    t.live, t.image_path = True, None; t.pitch_acc = 0.0; t.pitch_unknown = False; t._rep_flag = False
+    t.grab = lambda: im; t._settled = lambda prev=None: im; t.diff = lambda a, b: 30.0; t._shift = lambda a, b, d: (0.02, "")
+    _dr98 = []; t._drag = lambda dx, dy, fy=0.5, fx=None: _dr98.append(round(dx / t.dx_deg))
+    t._locate = lambda patch, im_, near=None, second=False: None
+    t._words = lambda im_: {}; t._verify_dump = lambda *a, **k: None; t._pitch_from_vshift = lambda a, b: (None, "")
+    t._feat_deg = lambda a, b, want=None: (None, None, 0, 0.0, ""); t._hud_task_word_at = lambda im_, fx, fy: ""; t._eprompt_note = lambda: ""
+    t._comp_deg = lambda: 0.0; t._comp_note = lambda c: ""
+    _seq98 = iter([(0.0, "特徵點", None), (6.0, "特徵點", None)])
+    t._landmark_verify = lambda b, a, want, sh, pitch=0.0: next(_seq98)
+    _r = t.look_at(0.55, 0.5)                               # 約 +7 度
+    check("小角度第一次量到 0 → 再送一次剩下的、合計一致", "再送一次剩下的" in _r and "一致】視角移動到" in _r and len(_dr98) == 2 and abs(_dr98[1]) <= 8, (_r[:300], _dr98))
+    _dr98.clear(); _seq98 = iter([(7.0, "特徵點", None)])
+    t._landmark_verify = lambda b, a, want, sh, pitch=0.0: next(_seq98)
+    _r = t.look_at(0.55, 0.5)
+    check("第一次就轉到位 → 不再送", "再送一次" not in _r and len(_dr98) == 1, (_r[:200], _dr98))
+finally:
+    for k, v in _bak.items():
+        setattr(t, k, v)
+    t.pitch_acc = 0.0; t.pitch_unknown = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
