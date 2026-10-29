@@ -119,6 +119,9 @@ NO_SMALL_UPDATE = False   # --no-small-update（10/23）
 LIVE = {"輪": 0, "階段": "啟動", "開始": 0.0, "做": []}   # 10/23 直播網站：這一輪在做什麼
 ASK_CLAUDE = True         # 10/23 實驗分枝 exp-ask-claude：問Claude
 # 10/29 使用者實驗：「把工具分成之後再給他，把移動那些分為好幾層工具，讓他一層一層往下找，減少 Context 的使用」
+SLIM = {"開": False}       # 10/29 16:1x 使用者重排 system：只留 身分／絕對限制／工具／兩步規劃＋格式，其他搬進工具或事件發生時才進面板（--slim-system）
+# 使用者目標裡已經掛到工具上的段落（slim 時 system 不再列；之後新加的段落照樣列）
+GOALS_IN_TOOLS = ("[2026-10-18 23:2x", "[2026-10-22 00:4x", "[2026-10-23 12:2x", "[2026-10-26 14:3x", "[2026-10-26 16:5x")
 TOOL_TREE = {"開": False}  # --tool-tree／--tree-rotate：system 只列第一層，他用 打開(路徑) 往下找
 TREE_OPEN_ENTRY = {"名稱": "打開", "類別": "文件", "用途": "工具樹一層一層打開：給第一層名稱就列下一層；打開到最底層就列出那幾個工具的用法和例子（之後 8 輪面板會一直列著）。做新的事之前、上一步沒照預期、換場景或換小任務、不知道用哪個工具時都先打開那一類；放先記、不佔步數、不動遊戲",
                    "用法": "打開(路徑)", "例": "打開(移動與視角)", "參數": {"路徑": "第一層名稱，或 第一層/第二層"},
@@ -253,6 +256,20 @@ def _build_system(game, cat, plan3=False):
         except OSError:
             pass
     review_txt = mine_txt + review_txt
+    if SLIM["開"]:
+        blocks = re.split(r"\n(?=\[20\d\d-)", goal)
+        goal_s = NL.join(b.strip() for b in blocks if b.strip() and not b.strip().startswith(GOALS_IN_TOOLS)) or "（沒有）"
+        fmt = plan_format(int(plan3)) if plan3 else cat["輸出格式"]
+        return (f"{identity}" + NL
+                + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
+                + "使用者給你的目標：" + NL + goal_s + NL
+                + "（使用者其他交代已經寫進相關工具的說明與回傳；換了場景就叫 場景切換、不知道現在該做什麼就叫 研究任務）" + NL * 2
+                + rules + NL * 2
+                + review_txt
+                + "你有這些工具（格式 範例｜用途；括號裡是範例值，**要填你自己的數字和內容**，範例只是示範成功的用法）。要什麼自己叫，程式只做你點名的事，結果下一輪回給你：" + NL
+                + tool_txt + NL * 2
+                + (plan_rule(int(plan3)) + NL * 2 if plan3 else "")
+                + "每一輪只輸出一個 JSON：" + slim_format(fmt))
     return (f"{identity}" + NL
             + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
             + "使用者給你的目標：" + NL + goal + NL * 2
@@ -317,6 +334,14 @@ _PLAN_RULE = ("【K步規劃】（使用者 10/18 定的，這次挑戰照這個
               + "【小任務完成要先回顧三步】（使用者 10/18 12:5x 定的）任務完成、這步做完 都要送兩次："
               "第一次送，程式不會記完成，會把完成前最後三步（做了什麼、結果應該是、程式回傳、你填的符合）列給你；"
               "你逐步回顧是不是真的做成了，確定才在之後的輪再送一次，並寫 回顧（三步各自確認的結果，要寫字不能只寫數字）。沒做成就不要送，繼續做。")
+
+
+def slim_format(fmt):
+    """slim／工具樹：JSON「先記」欄是他寫答案前最後讀到的（有 false 叫 檢討 66% 照做），把 打開 和 找錯 也放在這裡。"""
+    add = "；符合時也可以找做慢、做白工的地方檢討"
+    if TOOL_TREE["開"]:
+        add += "；有 false 時同時 打開(那一步工具所在的那一格) 看同一格有沒有更合適的工具"
+    return fmt.replace("有 false 就在這裡叫 檢討(…)", "有 false 就在這裡叫 檢討(…)" + add)
 
 
 def plan_rule(n):
@@ -678,6 +703,52 @@ class Tools(ExtraTools):
 
     def doc_list(self, 類別=""):
         return NL.join(catalog_lines(self.cat, str(類別).strip() or None)) or "沒有這一類"
+
+    # ---- 10/29 16:1x 使用者重排：場景切換（預期中的也算；量測不再是他的工具）、研究任務
+    switch_pending, switch_wait = "", 0
+
+    def scene_switch(self, 原因="", auto=False):
+        """場景切換：①收掉現在的小任務 ②翻他在很像的畫面記過的 ③重量刻度／深度、驗一圈、判斷人稱。程式偵測到死亡、載入黑畫面也會自動叫（auto）。"""
+        why = str(原因).strip() or "你叫了 場景切換"
+        out = [f"【場景切換】{datetime.now().strftime('%H:%M')} {why}" + ("（程式偵測到、自動幫你做了）" if auto else "")]
+        sm = getattr(self, "small", None)
+        if sm:
+            self.small_prev = dict(sm, 換掉=time.time())
+            self.small = None
+            self._append("小任務.md", f"換場景收掉:{sm['名稱']}｜{sm['輪']} 輪、✗{sm['✗']}、檢討{sm['檢討']}")
+            out.append(f"① 你的小任務「{sm['名稱']}」是 {sm.get('開始', '?')} 換場景前設的，程式先收掉了（要接著做就再 設小任務 設回來）")
+        else:
+            out.append("① 現在沒有小任務")
+        im = self.grab()
+        scm = getattr(self, "scene_mem", None)
+        if scm is not None:
+            if not auto:
+                scm.update(im, ["換場景：" + why])          # 他自己叫的也開一段新場景
+            out.append("② 你以前在很像的畫面記過的：" + (scm.records_text(im).strip() if im is not None else "（抓不到畫面）"))
+        r = self.cal_opening()
+        if not r.startswith("離線"):
+            pc = self.cal_persp_check()
+            if self.startup.get("人稱"):
+                self.cal_persp(self.startup["人稱"])        # 照量到的人稱換上下全程
+            r += NL + "人稱：" + (self.startup.get("人稱") or "程式判斷不了——看畫面送 回報人稱(第一人稱或第三人稱)") + "（" + pc.split(NL)[-1][:120] + "）"
+        out.append("③ 重量：" + r)
+        out.append("（使用者 10/22 交代）配對的正確地方通常在重生點正面對著的地方，背後多半是訓練場、不是正式遊戲。")
+        out.append("接著：照現在的場景想現在該做什麼（不確定就 研究任務），用 設小任務 定下來。")
+        self.switch_pending, self.switch_wait = "", 0
+        return NL.join(out)
+
+    def task_study(self):
+        """研究任務：system 原本的【大任務與小任務】搬到這裡，加上現況。"""
+        big, sm = getattr(self, "big", None), getattr(self, "small", None)
+        words = "、".join(str(w[0] if isinstance(w, (list, tuple)) else w) for w in (getattr(self, "task_current", None) or [])) or "（程式這輪沒讀到）"
+        return ("【研究任務】（使用者 10/21 交代的做法）大任務只是一個段落（例：大任務 做飯 → 小任務 買菜、切菜、炒菜）；"
+                "**每一輪的目標是現在的小任務**。設大任務(名稱,目標) 定段落、設小任務(名稱,怎麼做) 定現在要做的那一件；"
+                "小任務做完送 任務完成（要送兩次：第一次程式列出完成前三步給你回顧，確定做成了再送一次寫 回顧）；"
+                "大任務完成也送兩次，先逐一確認每個小任務是不是一次做對。出現變動（死掉、任務字換了、換場景）就重新想現在的任務、該換就 設小任務。" + NL
+                + "現況：大任務 " + (f"「{big['名稱']}」（目標：{big.get('成功條件') or '沒寫'}）" if big else "（沒設）")
+                + "｜小任務 " + (f"「{sm['名稱']}」（怎麼做：{sm.get('怎麼做') or '沒寫'}，{sm.get('開始', '?')} 起、第 {sm.get('輪', 0)} 輪）" if sm else "（沒設）")
+                + f"｜右上任務字（HUD，可能讀錯）：{words}" + NL
+                + "接著：照任務字和畫面決定現在這一件，用 設小任務(名稱,怎麼做) 定下來。")
 
     # ---- 10/29 工具樹實驗
     TREE_KEEP = 8            # 打開過／用過的工具，之後幾輪留在面板
@@ -5026,6 +5097,21 @@ TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請"
             "扮演")
 
 
+def screen_busy(im):
+    """第 111 輪：自動 場景切換 前先看畫面——全黑（載入中）或有死亡字就先不量。"""
+    if im is None:
+        return True
+    try:
+        import numpy as np
+        if float(np.asarray(im.convert("L").resize((64, 36)), dtype=float).mean()) < 20:
+            return True
+        import local_text
+        txt = " ".join(str(r[1]) for r in (local_text._win_read_once(im) or []))
+        return bool(re.search(Tools.DEATH_RE, txt, re.I))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class ThinkWatch:
     """第 102 輪（10/29）：他想的那 30～100 秒裡畫面還在跑——10/29 死 3 次只有 1 次看到死亡畫面（另 2 次在想的時候死、
     下一輪直接是大廳）。想的時候背景每 EVERY 秒截一次，畫面跟上一張差很多才整張 OCR，讀到 DEATH_RE 的字就記下，下一輪面板照實寫。"""
@@ -5173,6 +5259,10 @@ class SceneMemory:
             txt += "先想現在這個場景要做什麼，用 設小任務 定下來。"
         if im is None:
             return txt + NL
+        return txt + self.records_text(im)
+
+    def records_text(self, im):
+        """用顏色分布找以前最像的那段，列他那段時間自己記的（第 103 輪；第 111 輪 場景切換 也用）。"""
         f = self.feat(im)
         best, bi = 0.0, None
         for i, sg in enumerate(self.segs[:-1]):
@@ -5182,14 +5272,14 @@ class SceneMemory:
                 if s > best:
                     best, bi = s, i
         if bi is None or best < self.SIM_MIN:
-            return txt + "（以前沒有顏色分布很像這個畫面的段落）" + NL
+            return "（以前沒有顏色分布很像這個畫面的段落）" + NL
         sg = self.segs[bi]
         t1 = self.segs[bi + 1]["開始"]
         recs = self._records(sg["開始"], t1)
         span = f"{sg['時間'][-5:]}～{datetime.fromtimestamp(t1).strftime('%H:%M')}"
         if not recs:
-            return txt + f"（以前最像的是 {span} 那段，相似 {best:.2f}，那段你沒有記東西）" + NL
-        return (txt + NL + f"【你上次在很像的畫面（{span} 那段，顏色分布相似 {best:.2f}）自己記過的】" + NL
+            return f"（以前最像的是 {span} 那段，相似 {best:.2f}，那段你沒有記東西）" + NL
+        return (NL + f"【你上次在很像的畫面（{span} 那段，顏色分布相似 {best:.2f}）自己記過的】" + NL
                 + NL.join("・" + r for r in recs[-12:]) + NL)
 
 
@@ -5437,6 +5527,7 @@ def main():
     # 10/28 01:1x 使用者實驗「context 順序差異：重要的事情在頭／中／尾，看哪個任務成功率最高」
     ap.add_argument("--ctx-order", default="頭", choices=["頭", "中", "尾"], help="面板裡最重要那塊（大任務／小任務／任務字／上一輪結果）放頭、中、尾")
     ap.add_argument("--ctx-rotate", type=int, default=0, help="每 N 分鐘輪流 頭→中→尾（0＝固定用 --ctx-order）；每輪紀錄寫 順序 欄")
+    ap.add_argument("--slim-system", action="store_true", help="10/29 16:1x 使用者重排 system（只留身分／絕對限制／工具／兩步規劃＋格式；場景切換 自動、研究任務）")
     ap.add_argument("--tool-tree", action="store_true", help="10/29 實驗：工具樹（system 只列第一層，打開(路徑) 一層層往下找）")
     ap.add_argument("--tree-rotate", type=int, default=0, help="10/29 實驗：每 N 分鐘輪流 工具樹→全列（從 --tree-t0 起算，第一段是樹）；jsonl 寫 工具模式")
     ap.add_argument("--tree-t0", default="", help="--tree-rotate 起算時刻 HH:MM（重啟沿用時程）")
@@ -5578,6 +5669,9 @@ def main():
             print(f"   存檔失敗：{e}")
     think_watch, think_hits = ThinkWatch(tools), []   # 第 102 輪
     tools.scene_mem = SceneMemory(tools.mdir)         # 第 103 輪
+    SLIM["開"] = bool(args.slim_system)
+    if SLIM["開"] and live:
+        tools.switch_pending = "程式啟動"                # 第 111 輪：量測不再是他的工具 → 啟動時程式先量
     prev = None         # 上一輪的 原因／預期／做了（12:1x 使用者：三件事＋不符就檢討）
     missed_review = False
     match_stat = {"符合": 0, "不符": 0, "不符沒檢討": 0}
@@ -5600,6 +5694,12 @@ def main():
                     time.sleep(10)
                     continue
                 print(f"   ⚠ 遊戲不在前景（前景是「{fg_title}」，{idle:.0f} 秒沒人動）→ 已切回遊戲")
+        switch_txt = ""
+        if SLIM["開"] and live and tools.switch_pending:   # 第 111 輪：換場景（死亡／載入黑畫面／啟動）→ 等畫面不是全黑、不是死亡畫面再自動 場景切換
+            tools.switch_wait += 1
+            if not screen_busy(tools.grab()) or tools.switch_wait >= 5:
+                switch_txt = tools.scene_switch(tools.switch_pending, auto=True)
+                print("   🔄 " + switch_txt.split(NL)[0])
         im = tools.grab()
         if im is None:
             print(f"[{rnd}] 抓不到畫面（Roblox 不在前景？），等 3 秒")
@@ -5628,7 +5728,14 @@ def main():
         if any(h[1] == ThinkWatch.DARK for h in think_hits) and not any(e.startswith("換場景") for e in events):
             events.append("換場景：你上一輪在想的時候畫面全黑過（可能在載入、換地方、重新開局）")   # 第 109 輪
         tools.scene_mem.update(im, events)               # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的
-        scene_txt = tools.scene_mem.panel(im, tools.small)
+        if SLIM["開"]:                                    # 第 111 輪：改成下一輪開頭程式自動 場景切換（收小任務＋翻紀錄＋重量），結果放這裡
+            scene_ev = [e for e in events if e.startswith(("死亡", "換場景"))]
+            if scene_ev and not tools.switch_pending:
+                tools.switch_pending, tools.switch_wait = "；".join(scene_ev), 0
+            tools.scene_mem.note_left = 0
+            scene_txt = (switch_txt + NL) if switch_txt else ""
+        else:
+            scene_txt = tools.scene_mem.panel(im, tools.small)
         up_reason = "" if args.no_small_update else tools.small_update_reason(events)
         if up_reason:                                     # 10/21：出現變動就重新想任務＋定期小任務更新
             small_up = tools.small_update(up_reason, im, history, task_words)
@@ -5656,6 +5763,10 @@ def main():
             prev_txt = ("原因：" + prev.get("原因", "？") + "｜預期結果：" + prev.get("預期", "？") + "｜做了：" + prev.get("做了", "無")
                         + NL + "→ 看現在的畫面，在「上一輪實際」寫實際結果、「符合」填 true/false；不符就同一輪叫 檢討") if prev else "（第一輪，沒有上一輪）"
         remind = ("⚠ 上一輪你填「符合:false」卻沒叫 檢討——這一輪先 檢討(原因,預期,實際,錯在哪,下次)" + NL) if missed_review else ""
+        if SLIM["開"] and history and False in (history[-1].get("符合") or []):   # 第 111 輪：檢討的做法只在有 false 時進面板
+            _bad = [str(i + 1) for i, f in enumerate(history[-1].get("符合") or []) if f is False]
+            remind += ("【檢討】上一輪第 " + "、".join(_bad) + " 步沒照預期 → 這一輪 先記 叫 檢討(原因,預期,實際,錯在哪,下次)；"
+                       "寫之前先 查準則(這件事) 看以前有沒有犯過，同樣的錯寫「又犯：…」、下次換一個跟之前不一樣、做得到的做法" + NL)
         last_seen = (history[-1].get("看到", "") if history else "")
         disp_txt = tools.dispatch_panel()
         # 10/28 01:1x 使用者實驗：最重要那塊（大任務／小任務／任務字／上一輪結果）放 頭／中／尾，其他段落順序不變
@@ -5685,7 +5796,7 @@ def main():
         else:
             body = key_txt + NL + rest_a + rest_b1 + rest_b2
         panel = ((disp_txt + NL * 2) if disp_txt else "") + ((ask_txt + NL * 2) if ask_txt else "") + body + (
-            f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + plan_format(plan_n) if plan_n else
+            f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + (slim_format(plan_format(plan_n)) if SLIM["開"] else plan_format(plan_n)) if plan_n else
             "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
         content.append({"type": "text", "text": panel})
         t0 = time.time()
@@ -5816,7 +5927,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

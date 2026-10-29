@@ -162,7 +162,7 @@ if im is not None:
     _ly, _lp, _ln, _lc, _ld = _V.estimate_yaw_pitch_loftr(im.convert("L"), _rot45)
     check("LoFTR 退路 合成右轉 45 度", _ly is not None and 43 <= _ly <= 47 and _lc >= 0.5, (_ly, _ln, _lc, _ld))
 check("量刻度中段 dry-run", "不能量刻度中段" in t.cal_mid(""), t.cal_mid(""))
-check("量刻度中段 在目錄", "量刻度中段" in "\n".join(T.catalog_lines(cat)) if hasattr(T, "catalog_lines") else any(x.get("名稱") == "量刻度中段" for x in (cat["工具"] if isinstance(cat, dict) and "工具" in cat else cat)))
+check("量刻度中段 在目錄（第 111 輪起隱藏、叫得到）", any(x.get("名稱") == "量刻度中段" and x.get("隱藏") for x in cat["工具"]))
 _n, _p = T._parse_call("量刻度中段(45)", cat); check("parse 量刻度中段(45)", _n == "量刻度中段" and _p.get("度") == "45", (_n, _p))
 # 中段算法：模擬三段 +8／+10／+10（頭段死區 2 度）
 _bak2 = {k: getattr(t, k) for k in ("_drag_staged", "_feat_deg")}
@@ -1111,7 +1111,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4）", len(_ex101) == 425, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4）", len(_ex101) == 433, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1211,7 +1211,7 @@ check("第 110 輪：任務字剛好換了的紀錄排第一、標出換了什�
 check("沒對上任務字換的不加標", all("✓ 記的時候" not in l for l in _lines if "拍照牆" in l or "相機道具" in l), _r[:400])
 # 10/29 10:4x 使用者「多多介紹打開」：system 說明用途／時機、要做的事→哪一格；面板每輪提醒；上一輪沒照預期指出那個工具在哪一格
 _s108 = T.build_system("動物醫院", _cat105, 2)
-check("system 有 什麼時候打開／怎麼打開／要做的事→哪一格（每個第二層都有）", "**什麼時候打開**" in _s108 and "打開(移動與視角/走去目標)" in _s108 and "打開(學習/眼睛與資料)" in _s108)
+check("system 有 什麼時候打開／怎麼打開／要做的事→哪一格（每個第二層都有）", "**什麼時候打開**" in _s108 and "打開(移動與視角/走去目標)" in _s108 and "打開(認識新東西/眼睛與資料)" in _s108)
 _t108 = T.Tools("動物醫院", _cat105, live=False, image_path=None); _t108.tree_round = 5; _t108.tree_recent = {}
 _h = _t108.tree_panel({"用": ["檢討(x)", "記準則(y)", "走(0.5)", "長按(e,1.5)"], "符合": [True, False]})
 check("面板提醒還沒打開過＋上一輪 ✗ 的 長按 指到 互動/按鍵（先記不算步）", "還沒打開過" in _h and "長按 在「互動/按鍵」" in _h and "走 在" not in _h, _h[:300])
@@ -1226,5 +1226,28 @@ check("system 不再叫他用 捲 切人稱", "捲(正數) 拉近" not in _s107 
 _c107 = {t["名稱"]: t for t in T.load_catalog("動物醫院")["工具"]}
 check("開局測量 在目錄、實作 cal_opening 存在", _c107.get("開局測量", {}).get("實作") == "cal_opening" and hasattr(T.Tools, "cal_opening"))
 check("記應該人稱 不再叫他捲", "捲(正數)" not in _c107["記應該人稱"]["用途"])
-check("開局測量 在工具樹 校準/開工", "開局測量" in T.load_tree()["校準"]["子"]["開工"]["工具"])
+check("第 111 輪：量測不列（開局測量隱藏）、場景切換 第一層自己一格", _c107["開局測量"].get("隱藏") and T.load_tree()["場景切換"]["工具"] == ["場景切換"])
+# 第 111 輪：使用者重排 system（--slim-system）
+_c111 = T.load_catalog("動物醫院")
+T.SLIM["開"] = True; T.TOOL_TREE["開"] = True
+_s111 = T.build_system("動物醫院", _c111, 2)
+T.TOOL_TREE["開"] = False
+_s111f = T.build_system("動物醫院", _c111, 2)
+check("slim system 只留 身分／目標第一段／絕對限制／工具／兩步規劃＋格式", "【絕對限制】" in _s111 and "【兩步規劃】" in _s111 and "從頭重新學一次" in _s111
+      and all(x not in _s111 for x in ("【開局測量】", "【每個行為三件事】", "【大任務與小任務】", "【第幾人稱】", "【突發狀況】", "磁磚", "捲鏡頭")), len(_s111))
+check("slim 樹模式 system < 4,000 字、全列 < 18,000 字", len(_s111) < 4000 and len(_s111f) < 18000, (len(_s111), len(_s111f)))
+check("slim 樹模式 JSON 先記欄有 打開 提示、全列沒有", "同時 打開(那一步工具所在的那一格)" in _s111 and "同時 打開(" not in _s111f and "找做慢、做白工" in _s111f)
+_by111 = {t["名稱"]: t for t in _c111["工具"]}
+check("使用者目標掛到工具：轉 正負、捲 不切人稱、估距 磁磚、記長相 拍照記點", "鏡頭往右轉" in _by111["轉"]["用途"] and "不要捲來切換人稱" in _by111["捲"]["用途"]
+      and "磁磚" in _by111["估距"]["用途"] and "拍照記成點" in _by111["記長相"]["用途"])
+_t111 = T.Tools("動物醫院", _c111, live=False, image_path=None)
+_t111.small = {"名稱": "拍照", "怎麼做": "x", "開始": "14:00", "開始秒": 0, "輪": 3, "✗": 1, "檢討": 1, "上次更新": 0}
+_t111.mdir = _tf110.mkdtemp()
+_r = _t111.run("場景切換", {"原因": "死掉回大廳"})
+check("場景切換：收掉小任務（留在 small_prev）、回傳寫原因／配對提示／接著設小任務", _t111.small is None and _t111.small_prev["名稱"] == "拍照"
+      and "死掉回大廳" in _r and "「拍照」是 14:00 換場景前設的" in _r and "配對" in _r and "設小任務" in _r, _r[:300])
+_r = _t111.run("研究任務", {})
+check("研究任務：大任務／小任務做法＋現況", "每一輪的目標是現在的小任務" in _r and "現況：大任務" in _r, _r[:200])
+check("screen_busy：全黑＝忙、亮的沒字＝不忙", T.screen_busy(Image.new("RGB", (64, 36), (2, 2, 2))) and not T.screen_busy(Image.new("RGB", (64, 36), (150, 150, 150))))
+T.SLIM["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
