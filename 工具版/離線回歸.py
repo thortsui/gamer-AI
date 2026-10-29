@@ -1194,6 +1194,21 @@ check("樹模式下 用過的工具也留在面板", "等(" in _t105.tree_panel(
 check("叫錯工具名 按鍵(s,0.5) → 指到 互動/按鍵", "互動/按鍵" in T.tree_suggest("按鍵(s,0.5)"))
 check("後退 → 指到 走一段（有 退）", "走一段" in T.tree_suggest("後退(0.5)"))
 check("只撞到一個字（開門）→ 不亂指、叫他一層層找", "一層層找" in T.tree_suggest("開門"), T.tree_suggest("開門"))
+# 第 110 輪：查準則 把「記的時候任務字剛好換了」的紀錄排最前、標出換了什麼（暫存目錄）
+import tempfile as _tf110, json as _js110
+from datetime import datetime as _dt110
+_d110 = _tf110.mkdtemp()
+_t110 = T.Tools("動物醫院", _cat105, live=False, image_path=None)
+_t110.mdir = _d110; _t110.reviews = []
+_today = _dt110.now().strftime("%Y-%m-%d"); _md = _dt110.now().strftime("%m/%d")
+open(os.path.join(_d110, _today + ".jsonl"), "w", encoding="utf-8").write(
+    _js110.dumps({"時間": "10:52:00", "任務字換": {"時間": "10:51", "舊": "拍照", "新": "在電腦上註冊"}}, ensure_ascii=False) + chr(10))
+open(os.path.join(_d110, "互動物.md"), "w", encoding="utf-8").write(f"- {_md} 09:00 拍照牆｜功能:拍照沒反應｜用法:長按E" + chr(10) + f"- {_md} 10:51 桌上相機｜功能:拍照→註冊｜用法:長按E1.5" + chr(10))
+_js110.dump([{"對象": "拍照", "準則": "要選相機道具按2", "時間": f"{_md} 09:30", "次數": 1, "照做✓": 5}], open(os.path.join(_d110, "準則.json"), "w", encoding="utf-8"), ensure_ascii=False)
+_r = _t110.run("查準則", {"對象或情況": "拍照"})
+_lines = [l for l in _r.split(chr(10)) if l.startswith("- ")]
+check("第 110 輪：任務字剛好換了的紀錄排第一、標出換了什麼", bool(_lines) and "桌上相機" in _lines[0] and "✓ 記的時候程式量到任務字「拍照」→「在電腦上註冊」" in _lines[0], _r[:400])
+check("沒對上任務字換的不加標", all("✓ 記的時候" not in l for l in _lines if "拍照牆" in l or "相機道具" in l), _r[:400])
 # 10/29 10:4x 使用者「多多介紹打開」：system 說明用途／時機、要做的事→哪一格；面板每輪提醒；上一輪沒照預期指出那個工具在哪一格
 _s108 = T.build_system("動物醫院", _cat105, 2)
 check("system 有 什麼時候打開／怎麼打開／要做的事→哪一格（每個第二層都有）", "**什麼時候打開**" in _s108 and "打開(移動與視角/走去目標)" in _s108 and "打開(學習/眼睛與資料)" in _s108)

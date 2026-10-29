@@ -1283,6 +1283,42 @@ class ExtraTools:
         except OSError:
             return []
 
+    def _task_changes(self):
+        """第 110 輪：今天的紀錄裡程式量到「右上任務字換了」的時間（分鐘）→ {HH:MM: (舊, 新)}；照檔案修改時間快取。"""
+        p = os.path.join(self.mdir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            return {}
+        if getattr(self, "_tc_cache", (None,))[0] == mt:
+            return self._tc_cache[1]
+        out = {}
+        for line in open(p, encoding="utf-8", errors="replace"):
+            if '"任務字換": {' not in line and '"任務字換": [{' not in line:
+                continue
+            try:
+                ev = json.loads(line).get("任務字換")
+            except ValueError:
+                continue
+            for e in (ev if isinstance(ev, list) else [ev]):
+                if isinstance(e, dict) and e.get("時間"):
+                    out[e["時間"]] = (e.get("舊", ""), e.get("新", ""))
+        self._tc_cache = (mt, out)
+        return out
+
+    def _verified(self, hhmm, tc):
+        """記錄時間前後 2 分鐘內任務字換過 → (舊, 新)；沒有回 None。"""
+        try:
+            h, m = int(hhmm[:2]), int(hhmm[3:5])
+        except (ValueError, TypeError):
+            return None
+        for d in (0, -1, 1, -2, 2):
+            t = (h * 60 + m + d) % 1440
+            k = f"{t // 60:02d}:{t % 60:02d}"
+            if k in tc:
+                return tc[k]
+        return None
+
     def mem_rule_find(self, 對象或情況=""):
         q = str(對象或情況).strip()
         if not q:
@@ -1302,6 +1338,7 @@ class ExtraTools:
         # 10/20：以前只要一半字組對上就算，一次回報幾百條 → 收緊：整句出現，或至少對上 2 組且 6 成（短的 8 成）；
         # 再把相近的合併成一條（×N＝同一件事記了 N 次）
         need = 0.8 if len(qb) <= 3 else 0.6
+        tc = self._task_changes()                      # 第 110 輪：記的當下任務字真的換了＝程式量到的成功，排前面
         scored, seen = [], set()
         for src, txt in pool:
             key = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", txt)
@@ -1317,7 +1354,14 @@ class ExtraTools:
                     r = rmap[txt]
                     ok, bad = r.get("照做✓", 0), self._rule_bad(r)
                     sc += 4 * (ok - bad) / (ok + bad + 2)
-                scored.append([sc, src, txt, tb, 1])
+                mt = re.match(r"\d\d/\d\d (\d\d:\d\d)", txt)
+                when = mt.group(1) if mt else (str(rmap[txt].get("時間", ""))[-5:] if src == "準則" else "")
+                vf = self._verified(when, tc) if when else None
+                disp = txt
+                if vf:
+                    sc += 12
+                    disp = txt + f"（✓ 記的時候程式量到任務字「{vf[0]}」→「{vf[1]}」）"
+                scored.append([sc, src, txt, tb, 1, disp])
         scored.sort(key=lambda x: -x[0])
         kept = []
         for x in scored:
@@ -1338,8 +1382,8 @@ class ExtraTools:
                         seen.append(self._rule_key(rmap[x[2]]))
                         del seen[:-10]
         return (f"跟「{q}」有關的：準則 {n_rule} 條、其他 {len(kept) - n_rule} 種（相近的已合併，×N＝同一件事記了 N 次；"
-                f"準則照「查出來後照做的 ✓／✗」排，接下來 {self.RULE_WATCH} 輪的結果會記回這幾條；列前 8）：" + NL
-                + NL.join(f"- [{src}{f' ×{n}' if n > 1 else ''}] {txt[:200]}" for _, src, txt, _, n in kept[:8]))
+                f"記的時候任務字剛好換了的（程式量到的成功）排最前，準則再照「查出來後照做的 ✓／✗」排，接下來 {self.RULE_WATCH} 輪的結果會記回這幾條；列前 8）：" + NL
+                + NL.join(f"- [{src}{f' ×{n}' if n > 1 else ''}] {disp[:240]}" for _, src, txt, _, n, disp in kept[:8]))
 
     def mem_history_find(self, 關鍵字=""):
         q = str(關鍵字).strip()
