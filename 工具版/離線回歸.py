@@ -1316,6 +1316,9 @@ _tr, _h = _t114.mismatch_track(["走(0.5)"], [False], _b114, False)
 check("換了地方重新數", _tr is None and len(_t114.mismatch_log["移動"]) == 1)
 _tr, _h = _t114.mismatch_track(["走(0.5)"], [False], _b114, True)
 check("有真正的效果 → 清空", _tr is None and _t114.mismatch_log == {})
+_t114.mismatch_log = {}
+_tr, _h = _t114.mismatch_track(['右移({"秒": "0.6"})', '走過去({"目標": "0.65"})'], [False, False], _a114, False)
+check("同一輪兩步同類都 false 只算一次（不跳過再檢查）、動作字顯示成 右移(0.6)", _tr is None and len(_t114.mismatch_log["移動"]) == 1 and "右移(0.6)" in _h[0], (_tr, _h))
 check("按(1)、按(esc) 不算互動類", _t114._kind("按(1)") is None and _t114._kind("按(esc)") is None and _t114._kind("按(e)") == "互動")
 check("不合預期 在目錄與工具樹、沒有 互動沒效果 這個工具", "不合預期" in T.load_tree()["任務流程"]["子"]["出事"]["工具"]
       and any(t["名稱"] == "不合預期" and t["實作"] == "unexpected" for t in T.load_catalog("動物醫院")["工具"])

@@ -762,20 +762,21 @@ class Tools(ExtraTools):
             return None, []
         f = SceneMemory.feat(im)
         now = datetime.now().strftime("%H:%M")
-        hints, trig = [], None
+        hints, trig, seen = [], None, set()
         for call, flag in zip(steps, flags):
             k = self._kind(call)
-            if flag is not False or not k:
+            if flag is not False or not k or k in seen:
                 continue
+            seen.add(k)                                 # 10/29 22:51：同一輪兩步同類都 false 會直接觸發、跳過「再檢查一次」→ 一輪同類只算一次
             lst = self.mismatch_log.get(k, [])
             if lst and SceneMemory.sim(f, lst[0][2]) < self.INTERACT_SAME:
                 lst = []                                # 換了地方，重新數
-            lst.append((now, str(call)[:30], f))
+            lst.append((now, _call_txt(call), f))
             self.mismatch_log[k] = lst
             if len(lst) >= 2:
                 trig = (k, lst)
             else:
-                hints.append(f"「{str(call)[:30]}」（{k}）跟你預期的不一樣 → 這一輪再檢查一次：同樣再做一次，或換個角度／距離確認是不是真的沒效果；"
+                hints.append(f"「{_call_txt(call)}」（{k}）跟你預期的不一樣 → 這一輪再檢查一次：同樣再做一次，或換個角度／距離確認是不是真的沒效果；"
                              "如果還是不合，程式會幫你回報這個地方可能有問題")
         return trig, hints
 
@@ -5225,6 +5226,18 @@ TASK_HUD = ("輪班", "理智", "保安", "道具", "金幣", "商店", "邀請"
             "轉移",
             # 10/20 19:51 誤判：大廳「角色扮演」招牌（讀成「色扮演」）被當成任務字
             "扮演")
+
+
+def _call_txt(call):
+    """紀錄裡的動作 走({"秒": "0.5"}) → 走(0.5)（給面板看）。"""
+    c = str(call)
+    m = re.match(r"^([^(（]+)[(（]\s*(\{.*\})\s*[)）]$", c)
+    if m:
+        try:
+            return f"{m.group(1)}({','.join(str(v) for v in json.loads(m.group(2)).values())})"[:30]
+        except ValueError:
+            pass
+    return c[:30]
 
 
 def screen_busy(im):
