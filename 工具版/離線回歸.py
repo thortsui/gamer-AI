@@ -1134,4 +1134,27 @@ try:
     check("沒有死亡字 → 不記", _w102.stop() == [])
 finally:
     _lt102._win_read_once = _bak102; T.ThinkWatch.EVERY = 4.0
+# 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的（暫存目錄，不碰真的記憶）
+import tempfile as _tf103, json as _js103
+from datetime import datetime as _dt103
+_d103 = _tf103.mkdtemp()
+_red, _blue = Image.new("RGB", (160, 90), (200, 30, 30)), Image.new("RGB", (160, 90), (30, 30, 200))
+_t0 = _dt103(2026, 10, 29, 1, 0).timestamp()
+open(os.path.join(_d103, "觸碰物.md"), "w", encoding="utf-8").write("- 10/29 01:05 藍色踏板｜站上去:進場｜站上去等倒數" + chr(10) + "- 10/29 01:40 別的東西｜x" + chr(10))
+_js103.dump([{"對象": "紅區", "準則": "要先看四周", "時間": "10/29 01:10", "次數": 1}], open(os.path.join(_d103, "準則.json"), "w", encoding="utf-8"), ensure_ascii=False)
+_sm = T.SceneMemory(_d103)
+_sm.update(_red, [], now=_t0)                                   # 01:00 程式啟動、紅畫面
+check("第一輪開一段、沒有提醒", len(_sm.segs) == 1 and _sm.panel(_red, None) == "")
+_sm.update(_blue, ["死亡：你上一輪看到死亡／結束畫面"], now=_t0 + 1800)      # 01:30 死了、藍畫面
+_sm.update(_red, ["換場景：畫面從全黑／載入回來（可能換地方、重新開局）"], now=_t0 + 3600)   # 02:00 回到紅畫面
+_p = _sm.panel(_red, {"名稱": "拍照", "開始": "01:45", "開始秒": _t0 + 2700})
+check("換場景 → 提醒小任務是換場景前設的", "【場景切換】" in _p and "「拍照」是 01:45 設的（換場景之前）" in _p, _p[:200])
+check("找到最像的紅色段（01:00～01:30）、列他那段記的觸碰物＋準則，不列別段", "01:00～01:30" in _p and "藍色踏板" in _p and "紅區" in _p and "別的東西" not in _p, _p)
+_sm.panel(_red, None); _sm.panel(_red, None)
+check("提醒只出 3 輪", _sm.panel(_red, None) == "")
+_sm.update(_blue, ["死亡：x"], now=_t0 + 4000); _sm.small_reset()
+check("他 設小任務 就收掉提醒", _sm.panel(_blue, None) == "")
+_sm.update(_red, ["文字變化：右上角任務字「a」→「b」"], now=_t0 + 4100)
+check("任務字換不算換場景", len(_sm.segs) == 4)
+check("存檔 場景段.json 重開讀得回來", len(T.SceneMemory(_d103).segs) == 4)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

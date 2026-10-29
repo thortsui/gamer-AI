@@ -4423,8 +4423,10 @@ class Tools(ExtraTools):
         if self.small and self.small["名稱"] == name:
             self.small["怎麼做"] = how or self.small["怎麼做"]
             return f"現在的小任務還是「{name}」，怎麼做更新成：{self.small['怎麼做'] or '（沒寫）'}"
-        self.small = {"名稱": name, "怎麼做": how, "開始": datetime.now().strftime("%H:%M"), "輪": 0, "✗": 0, "檢討": 0, "上次更新": 0}
+        self.small = {"名稱": name, "怎麼做": how, "開始": datetime.now().strftime("%H:%M"), "開始秒": time.time(), "輪": 0, "✗": 0, "檢討": 0, "上次更新": 0}
         self.no_small = 0
+        if getattr(self, "scene_mem", None):
+            self.scene_mem.small_reset()                  # 第 103 輪：換場景後他重設小任務 → 收掉提醒
         self._append("小任務.md", f"開始:{name}｜怎麼做:{how}｜大任務:{(self.big or {}).get('名稱', '沒設')}")
         return (note + f"現在的小任務＝「{name}」（怎麼做：{how or '沒寫，想好就 設小任務(' + name + ',怎麼做) 補上'}）；"
                 "每一輪的目標就是它，做完送 任務完成")
@@ -4920,6 +4922,119 @@ class ThinkWatch:
                 + "；".join(f"{t} 讀到「{w}」（整句：{s}）" for t, w, s in hits) + NL)
 
 
+class SceneMemory:
+    """第 103 輪（10/29 使用者「如果場景有切換任務也要」）：10/29 06:17 死回大廳後他帶著局內的小任務「拍照」在大廳繞 77 分鐘，
+    而他自己 00:25 起記過 7 次「站上踏板等倒數＝進場」卻沒翻出來。
+    場景切換（死亡／想的時候讀到死亡字／全黑載入回來／描述畫面類型變了）→ 開一段新場景；面板提醒小任務是換場景前設的、要重新想，
+    並用顏色分布找以前最像的那段，列他自己在那段時間記的（觸碰物／筆記／互動物／卡法／準則）。只翻他自己寫的，不加遊戲知識。"""
+    FILES = ("觸碰物.md", "筆記.md", "互動物.md", "卡法.md")
+    SHOW_ROUNDS = 3          # 換場景後提醒幾輪（他 設小任務 就提早收）
+    SIM_MIN = 0.75           # 顏色分布交集（跟那段最像的 3 張平均）≥ 0.75 才算「很像」；10/29 離線：大廳 9/9 認到以前的大廳段
+
+    def __init__(self, mdir):
+        self.path = os.path.join(mdir, "場景段.json")
+        self.mdir = mdir
+        try:
+            self.segs = json.load(open(self.path, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            self.segs = []
+        self.note_left, self.note_why = 0, ""
+
+    @staticmethod
+    def feat(im):
+        import numpy as np
+        hsv = np.asarray(im.convert("RGB").resize((96, 54)).convert("HSV"), dtype=float)
+        h, s, v = hsv[..., 0] / 256, hsv[..., 1] / 256, hsv[..., 2] / 256
+        hs = np.histogram2d(h.ravel(), s.ravel(), bins=(8, 4), range=((0, 1), (0, 1)))[0].ravel()
+        vh = np.histogram(v.ravel(), bins=4, range=(0, 1))[0]
+        f = np.concatenate([hs, vh]).astype(float)
+        return [round(x, 4) for x in (f / f.sum()).tolist()]
+
+    @staticmethod
+    def sim(a, b):
+        return sum(min(x, y) for x, y in zip(a, b)) * 2 / (sum(a) + sum(b) or 1)
+
+    def _save(self):
+        try:
+            json.dump(self.segs[-200:], open(self.path, "w", encoding="utf-8"), ensure_ascii=False)
+        except OSError:
+            pass
+
+    def update(self, im, events, now=None):
+        """每輪呼叫。events＝這輪的變動字串；有場景類的就開新一段。"""
+        now = now or time.time()
+        scene = [e for e in events if e.startswith(("死亡", "換場景", "畫面變了：畫面類型"))]
+        if scene or not self.segs:
+            self.segs.append({"開始": now, "時間": datetime.fromtimestamp(now).strftime("%m/%d %H:%M"),
+                              "原因": "；".join(scene) or "程式啟動", "特徵": [], "輪": 0})
+            if scene:
+                self.note_left, self.note_why = self.SHOW_ROUNDS, "；".join(scene)
+        cur = self.segs[-1]
+        if im is not None and len(cur["特徵"]) < 20:          # 這段頭 20 輪每輪存一張的顏色分布（一張不夠分：大廳 vs 局內單張平均 0.65 vs 0.50 重疊）
+            cur["特徵"].append(self.feat(im))
+        cur["輪"] += 1
+        self._save()
+
+    def small_reset(self):
+        self.note_left = 0
+
+    def _records(self, t0, t1):
+        out = []
+        yr = datetime.now().year
+
+        def _ts(s):
+            try:
+                return datetime.strptime(f"{yr}/{s}", "%Y/%m/%d %H:%M").timestamp()
+            except ValueError:
+                return None
+        for fn in self.FILES:
+            for line in read_text(os.path.join(self.mdir, fn)).splitlines():
+                m = re.match(r"-\s*(\d\d/\d\d \d\d:\d\d)\s*(.+)", line.strip())
+                t = _ts(m.group(1)) if m else None
+                if t is not None and t0 <= t < t1:
+                    out.append((t, f"{fn[:-3]}：{m.group(2)[:70]}"))
+        try:
+            for r in json.load(open(os.path.join(self.mdir, "準則.json"), encoding="utf-8")):
+                t = _ts(str(r.get("時間", "")))
+                if t is not None and t0 <= t < t1:
+                    out.append((t, f"準則：{r.get('對象', '')}｜{str(r.get('準則', ''))[:60]}"))
+        except Exception:  # noqa: BLE001
+            pass
+        return [x for _, x in sorted(out)]
+
+    def panel(self, im, small):
+        if self.note_left <= 0:
+            return ""
+        self.note_left -= 1
+        cur = self.segs[-1]
+        txt = f"【場景切換】{cur['時間'][-5:]} {self.note_why}。"
+        if small:
+            txt += (f"你現在的小任務「{small['名稱']}」是 {small.get('開始', '?')} 設的"
+                    + ("（換場景之前）" if small.get("開始秒", 0) < cur["開始"] else "") + "——先重新想：現在這個場景要做的是什麼？要換就 設小任務。")
+        else:
+            txt += "先想現在這個場景要做什麼，用 設小任務 定下來。"
+        if im is None:
+            return txt + NL
+        f = self.feat(im)
+        best, bi = 0.0, None
+        for i, sg in enumerate(self.segs[:-1]):
+            if sg.get("特徵"):
+                top = sorted((self.sim(f, x) for x in sg["特徵"]), reverse=True)[:3]
+                s = sum(top) / len(top)
+                if s > best:
+                    best, bi = s, i
+        if bi is None or best < self.SIM_MIN:
+            return txt + "（以前沒有顏色分布很像這個畫面的段落）" + NL
+        sg = self.segs[bi]
+        t1 = self.segs[bi + 1]["開始"]
+        recs = self._records(sg["開始"], t1)
+        span = f"{sg['時間'][-5:]}～{datetime.fromtimestamp(t1).strftime('%H:%M')}"
+        if not recs:
+            return txt + f"（以前最像的是 {span} 那段，相似 {best:.2f}，那段你沒有記東西）" + NL
+        return (txt + NL + f"【你上次在很像的畫面（{span} 那段，顏色分布相似 {best:.2f}）自己記過的】" + NL
+                + NL.join("・" + r for r in recs[-12:]) + NL)
+
+
 def top_right_words(im):
     """10/19 任務字整併：只裁畫面右緣任務列（x 0.78～1、y 0.06～0.48）放大兩倍再 OCR（10/18 整張讀多是海報／招牌亂碼）；
     去掉 HUD、純英文招牌、少於 3 個中文字的。回 [(字, x, y)]，座標換回整張畫面比例、由上往下排。"""
@@ -5281,6 +5396,7 @@ def main():
         except OSError as e:
             print(f"   存檔失敗：{e}")
     think_watch, think_hits = ThinkWatch(tools), []   # 第 102 輪
+    tools.scene_mem = SceneMemory(tools.mdir)         # 第 103 輪
     prev = None         # 上一輪的 原因／預期／做了（12:1x 使用者：三件事＋不符就檢討）
     missed_review = False
     match_stat = {"符合": 0, "不符": 0, "不符沒檢討": 0}
@@ -5321,7 +5437,12 @@ def main():
         else:
             tools.no_small += 1
         small_up = ""
-        up_reason = "" if args.no_small_update else tools.small_update_reason(tools.change_events(task_ev, history, im))
+        events = tools.change_events(task_ev, history, im)
+        if think_hits and not any(e.startswith("死亡") for e in events):
+            events.append("死亡：你上一輪在想的時候，畫面出現過「" + think_hits[0][1] + "」")
+        tools.scene_mem.update(im, events)               # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的
+        scene_txt = tools.scene_mem.panel(im, tools.small)
+        up_reason = "" if args.no_small_update else tools.small_update_reason(events)
         if up_reason:                                     # 10/21：出現變動就重新想任務＋定期小任務更新
             small_up = tools.small_update(up_reason, im, history, task_words)
         watch_txt = ""
@@ -5352,6 +5473,7 @@ def main():
         disp_txt = tools.dispatch_panel()
         # 10/28 01:1x 使用者實驗：最重要那塊（大任務／小任務／任務字／上一輪結果）放 頭／中／尾，其他段落順序不變
         key_txt = ("【這一輪最重要的：大任務、小任務、任務字、上一輪結果】" + NL
+                   + scene_txt
                    + "【大任務】（一個段落；目標）" + big_txt + NL
                    + "【前面完成的小任務】" + NL + tools.small_lines() + NL
                    + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
