@@ -1171,7 +1171,7 @@ check("工具樹涵蓋每個列出的工具、不重複、沒有不存在的名�
 check("打開 在目錄裡但隱藏（全列模式不列）", any(t["名稱"] == "打開" and t.get("隱藏") for t in _cat105["工具"]))
 T.TOOL_TREE["開"] = False; _s0 = T.build_system("動物醫院", _cat105, 2)
 T.TOOL_TREE["開"] = True; _s1 = T.build_system("動物醫院", _cat105, 2)
-check("樹模式 system 比全列少一半以上、有【工具樹】", len(_s1) < len(_s0) / 2 and "【工具樹】" in _s1 and "【工具樹】" not in _s0, (len(_s0), len(_s1)))
+check("樹模式 system 比全列少一半以上、有【工具樹】", len(_s1) < len(_s0) / 2 and "【工具樹" in _s1 and "【工具樹" not in _s0, (len(_s0), len(_s1)))
 _t105 = T.Tools("動物醫院", _cat105, live=False, image_path=None)
 _t105.tree_recent = {}; _t105.tree_round = 5
 _r = _t105.run("打開", {"路徑": "移動與視角"})
@@ -1190,6 +1190,15 @@ check("樹模式下 用過的工具也留在面板", "等(" in _t105.tree_panel(
 check("叫錯工具名 按鍵(s,0.5) → 指到 互動/按鍵", "互動/按鍵" in T.tree_suggest("按鍵(s,0.5)"))
 check("後退 → 指到 走一段（有 退）", "走一段" in T.tree_suggest("後退(0.5)"))
 check("只撞到一個字（開門）→ 不亂指、叫他一層層找", "一層層找" in T.tree_suggest("開門"), T.tree_suggest("開門"))
+# 10/29 10:4x 使用者「多多介紹打開」：system 說明用途／時機、要做的事→哪一格；面板每輪提醒；上一輪沒照預期指出那個工具在哪一格
+_s108 = T.build_system("動物醫院", _cat105, 2)
+check("system 有 什麼時候打開／怎麼打開／要做的事→哪一格（每個第二層都有）", "**什麼時候打開**" in _s108 and "打開(移動與視角/走去目標)" in _s108 and "打開(學習/眼睛與資料)" in _s108)
+_t108 = T.Tools("動物醫院", _cat105, live=False, image_path=None); _t108.tree_round = 5; _t108.tree_recent = {}
+_h = _t108.tree_panel({"用": ["檢討(x)", "記準則(y)", "走(0.5)", "長按(e,1.5)"], "符合": [True, False]})
+check("面板提醒還沒打開過＋上一輪 ✗ 的 長按 指到 互動/按鍵（先記不算步）", "還沒打開過" in _h and "長按 在「互動/按鍵」" in _h and "走 在" not in _h, _h[:300])
+_t108.run("打開", {"路徑": "看畫面"}); _t108.tree_round = 8
+check("打開過 → 寫次數與幾輪前", "打開過 1 次、上次是 3 輪前" in _t108.tree_hint(None), _t108.tree_hint(None))
+check("tree_path_of 找得到第二層、第一層直接放的", T.tree_path_of("走過去") == "移動與視角/走去目標" and T.tree_path_of("關掉") == "意外" and T.tree_path_of("沒這個") is None)
 T.TOOL_TREE["開"] = False
 # 10/29 使用者：開局那段做成工具 開局測量；捲鏡頭前後矛盾都改
 _s107 = T.build_system("動物醫院", T.load_catalog("動物醫院"), 2)

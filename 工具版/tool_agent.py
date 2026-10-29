@@ -120,7 +120,7 @@ LIVE = {"輪": 0, "階段": "啟動", "開始": 0.0, "做": []}   # 10/23 直播
 ASK_CLAUDE = True         # 10/23 實驗分枝 exp-ask-claude：問Claude
 # 10/29 使用者實驗：「把工具分成之後再給他，把移動那些分為好幾層工具，讓他一層一層往下找，減少 Context 的使用」
 TOOL_TREE = {"開": False}  # --tool-tree／--tree-rotate：system 只列第一層，他用 打開(路徑) 往下找
-TREE_OPEN_ENTRY = {"名稱": "打開", "類別": "文件", "用途": "工具樹一層一層打開：給第一層名稱就列下一層；打開到最底層就列出那幾個工具的用法和例子（之後幾輪面板會一直列著）",
+TREE_OPEN_ENTRY = {"名稱": "打開", "類別": "文件", "用途": "工具樹一層一層打開：給第一層名稱就列下一層；打開到最底層就列出那幾個工具的用法和例子（之後 8 輪面板會一直列著）。做新的事之前、上一步沒照預期、換場景或換小任務、不知道用哪個工具時都先打開那一類；放先記、不佔步數、不動遊戲",
                    "用法": "打開(路徑)", "例": "打開(移動與視角)", "參數": {"路徑": "第一層名稱，或 第一層/第二層"},
                    "回傳": "下一層的名稱與說明；最底層＝那幾個工具的用法、用途、例子", "實作": "tree_open", "隱藏": True,
                    "例子": ["打開(移動與視角)——要轉頭或走路，先看下一層有哪幾類", "打開(移動與視角/走去目標)——要走到畫面上的東西，列出那幾個工具",
@@ -153,16 +153,45 @@ def tree_suggest(text):
 
 def tree_top_text(cat=None):
     tree = load_tree()
-    lines = ["【工具樹】（這次實驗：工具不一次全列。要用工具先 打開(第一層名稱) 看下一層，再 打開(第一層/第二層) 列出那幾個工具的用法和例子；"
-             "打開過、用過的工具之後 8 輪會列在面板【你打開的工具】。名字知道的工具不用打開也可以直接叫。打開 放「先記」，不佔步數。）"]
+    # 10/29 10:4x 使用者「他使用打開，多多介紹打開工具的用途讓他更常用」（09:12～10:34 樹模式 44 輪他 0 次打開）
+    n_tools = sum(len(_tree_leaf_tools(n)) for n in tree.values())
+    lines = ["【工具樹＋打開】（這次實驗）你有 " + str(n_tools) + " 個工具，這裡只列分類；每個工具的用法、參數、例子都收在樹裡，要用 打開 拿出來。"
+             "你平常叫的那幾個只是一小部分——很多工具會幫你做完整件事（例：走過去 會自己轉正、邊走邊找、到面前就停；描述畫面 給每個東西編號和座標；"
+             "找長相 用照片 1 秒找到東西；確認是否是UI 分辨場景物件和介面字），不打開就不知道有。",
+             "**什麼時候打開**：①每做一件新的事之前，先想「這件事屬於哪一類」，打開那一類看有沒有更合適的工具；②上一步沒照預期（符合 false、被擋、沒反應、找不到）→ 打開同一類看別的工具；"
+             "③換了場景、換了小任務；④想做的事不知道用哪個工具。",
+             "**怎麼打開**：打開(第一層) 看下一層有哪幾類 → 打開(第一層/第二層) 列出那幾個工具的用法和例子；也可以直接 打開(第二層)。"
+             "打開 放「先記」（一輪最多 2 個），**不佔步數、不動遊戲**，結果下一輪在【工具回傳】；打開過、用過的工具之後 8 輪一直列在面板【你打開的工具】，不用重開。"
+             "名字已經知道的工具不打開也可以直接叫。",
+             "第一層："]
     for k, n in tree.items():
         sub = "、".join(n.get("子", {}).keys())
         lines.append(f"  {k}｜{n.get('說明', '')}" + (f"｜下一層：{sub}" if sub else f"｜{len(n.get('工具', []))} 個工具"))
     mine = [t["名稱"] for t in (cat or {}).get("工具", []) if t.get("自訂")]
     if mine:
         lines.append("  你自己定義的｜" + "、".join(mine) + "（直接叫）")
-    lines.append("  例：打開(移動與視角)；打開(移動與視角/走去目標)；打開(互動/按鍵)")
+    lines.append("要做的事 → 打開哪一格：")
+    for k, n in tree.items():
+        for k2, n2 in (n.get("子") or {}).items():
+            lines.append(f"  {n2.get('說明', k2)} → 打開({k}/{k2})")
+        if not n.get("子"):
+            lines.append(f"  {n.get('說明', k)} → 打開({k})")
     return NL.join(lines)
+
+
+def _tree_leaf_tools(n):
+    return list(n.get("工具", [])) + [x for c in n.get("子", {}).values() for x in _tree_leaf_tools(c)]
+
+
+def tree_path_of(name):
+    """工具在樹裡的路徑（第一層/第二層）；找不到回 None。"""
+    for k, n in load_tree().items():
+        if name in n.get("工具", []):
+            return k
+        for k2, n2 in n.get("子", {}).items():
+            if name in n2.get("工具", []):
+                return f"{k}/{k2}"
+    return None
 
 
 def build_system(game, cat, plan3=False):
@@ -655,7 +684,11 @@ class Tools(ExtraTools):
     tree_recent = {}         # 工具名 → 最後打開或用過的輪
     tree_round = 0
 
+    tree_opens, tree_last_open = 0, 0
+
     def tree_open(self, 路徑=""):
+        self.tree_opens += 1
+        self.tree_last_open = self.tree_round
         tree = load_tree()
         parts = [p.strip() for p in re.split(r"[/／>＞、,，]", str(路徑)) if p.strip()]
         if not parts:
@@ -685,13 +718,33 @@ class Tools(ExtraTools):
         sub = {"工具": [byname[n] for n in names if n in byname]}
         return f"【{'/'.join(trail)}】{len(names)} 個工具（之後 {self.TREE_KEEP} 輪會列在面板【你打開的工具】）：" + NL + NL.join(catalog_lines(sub))
 
-    def tree_panel(self):
+    def tree_hint(self, last=None):
+        """10/29 10:4x 使用者「多多介紹打開」：每輪一行提醒；上一輪有沒照預期的步，指出那個工具在樹的哪一格。"""
+        since = (self.tree_round - self.tree_last_open) if self.tree_opens else None
+        head = (f"【打開】這次啟動後你打開過 {self.tree_opens} 次" + (f"、上次是 {since} 輪前" if since is not None else "、還沒打開過")
+                + "。這輪做事前先想：要做的事屬於哪一類？打開(類/子類) 放先記，不佔步數。")
+        if last and False in (last.get("符合") or []):
+            fl = list(last.get("符合") or [])
+            steps = list(last.get("用") or [])[-len(fl):]           # 用 前面是 先記，最後 K 個才是步驟、跟 符合 一一對應
+            calls = [str(c) for c, f in zip(steps, fl) if f is False] or [str(c) for c in steps]
+            paths = []
+            for c in calls:
+                nm = re.split(r"[(（]", c)[0].strip()
+                pth = tree_path_of(nm)
+                if pth and pth not in [p for _, p in paths]:
+                    paths.append((nm, pth))
+            if paths:
+                head += "上一輪沒照預期的：" + "；".join(f"{nm} 在「{pth}」→ 打開({pth}) 看同一格有沒有更合適的" for nm, pth in paths[:2])
+        return head
+
+    def tree_panel(self, last=None):
         keep = [n for n, r in self.tree_recent.items() if self.tree_round - r <= self.TREE_KEEP]
+        hint = self.tree_hint(last) + NL
         if not keep:
-            return "【你打開的工具】（還沒打開過；要用工具先 打開(第一層名稱)）"
+            return hint + "【你打開的工具】（還沒打開過；要用工具先 打開(第一層名稱)）"
         byname = {t["名稱"]: t for t in self.cat["工具"]}
         sub = {"工具": [byname[n] for n in keep if n in byname and n != "打開"]}
-        return f"【你打開的工具】（最近 {self.TREE_KEEP} 輪打開或用過的）" + NL + NL.join("  " + l for l in catalog_lines(sub))
+        return hint + f"【你打開的工具】（最近 {self.TREE_KEEP} 輪打開或用過的）" + NL + NL.join("  " + l for l in catalog_lines(sub))
 
     # ---- 看
     def see_text(self):
@@ -5606,7 +5659,7 @@ def main():
                    + tw.panel(task_ev, big, acted=_acted_last(history)) + NL
                    + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind
                    + ThinkWatch.panel(think_hits) + NL)
-        rest_a = (((tools.tree_panel() + NL) if TOOL_TREE["開"] else "")
+        rest_a = (((tools.tree_panel(history[-1] if history else None) + NL) if TOOL_TREE["開"] else "")
                   + "【開工數值】" + tools.startup_text() + NL
                   + tools.persp_text() + NL
                   + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
