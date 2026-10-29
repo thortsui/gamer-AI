@@ -1111,7 +1111,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數不變（421）", len(_ex101) == 421, len(_ex101))
+check("範例總數（421＋開局測量 4）", len(_ex101) == 425, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1191,4 +1191,12 @@ check("叫錯工具名 按鍵(s,0.5) → 指到 互動/按鍵", "互動/按鍵" 
 check("後退 → 指到 走一段（有 退）", "走一段" in T.tree_suggest("後退(0.5)"))
 check("只撞到一個字（開門）→ 不亂指、叫他一層層找", "一層層找" in T.tree_suggest("開門"), T.tree_suggest("開門"))
 T.TOOL_TREE["開"] = False
+# 10/29 使用者：開局那段做成工具 開局測量；捲鏡頭前後矛盾都改
+_s107 = T.build_system("動物醫院", T.load_catalog("動物醫院"), 2)
+check("system 開局規則只留一行、叫 開局測量", "【開局測量】" in _s107 and "【開工先量" not in _s107 and "驗一圈(dx)" not in _s107.split("【開局測量】")[1].split(T.NL)[0])
+check("system 不再叫他用 捲 切人稱", "捲(正數) 拉近" not in _s107 and "切換人稱除外" not in _s107 and "不要用 捲 切換人稱" in _s107)
+_c107 = {t["名稱"]: t for t in T.load_catalog("動物醫院")["工具"]}
+check("開局測量 在目錄、實作 cal_opening 存在", _c107.get("開局測量", {}).get("實作") == "cal_opening" and hasattr(T.Tools, "cal_opening"))
+check("記應該人稱 不再叫他捲", "捲(正數)" not in _c107["記應該人稱"]["用途"])
+check("開局測量 在工具樹 校準/開工", "開局測量" in T.load_tree()["校準"]["子"]["開工"]["工具"])
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
