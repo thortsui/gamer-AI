@@ -341,7 +341,11 @@ def slim_format(fmt):
     add = "；符合時也可以找做慢、做白工的地方檢討"
     if TOOL_TREE["開"]:
         add += "；有 false 時同時 打開(那一步工具所在的那一格) 看同一格有沒有更合適的工具"
-    return fmt.replace("有 false 就在這裡叫 檢討(…)", "有 false 就在這裡叫 檢討(…)" + add)
+    out = fmt.replace("有 false 就在這裡叫 檢討(…)", "有 false 就在這裡叫 檢討(…)" + add)
+    if TOOL_TREE["開"]:      # 第 112 輪（使用者 16:2x）：先分類問題 → 程式下一輪把那一類的工具預先載入面板
+        out = out.replace('"先記":', '"問題類別":"先分類：這一輪要解決的問題屬於工具樹哪一類（第一層名稱，最多 2 個、用、分開），程式下一輪把那一類有哪些工具放進面板",'
+                                     '"先記":', 1)
+    return out
 
 
 def plan_rule(n):
@@ -808,9 +812,40 @@ class Tools(ExtraTools):
                 head += "上一輪沒照預期的：" + "；".join(f"{nm} 在「{pth}」→ 打開({pth}) 看同一格有沒有更合適的" for nm, pth in paths[:2])
         return head
 
+    tree_class = []          # 第 112 輪：他上一輪填的 問題類別（第一層名稱）
+
+    def set_tree_class(self, raw):
+        tree = load_tree()
+        got = []
+        for part in re.split(r"[、,，/／\s]+", str(raw or "")):
+            part = part.strip()
+            k = next((k for k in tree if part and (part == k or part in k or k in part)), None)
+            if not k and part:                            # 沒寫第一層名稱 → 字面最像的那一類（名稱＋說明＋子類名，至少撞 2 字）
+                sc = {kk: sum(1 for ch in set(part) if ch in kk + nn.get("說明", "") + "".join(nn.get("子", {}))) for kk, nn in tree.items()}
+                kk = max(sc, key=sc.get)
+                k = kk if sc[kk] >= 2 else None
+            if k and k not in got:
+                got.append(k)
+        self.tree_class = got[:2]
+        return self.tree_class
+
+    def tree_class_panel(self):
+        """他分類的那一類：每個第二層的工具名＋一句用途（不放例子；要例子再 打開）。"""
+        if not self.tree_class:
+            return "【你分類的問題】（上一輪沒填 問題類別；先分類這一輪的問題屬於哪一類，程式下一輪就把那一類的工具放進來）"
+        tree = load_tree()
+        byname = {t["名稱"]: t for t in self.cat["工具"]}
+        lines = []
+        for k in self.tree_class:
+            n = tree[k]
+            for k2, n2 in (n.get("子") or {"": n}).items():
+                tl = "；".join(f"{nm}＝{re.split(r'[：:。（(]', byname[nm]['用途'])[0][:28]}" for nm in n2.get("工具", []) if nm in byname)
+                lines.append(f"  {k}{'/' + k2 if k2 else ''}｜{tl}")
+        return (f"【你分類的問題：{'、'.join(self.tree_class)}】這一類有的工具（名字直接叫得到；要用法和例子就 打開(類/子類)）：" + NL + NL.join(lines))
+
     def tree_panel(self, last=None):
         keep = [n for n, r in self.tree_recent.items() if self.tree_round - r <= self.TREE_KEEP]
-        hint = self.tree_hint(last) + NL
+        hint = self.tree_class_panel() + NL + self.tree_hint(last) + NL
         if not keep:
             return hint + "【你打開的工具】（還沒打開過；要用工具先 打開(第一層名稱)）"
         byname = {t["名稱"]: t for t in self.cat["工具"]}
@@ -5815,6 +5850,9 @@ def main():
             if o2:
                 o, from_reason = o2, True
         seen, think = str(o.get("看到") or o.get("s") or "")[:80], str(o.get("想") or "")[:300]
+        q_class = str(o.get("問題類別") or "")[:60]
+        if TOOL_TREE["開"]:
+            tools.set_tree_class(q_class)
         calls = o.get("用") or o.get("a") or []
         if isinstance(calls, str):
             calls = [calls]
@@ -5927,7 +5965,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

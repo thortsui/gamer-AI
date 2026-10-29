@@ -1249,5 +1249,16 @@ check("場景切換：收掉小任務（留在 small_prev）、回傳寫原因�
 _r = _t111.run("研究任務", {})
 check("研究任務：大任務／小任務做法＋現況", "每一輪的目標是現在的小任務" in _r and "現況：大任務" in _r, _r[:200])
 check("screen_busy：全黑＝忙、亮的沒字＝不忙", T.screen_busy(Image.new("RGB", (64, 36), (2, 2, 2))) and not T.screen_busy(Image.new("RGB", (64, 36), (150, 150, 150))))
+# 第 112 輪：先分類問題 → 下一輪預先載入那一類的工具
+T.TOOL_TREE["開"] = True
+check("樹模式 JSON 有 問題類別 欄、在 先記 前面", '"問題類別":"先分類' in T.slim_format(T.plan_format(2)) and T.slim_format(T.plan_format(2)).find('"問題類別"') < T.slim_format(T.plan_format(2)).find('"先記"'))
+T.TOOL_TREE["開"] = False
+check("全列模式沒有 問題類別 欄", '"問題類別"' not in T.slim_format(T.plan_format(2)))
+_t112 = T.Tools("動物醫院", _c111, live=False, image_path=None)
+check("問題類別 認第一層名稱（最多 2 個）", _t112.set_tree_class("移動與視角、互動、查") == ["移動與視角", "互動"])
+_p = _t112.tree_class_panel()
+check("預先載入：每個子類列工具名＋一句用途、叫他要例子再打開", "移動與視角/走去目標｜走過去＝" in _p and "互動/按鍵｜按＝" in _p and "打開(類/子類)" in _p, _p[:200])
+check("沒寫第一層名稱 → 字面最像的（走路→移動與視角）", _t112.set_tree_class("走路") == ["移動與視角"] and _t112.set_tree_class("xyz") == [])
+check("沒填 → 提示先分類", "上一輪沒填 問題類別" in _t112.tree_class_panel())
 T.SLIM["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
