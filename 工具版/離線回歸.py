@@ -1111,7 +1111,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋互動沒效果 4）", len(_ex101) == 437, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4）", len(_ex101) == 437, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1304,9 +1304,21 @@ check("任務字換／換場景／設小任務＝有效果 → 清空", not _t11
 _t114.small = {"名稱": "瞬間移動", "怎麼做": "長按E", "開始": "19:00", "開始秒": 0, "輪": 5, "✗": 3, "檢討": 2, "上次更新": 0}
 for _ in range(3):
     _t114.interact_track(["長按(e,1.5)"], _a114, False)
-_r = _t114.interact_fail("瞬間移動 那裡", auto=True)
-check("互動沒效果：收小任務、記互動物、回傳寫 bug／換任務／附近看", _t114.small is None and "bug" in _r and "換一件小任務" in _r and "附近" in _r
-      and "瞬間移動 那裡｜功能:互動 3 次沒有真正的效果" in open(os.path.join(_t114.mdir, "互動物.md"), encoding="utf-8").read(), _r[:200])
-check("互動沒效果 在工具樹", "互動沒效果" in T.load_tree()["任務流程"]["子"]["出事"]["工具"] and any(t["名稱"] == "互動沒效果" for t in T.load_catalog("動物醫院")["工具"]))
+_r = _t114.unexpected("瞬間移動 那裡", auto=True)
+check("不合預期（互動超過兩次備援）：收小任務、記卡法、回報可能有問題、換任務重新觀察", _t114.small is None and "可能有問題" in _r and "換一件小任務" in _r and "重新觀察" in _r
+      and "瞬間移動 那裡" in open(os.path.join(_t114.mdir, "卡法.md"), encoding="utf-8").read(), _r[:200])
+_t114.mismatch_log = {}
+_tr, _h = _t114.mismatch_track(["走(0.5)", "長按(e,1.5)"], [True, False], _a114, False)
+check("不合預期第 1 次（長按 false）→ 只提示再檢查一次", _tr is None and len(_h) == 1 and "再檢查一次" in _h[0])
+_tr, _h = _t114.mismatch_track(["長按(e,1.5)", "走(0.5)"], [False, False], _a114, False)
+check("同類同地方第 2 次 → 觸發（互動）；走 第 1 次只提示", _tr and _tr[0] == "互動" and any("走(0.5)" in x for x in _h))
+_tr, _h = _t114.mismatch_track(["走(0.5)"], [False], _b114, False)
+check("換了地方重新數", _tr is None and len(_t114.mismatch_log["移動"]) == 1)
+_tr, _h = _t114.mismatch_track(["走(0.5)"], [False], _b114, True)
+check("有真正的效果 → 清空", _tr is None and _t114.mismatch_log == {})
+check("按(1)、按(esc) 不算互動類", _t114._kind("按(1)") is None and _t114._kind("按(esc)") is None and _t114._kind("按(e)") == "互動")
+check("不合預期 在目錄與工具樹（互動沒效果 改名）", "不合預期" in T.load_tree()["任務流程"]["子"]["出事"]["工具"]
+      and any(t["名稱"] == "不合預期" and t["實作"] == "unexpected" for t in T.load_catalog("動物醫院")["工具"])
+      and not any(t["名稱"] == "互動沒效果" for t in T.load_catalog("動物醫院")["工具"]))
 T.SLIM["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

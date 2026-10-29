@@ -739,25 +739,72 @@ class Tools(ExtraTools):
         self.inter_log += [(now, str(a)[:30], f) for a in acts]
         return len(self.inter_log) > self.INTERACT_LIMIT
 
-    def interact_fail(self, 哪裡="", 做了什麼="", auto=False):
-        """互動沒效果：收掉小任務、記成互動物（可能是 bug／條件還沒達成）、請他換任務去附近看看。"""
+    # 10/29 22:3x 使用者改名「不合預期」並放寬：「互動、移動的結果和他的想法完全不符合（例如應該要前進卻沒有動、按互動要開門門卻沒有開）
+    #   就需要再次檢查是否有問題；如果還有問題就回報說這個地方可能有問題，先去換個任務重新觀察後再執行」
+    #   → 他填 false 的步：同一類動作在同一個地方第 1 次＝面板請他再檢查一次；第 2 次（還是不合）＝程式叫 不合預期。
+    KIND_OF = {**{n: "移動" for n in ("走", "退", "左移", "右移", "跳", "走過去", "走到有變化", "拆兩段", "走到", "走到記過的", "到標點")},
+               **{n: "轉頭" for n in ("轉", "慢慢轉", "視角移動到", "仰", "修水平")},
+               **{n: "互動" for n in ("長按", "按", "點", "點字", "確認點")}}
+    mismatch_log = {}             # 類別 → [(時間, 動作, 特徵)]
+
+    def _kind(self, call):
+        n = re.split(r"[(（]", str(call).replace(" ", ""))[0]
+        if n == "按" and not self._is_interact(call):
+            return None                                 # 按(1)、按(esc) 不算互動
+        return self.KIND_OF.get(n)
+
+    def mismatch_track(self, steps, flags, im, real_effect):
+        """他填 false 的步記下來：同類同地方第 1 次回提示、第 2 次回 (類別, 紀錄) 要觸發 不合預期。"""
+        if real_effect:
+            self.mismatch_log = {}
+            return None, []
+        if im is None:
+            return None, []
+        f = SceneMemory.feat(im)
+        now = datetime.now().strftime("%H:%M")
+        hints, trig = [], None
+        for call, flag in zip(steps, flags):
+            k = self._kind(call)
+            if flag is not False or not k:
+                continue
+            lst = self.mismatch_log.get(k, [])
+            if lst and SceneMemory.sim(f, lst[0][2]) < self.INTERACT_SAME:
+                lst = []                                # 換了地方，重新數
+            lst.append((now, str(call)[:30], f))
+            self.mismatch_log[k] = lst
+            if len(lst) >= 2:
+                trig = (k, lst)
+            else:
+                hints.append(f"「{str(call)[:30]}」（{k}）跟你預期的不一樣 → 這一輪再檢查一次：同樣再做一次，或換個角度／距離確認是不是真的沒效果；"
+                             "如果還是不合，程式會幫你回報這個地方可能有問題")
+        return trig, hints
+
+    def unexpected(self, 哪裡="", 做了什麼="", auto=False, 類別=""):
+        """不合預期：回報這個地方可能有問題、收掉小任務、記卡法、請他換任務重新觀察後再執行。"""
         where = str(哪裡).strip() or "這個地方"
-        log = list(self.inter_log)
+        kind = str(類別).strip()
+        log = list(self.mismatch_log.get(kind, [])) if kind else list(self.inter_log)
         did = str(做了什麼).strip() or ("、".join(f"{t} {a}" for t, a, _ in log[-6:]) if log else "（你說的）")
-        n = len(log) or 3
-        out = [f"【互動沒效果】{datetime.now().strftime('%H:%M')} 你在{where}互動了 {n} 次（{did}），任務字沒換、場景也沒換＝沒有真正的效果"
+        n = len(log) or 2
+        out = [f"【不合預期】{datetime.now().strftime('%H:%M')} 你在{where}{('做' + kind) if kind else ''} {n} 次都跟你預期的不一樣（{did}）；再檢查過了還是不合"
                + ("（程式偵測到、自動幫你叫的）" if auto else "")]
-        out.append("想一想：這可能是遊戲的 bug、條件還沒達成（例如要先做別的事、要別人一起），或這裡本來就不能用——不是一直重按就會好。")
+        out.append("回報：這個地方可能有問題——可能是遊戲的 bug、條件還沒達成（例如要先做別的事、要別人一起），或這裡本來就不能這樣做；不是一直重做就會好。")
         sm = getattr(self, "small", None)
         if sm:
             self.small_prev = dict(sm, 換掉=time.time())
             self.small = None
-            self._append("小任務.md", f"互動沒效果收掉:{sm['名稱']}｜{sm['輪']} 輪、✗{sm['✗']}、檢討{sm['檢討']}")
-            out.append(f"你的小任務「{sm['名稱']}」先收掉了（之後要回來再 設小任務 設回來）")
-        self._append("互動物.md", f"{where}｜功能:互動 {n} 次沒有真正的效果（任務字、場景都沒變；可能是 bug、條件還沒達成或本來就不能用）｜用法:先換別的任務、去附近看看，之後再回來試")
-        out.append("接著：換一件小任務，去附近重新看看（看四周、描述畫面），找還沒試過的東西；用 設小任務 定下來。")
+            self._append("小任務.md", f"不合預期收掉:{sm['名稱']}｜{sm['輪']} 輪、✗{sm['✗']}、檢討{sm['檢討']}")
+            out.append(f"你的小任務「{sm['名稱']}」先收掉了（重新觀察後要回來再 設小任務 設回來）")
+        self._append("卡法.md", f"情況:{where}{kind}不合預期 {n} 次（{did[:60]}）｜解法:這裡可能有問題（bug／條件還沒達成），先換一件任務、重新觀察後再回來執行")
+        out.append("接著：先換一件小任務，重新觀察附近（看四周、描述畫面），找還沒試過的東西；觀察完再決定要不要回來執行。用 設小任務 定下來。")
         self.inter_log = []
+        if kind:
+            self.mismatch_log.pop(kind, None)
         return NL.join(out)
+
+    def interact_fail(self, 哪裡="", 做了什麼="", auto=False):
+        """（舊名，第 114 輪 互動沒效果）→ 不合預期"""
+        return self.unexpected(哪裡, 做了什麼, auto)
 
     # ---- 10/29 16:1x 使用者重排：場景切換（預期中的也算；量測不再是他的工具）、研究任務
     switch_pending, switch_wait = "", 0
@@ -5817,12 +5864,19 @@ def main():
         _last = history[-1] if history else {}
         _calls = list(_last.get("用") or [])
         _real = (bool(task_ev) or any(e.startswith(("死亡", "換場景")) for e in events)
-                 or any(str(c).startswith(("設小任務", "場景切換", "互動沒效果")) for c in _calls))
+                 or any(str(c).startswith(("設小任務", "場景切換", "互動沒效果", "不合預期")) for c in _calls))
         inter_txt = ""
-        if tools.interact_track(_calls, im, _real):      # 第 114 輪：同一個地方互動超過兩次都沒有真正的效果 → 程式幫他叫 互動沒效果
-            _m = re.search(r"[「\"]([^」\"]{1,10})[」\"]", str(_last.get("看到", "")))
-            inter_txt = tools.interact_fail((_m.group(1) + " 那裡") if _m else "", auto=True)
+        _flags = list(_last.get("符合") or [])
+        _steps = _calls[-len(_flags):] if _flags else []
+        _trig, _hints = tools.mismatch_track(_steps, _flags, im, _real)   # 第 114 輪：不合預期（他填 false 的步）
+        _many = tools.interact_track(_calls, im, _real)                    # 備援：同地方互動超過兩次都沒有真正的效果
+        _m = re.search(r"[「\"]([^」\"]{1,10})[」\"]", str(_last.get("看到", "")))
+        _where = (_m.group(1) + " 那裡") if _m else ""
+        if _trig or _many:
+            inter_txt = tools.unexpected(_where, auto=True, 類別=(_trig[0] if _trig else ""))
             print("   🔁 " + inter_txt.split(NL)[0][:160], flush=True)
+        elif _hints:
+            inter_txt = "【不合預期：再檢查一次】" + "；".join(_hints)
         tools.scene_mem.update(im, events)               # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的
         if SLIM["開"]:                                    # 第 111 輪：改成下一輪開頭程式自動 場景切換（收小任務＋翻紀錄＋重量），結果放這裡
             scene_ev = [e for e in events if e.startswith(("死亡", "換場景"))]
@@ -6035,7 +6089,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "互動沒效果": bool(inter_txt), "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "不合預期": inter_txt.split(NL)[0][:40] if inter_txt else "", "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},
