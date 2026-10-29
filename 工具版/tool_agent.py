@@ -746,6 +746,8 @@ class Tools(ExtraTools):
                **{n: "轉頭" for n in ("轉", "慢慢轉", "視角移動到", "仰", "修水平")},
                **{n: "互動" for n in ("長按", "按", "點", "點字", "確認點")}}
     mismatch_log = {}             # 類別 → [(時間, 動作, 特徵)]
+    MISMATCH_COOL = 6             # 10/30 01:3x：觸發後同一類 6 輪內不再觸發（23:42～01:33 觸發 10 次、每次都收小任務＋寫卡法）
+    mismatch_cool = {}            # 類別 → 觸發時的輪
 
     def _kind(self, call):
         n = re.split(r"[(（]", str(call).replace(" ", ""))[0]
@@ -756,7 +758,7 @@ class Tools(ExtraTools):
     def mismatch_track(self, steps, flags, im, real_effect):
         """他填 false 的步記下來：同類同地方第 1 次回提示、第 2 次回 (類別, 紀錄) 要觸發 不合預期。"""
         if real_effect:
-            self.mismatch_log = {}
+            self.mismatch_log, self.mismatch_cool = {}, {}
             return None, []
         if im is None:
             return None, []
@@ -773,7 +775,7 @@ class Tools(ExtraTools):
                 lst = []                                # 換了地方，重新數
             lst.append((now, _call_txt(call), f))
             self.mismatch_log[k] = lst
-            if len(lst) >= 2:
+            if len(lst) >= 2 and self.tree_round - self.mismatch_cool.get(k, -99) > self.MISMATCH_COOL:
                 trig = (k, lst)
             else:
                 hints.append(f"「{_call_txt(call)}」（{k}）跟你預期的不一樣 → 這一輪再檢查一次：同樣再做一次，或換個角度／距離確認是不是真的沒效果；"
@@ -796,7 +798,19 @@ class Tools(ExtraTools):
             self.small = None
             self._append("小任務.md", f"不合預期收掉:{sm['名稱']}｜{sm['輪']} 輪、✗{sm['✗']}、檢討{sm['檢討']}")
             out.append(f"你的小任務「{sm['名稱']}」先收掉了（重新觀察後要回來再 設小任務 設回來）")
-        self._append("卡法.md", f"情況:{where}{kind}不合預期 {n} 次（{did[:60]}）｜解法:這裡可能有問題（bug／條件還沒達成），先換一件任務、重新觀察後再回來執行")
+        key = f"{where}{kind}不合預期"
+        recent = [l for l in self._mem_lines("卡法.md", tail=30) if key in l]
+        dup = False
+        for l in recent[-1:]:                           # 10/30 01:3x：同地方同類 30 分鐘內記過就不再寫一條
+            m = re.match(r"(\d\d/\d\d \d\d:\d\d)", l)
+            try:
+                dup = bool(m) and (datetime.now() - datetime.strptime(f"{datetime.now().year}/{m.group(1)}", "%Y/%m/%d %H:%M")).total_seconds() < 1800
+            except ValueError:
+                dup = False
+        if not dup:
+            self._append("卡法.md", f"情況:{key} {n} 次（{did[:60]}）｜解法:這裡可能有問題（bug／條件還沒達成），先換一件任務、重新觀察後再回來執行")
+        if kind:
+            self.mismatch_cool[kind] = self.tree_round
         out.append("接著：先換一件小任務，重新觀察附近（看四周、描述畫面），找還沒試過的東西；觀察完再決定要不要回來執行。用 設小任務 定下來。")
         self.inter_log = []
         if kind:

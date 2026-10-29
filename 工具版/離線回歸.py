@@ -1319,6 +1319,16 @@ check("有真正的效果 → 清空", _tr is None and _t114.mismatch_log == {})
 _t114.mismatch_log = {}
 _tr, _h = _t114.mismatch_track(['右移({"秒": "0.6"})', '走過去({"目標": "0.65"})'], [False, False], _a114, False)
 check("同一輪兩步同類都 false 只算一次（不跳過再檢查）、動作字顯示成 右移(0.6)", _tr is None and len(_t114.mismatch_log["移動"]) == 1 and "右移(0.6)" in _h[0], (_tr, _h))
+_t114.mismatch_log, _t114.mismatch_cool = {}, {}; _t114.tree_round = 100
+_t114.mismatch_track(["走(0.5)"], [False], _a114, False); _tr, _ = _t114.mismatch_track(["走(0.5)"], [False], _a114, False)
+_r1 = _t114.unexpected("門口", auto=True, 類別="移動"); _n1 = open(os.path.join(_t114.mdir, "卡法.md"), encoding="utf-8").read().count("門口移動不合預期")
+_t114.tree_round = 103
+_t114.mismatch_track(["走(0.5)"], [False], _a114, False); _tr2, _ = _t114.mismatch_track(["走(0.5)"], [False], _a114, False)
+check("觸發後同類 6 輪內不再觸發", _tr and _tr2 is None, (_tr, _tr2))
+_t114.tree_round = 110
+_tr3, _ = _t114.mismatch_track(["走(0.5)"], [False], _a114, False)
+_t114.unexpected("門口", auto=True, 類別="移動")
+check("冷卻過了再觸發；同地方同類 30 分鐘內卡法不重複寫", _tr3 and _n1 == 1 and open(os.path.join(_t114.mdir, "卡法.md"), encoding="utf-8").read().count("門口移動不合預期") == 1, (_tr3, _n1))
 check("按(1)、按(esc) 不算互動類", _t114._kind("按(1)") is None and _t114._kind("按(esc)") is None and _t114._kind("按(e)") == "互動")
 check("不合預期 在目錄與工具樹、沒有 互動沒效果 這個工具", "不合預期" in T.load_tree()["任務流程"]["子"]["出事"]["工具"]
       and any(t["名稱"] == "不合預期" and t["實作"] == "unexpected" for t in T.load_catalog("動物醫院")["工具"])
