@@ -708,6 +708,57 @@ class Tools(ExtraTools):
     def doc_list(self, 類別=""):
         return NL.join(catalog_lines(self.cat, str(類別).strip() or None)) or "沒有這一類"
 
+    # ---- 第 114 輪（10/29 22:3x 使用者）：「互動了卻沒有用或卡住定在原地…同一個地方互動超過兩次卻都沒有真正的效果，
+    #      就該思考這是不是遊戲的 bug 或其他問題而導致不能用，這個時候就該切換任務再去附近重新看看」
+    #      起因：使用者實測大廳「瞬間移動」E 按了真的沒用，他 18:56 後在那裡長按 13 次以上、卡 3 小時。
+    INTERACT_NAMES = ("長按", "確認點", "點字", "點")
+    INTERACT_LIMIT = 2            # 同一個地方超過 2 次（第 3 次）就觸發
+    INTERACT_SAME = 0.75          # 畫面顏色分布相似 ≥0.75 算同一個地方
+    inter_log = []                # [(時間, 動作, 特徵)]
+
+    @staticmethod
+    def _is_interact(call):
+        c = str(call).replace(" ", "")
+        n = re.split(r"[(（]", c)[0]
+        if n == "按":
+            return bool(re.match(r"按[(（]['\"]?[eE]['\"]?[)）,，]", c))
+        return n in Tools.INTERACT_NAMES
+
+    def interact_track(self, calls, im, real_effect):
+        """每輪呼叫：上一輪的互動動作記下來；任務字換、換場景、換了小任務＝有真正的效果 → 清空。回傳要不要觸發。"""
+        if real_effect:
+            self.inter_log = []
+            return False
+        acts = [c for c in (calls or []) if self._is_interact(c)]
+        if not acts or im is None:
+            return False
+        f = SceneMemory.feat(im)
+        if self.inter_log and SceneMemory.sim(f, self.inter_log[0][2]) < self.INTERACT_SAME:
+            self.inter_log = []                         # 換了地方，重新數
+        now = datetime.now().strftime("%H:%M")
+        self.inter_log += [(now, str(a)[:30], f) for a in acts]
+        return len(self.inter_log) > self.INTERACT_LIMIT
+
+    def interact_fail(self, 哪裡="", 做了什麼="", auto=False):
+        """互動沒效果：收掉小任務、記成互動物（可能是 bug／條件還沒達成）、請他換任務去附近看看。"""
+        where = str(哪裡).strip() or "這個地方"
+        log = list(self.inter_log)
+        did = str(做了什麼).strip() or ("、".join(f"{t} {a}" for t, a, _ in log[-6:]) if log else "（你說的）")
+        n = len(log) or 3
+        out = [f"【互動沒效果】{datetime.now().strftime('%H:%M')} 你在{where}互動了 {n} 次（{did}），任務字沒換、場景也沒換＝沒有真正的效果"
+               + ("（程式偵測到、自動幫你叫的）" if auto else "")]
+        out.append("想一想：這可能是遊戲的 bug、條件還沒達成（例如要先做別的事、要別人一起），或這裡本來就不能用——不是一直重按就會好。")
+        sm = getattr(self, "small", None)
+        if sm:
+            self.small_prev = dict(sm, 換掉=time.time())
+            self.small = None
+            self._append("小任務.md", f"互動沒效果收掉:{sm['名稱']}｜{sm['輪']} 輪、✗{sm['✗']}、檢討{sm['檢討']}")
+            out.append(f"你的小任務「{sm['名稱']}」先收掉了（之後要回來再 設小任務 設回來）")
+        self._append("互動物.md", f"{where}｜功能:互動 {n} 次沒有真正的效果（任務字、場景都沒變；可能是 bug、條件還沒達成或本來就不能用）｜用法:先換別的任務、去附近看看，之後再回來試")
+        out.append("接著：換一件小任務，去附近重新看看（看四周、描述畫面），找還沒試過的東西；用 設小任務 定下來。")
+        self.inter_log = []
+        return NL.join(out)
+
     # ---- 10/29 16:1x 使用者重排：場景切換（預期中的也算；量測不再是他的工具）、研究任務
     switch_pending, switch_wait = "", 0
 
@@ -5763,6 +5814,15 @@ def main():
             events.append("死亡：你上一輪在想的時候，畫面出現過「" + _dead[0][1] + "」")
         if any(h[1] == ThinkWatch.DARK for h in think_hits) and not any(e.startswith("換場景") for e in events):
             events.append("換場景：你上一輪在想的時候畫面全黑過（可能在載入、換地方、重新開局）")   # 第 109 輪
+        _last = history[-1] if history else {}
+        _calls = list(_last.get("用") or [])
+        _real = (bool(task_ev) or any(e.startswith(("死亡", "換場景")) for e in events)
+                 or any(str(c).startswith(("設小任務", "場景切換", "互動沒效果")) for c in _calls))
+        inter_txt = ""
+        if tools.interact_track(_calls, im, _real):      # 第 114 輪：同一個地方互動超過兩次都沒有真正的效果 → 程式幫他叫 互動沒效果
+            _m = re.search(r"[「\"]([^」\"]{1,10})[」\"]", str(_last.get("看到", "")))
+            inter_txt = tools.interact_fail((_m.group(1) + " 那裡") if _m else "", auto=True)
+            print("   🔁 " + inter_txt.split(NL)[0][:160], flush=True)
         tools.scene_mem.update(im, events)               # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的
         if SLIM["開"]:                                    # 第 111 輪：改成下一輪開頭程式自動 場景切換（收小任務＋翻紀錄＋重量），結果放這裡
             scene_ev = [e for e in events if e.startswith(("死亡", "換場景"))]
@@ -5815,6 +5875,7 @@ def main():
         # 10/28 01:1x 使用者實驗：最重要那塊（大任務／小任務／任務字／上一輪結果）放 頭／中／尾，其他段落順序不變
         key_txt = ("【這一輪最重要的：大任務、小任務、任務字、上一輪結果】" + NL
                    + scene_txt
+                   + ((inter_txt + NL) if inter_txt else "")
                    + ((mem_txt + NL) if mem_txt else "")
                    + "【大任務】（一個段落；目標）" + big_txt + NL
                    + "【前面完成的小任務】" + NL + tools.small_lines() + NL
@@ -5974,7 +6035,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "互動沒效果": bool(inter_txt), "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

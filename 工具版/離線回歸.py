@@ -1111,7 +1111,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4）", len(_ex101) == 433, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋互動沒效果 4）", len(_ex101) == 437, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1289,5 +1289,24 @@ check("照他寫的：互動物刪 I2 留 I1", open(os.path.join(_d113, "互動�
 check("改之前有備份、有記憶檢查.md、回傳寫刪幾條加幾條", os.listdir(os.path.join(_d113, "記憶檢查_備份")) and os.path.exists(os.path.join(_d113, "記憶檢查.md")) and "刪掉 3 條、新增 1 條" in _r, _r[:200])
 check("分批：第 3 批沒解析出來也照前兩批改、回傳列每批秒數", "第 3 批" in _r and "沒解析出來" in _r, _r[-200:])
 check("全部記憶都給他看（含編號）、做過之後 2 小時內不到期", "R3 [準則]" in _seen["user"] and "I2 [互動物]" in _seen["user"] and not _t113.mem_check_due(99))
+# 第 114 輪：同一個地方互動超過兩次沒有真正的效果 → 互動沒效果（收小任務、記互動物、請他換任務去附近看）
+_t114 = T.Tools("動物醫院", _c111, live=False, image_path=None); _t114.mdir = _tf110.mkdtemp(); _t114.inter_log = []
+_a114 = Image.new("RGB", (160, 90), (120, 40, 40)); _b114 = Image.new("RGB", (160, 90), (40, 40, 160))
+check("互動動作判斷：長按、按(e)、確認點 算；按(1)、走 不算", T.Tools._is_interact("長按(e,1.5)") and T.Tools._is_interact("按(e)") and T.Tools._is_interact("確認點(審核)")
+      and not T.Tools._is_interact("按(1)") and not T.Tools._is_interact("走(0.5)"))
+check("同一個地方第 1、2 次不觸發", not _t114.interact_track(["走(0.5)", "長按(e,1.5)"], _a114, False) and not _t114.interact_track(["長按(e,1.5)"], _a114, False))
+check("第 3 次觸發", _t114.interact_track(["長按(e,1.5)"], _a114, False))
+_t114.inter_log = []
+_t114.interact_track(["長按(e,1.5)"], _a114, False); _t114.interact_track(["長按(e,1.5)"], _a114, False)
+check("換了地方重新數（不觸發）", not _t114.interact_track(["長按(e,1.5)"], _b114, False) and len(_t114.inter_log) == 1)
+_t114.interact_track(["長按(e,1.5)"], _b114, False)
+check("任務字換／換場景／設小任務＝有效果 → 清空", not _t114.interact_track(["長按(e,1.5)"], _b114, True) and _t114.inter_log == [])
+_t114.small = {"名稱": "瞬間移動", "怎麼做": "長按E", "開始": "19:00", "開始秒": 0, "輪": 5, "✗": 3, "檢討": 2, "上次更新": 0}
+for _ in range(3):
+    _t114.interact_track(["長按(e,1.5)"], _a114, False)
+_r = _t114.interact_fail("瞬間移動 那裡", auto=True)
+check("互動沒效果：收小任務、記互動物、回傳寫 bug／換任務／附近看", _t114.small is None and "bug" in _r and "換一件小任務" in _r and "附近" in _r
+      and "瞬間移動 那裡｜功能:互動 3 次沒有真正的效果" in open(os.path.join(_t114.mdir, "互動物.md"), encoding="utf-8").read(), _r[:200])
+check("互動沒效果 在工具樹", "互動沒效果" in T.load_tree()["任務流程"]["子"]["出事"]["工具"] and any(t["名稱"] == "互動沒效果" for t in T.load_catalog("動物醫院")["工具"]))
 T.SLIM["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
