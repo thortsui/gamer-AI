@@ -1187,5 +1187,8 @@ _t105.tree_round = 14
 check("超過 8 輪就收掉", "走過去(" not in _t105.tree_panel())
 _t105.run("等", {"秒": "0"}); _t105.tree_round = 15
 check("樹模式下 用過的工具也留在面板", "等(" in _t105.tree_panel(), _t105.tree_panel()[:200])
+check("叫錯工具名 按鍵(s,0.5) → 指到 互動/按鍵", "互動/按鍵" in T.tree_suggest("按鍵(s,0.5)"))
+check("後退 → 指到 走一段（有 退）", "走一段" in T.tree_suggest("後退(0.5)"))
+check("只撞到一個字（開門）→ 不亂指、叫他一層層找", "一層層找" in T.tree_suggest("開門"), T.tree_suggest("開門"))
 T.TOOL_TREE["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

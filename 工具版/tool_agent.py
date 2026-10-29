@@ -134,6 +134,23 @@ def load_tree():
         return {}
 
 
+def tree_suggest(text):
+    """工具樹實驗（10/29 09:3x）：叫了不存在的工具名（他 3 次寫 按鍵(s,0.5)，一次都沒 打開）→ 指出樹裡字面最像的那一格。"""
+    q = re.split(r"[(（]", str(text))[0].strip()
+    best, path = 0, None
+    for k, n in load_tree().items():
+        for k2, n2 in (n.get("子") or {"": n}).items():
+            hay = k + k2 + n2.get("說明", "") + "".join(n2.get("工具", []))
+            sc = sum(1 for c in set(q) if c in hay)
+            if any(t in q or q in t for t in n2.get("工具", []) if q):
+                sc += 2                                   # 工具名跟他寫的互相包含（後退 ⊃ 退）
+            if sc >= 2 and sc > best:
+                best, path = sc, (k + ("/" + k2 if k2 else ""), n2.get("工具", []))
+    if not path:
+        return "；不知道工具名就 打開(第一層名稱) 一層層找"
+    return f"；樹裡字面最像的是「{path[0]}」（{'、'.join(path[1])}）——要看用法就 打開({path[0]})"
+
+
 def tree_top_text(cat=None):
     tree = load_tree()
     lines = ["【工具樹】（這次實驗：工具不一次全列。要用工具先 打開(第一層名稱) 看下一層，再 打開(第一層/第二層) 列出那幾個工具的用法和例子；"
@@ -5681,7 +5698,8 @@ def main():
         def do(item, tag=""):
             name, params = parse_call(item, cat)
             if not name:
-                rets.append(f"✗ {tag}看不懂「{params}」（工具名要照清單）")
+                rets.append(f"✗ {tag}看不懂「{params}」（工具名要照清單）"
+                            + (tree_suggest(params) if TOOL_TREE["開"] else ""))
                 return f"看不懂「{params}」"
             LIVE["階段"] = "做"
             LIVE["做"].append({"工具": f"{tag}{name}", "參數": params, "預計": LIVE.pop("_預計", ""), "回傳": ""})
