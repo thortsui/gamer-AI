@@ -1175,6 +1175,153 @@ class ExtraTools:
         shutil.move(d, os.path.join(dst_dir, name + "_" + datetime.now().strftime("%m%d_%H%M%S")))
         return f"「{name}」的 {n} 張照片收起來了（移到 長相_已忘，之後 找長相／走過去 不會再用它）"
 
+    # ---------------- 第 113 輪：記憶檢查（10/29 16:3x 使用者「他需要定期去檢查他自己的記憶是否有混亂或者互斥，要定期全部檢查並且要修正」）
+    #   10/29 他 0 次叫 整理記憶、面板提示他沒理 → 改成程式定期停下來請他做。程式只做機械的事：全部編號列出＋標可疑的組；
+    #   哪些混亂／互斥、怎麼改由他決定，程式照他寫的刪／加（先備份）。
+    MEM_CHECK_FILES = (("I", "互動物.md", "互動物"), ("T", "觸碰物.md", "觸碰物"), ("N", "筆記.md", "筆記"), ("K", "卡法.md", "卡法"))
+    MEM_CHECK_MIN = 120
+
+    def mem_check_due(self, rnd):
+        try:
+            st = json.load(open(os.path.join(self.mdir, "記憶檢查.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            st = {}
+        if not st:
+            return rnd >= 5
+        return time.time() - st.get("時間戳", 0) >= self.MEM_CHECK_MIN * 60
+
+    def _mem_check_items(self):
+        items = []                                   # (編號, 類, 內容, 來源)
+        for i, r in enumerate(self._rules_load()):
+            items.append((f"R{i + 1}", "準則", f"{r.get('時間', '')} {r.get('對象', '')}｜{r.get('準則', '')}（照做 ✓{r.get('照做✓', 0)} ✗{r.get('照做✗', 0)}）", ("準則", i)))
+        for pre, fn, kind in self.MEM_CHECK_FILES:
+            for i, l in enumerate(self._mem_lines(fn, tail=100000)):
+                items.append((f"{pre}{i + 1}", kind, l, (fn, i)))
+        return items
+
+    def _mem_check_groups(self, items):
+        """可疑的組：同一個名稱／對象記了 2 條以上、準則照做多半 ✗、字面很像（bigram Jaccard ≥ 0.45）。只是提示。"""
+        out, name_of = [], {}
+        for code, kind, txt, _ in items:
+            body = re.sub(r"^\d\d/\d\d \d\d:\d\d\s*", "", txt)
+            name_of.setdefault((kind, body.split("｜")[0].strip()), []).append(code)
+        for (kind, name), codes in name_of.items():
+            if len(codes) >= 2 and name:
+                out.append(f"{kind}「{name}」{len(codes)} 條：{'、'.join(codes)}")
+        for code, kind, txt, _ in items:
+            m = re.search(r"✓(\d+) ✗(\d+)", txt)
+            if kind == "準則" and m and int(m.group(2)) >= 3 and int(m.group(2)) > 2 * int(m.group(1)):
+                out.append(f"{code} 照做多半 ✗（{m.group(0)}）")
+        bg = [(code, self._bg(re.sub(r"^\d\d/\d\d \d\d:\d\d\s*|（照做.*）$", "", txt))) for code, _, txt, _ in items]
+        seen = set()
+        for i, (a, ba) in enumerate(bg):
+            near = [b for b, bb in bg[i + 1:] if ba and bb and len(ba & bb) / max(1, len(ba | bb)) >= 0.45]
+            if near and a not in seen:
+                seen.update(near)
+                out.append(f"字面很像：{a}、{'、'.join(near[:5])}")
+        return out[:40]
+
+    # 10/29 16:40 實測：225 條一次給，中想 300 秒還在推理、沒輸出 → 分三批（編號照舊是全部的編號，跨批照樣刪得到）
+    MEM_CHECK_BATCHES = (("準則",), ("互動物", "觸碰物"), ("筆記", "卡法"))
+    MEM_CHECK_DEADLINE = 420
+
+    def mem_check(self):
+        items = self._mem_check_items()
+        if not items:
+            return ""
+        system = (self._identity() + NL + "現在是定期記憶檢查（使用者交代）：遊戲先停一下。把你自己記的全部看一遍，找出混亂、互斥、重複的，"
+                  "自己決定怎麼修正（刪掉、合併成一條清楚的）。只根據記憶和你玩過的經驗，不要編。")
+        merged, msgs, t0 = {"修正": [], "總結": [], "檢查了幾條": 0}, [], time.time()
+        for bi, kinds in enumerate(self.MEM_CHECK_BATCHES):
+            part = [x for x in items if x[1] in kinds]
+            if not part:
+                continue
+            groups = self._mem_check_groups(part)
+            listing = NL.join(f"{c} [{k}] {t[:110]}" for c, k, t, _ in part)
+            user = (f"【記憶檢查 第 {bi + 1}/{len(self.MEM_CHECK_BATCHES)} 批：你記的{'、'.join(kinds)}，共 {len(part)} 條】（編號：R 準則、I 互動物、T 觸碰物、N 筆記、K 卡法）" + NL + listing + NL * 2
+                    + "【程式找到的可疑組（只是提示，不一定真的有問題；沒列到的你也要看）】" + NL + (NL.join("- " + g for g in groups) or "（沒有）") + NL * 2
+                    + "逐條全部看過，找出 ①互相矛盾（一條說要、一條說不要；同一個東西兩種說法）②重複（同一件事記了好幾條）③混亂（寫錯、說不清、跟後來發現的事實不合、照做多半 ✗）。"
+                      "每一組決定怎麼改：刪掉哪幾條、要不要換成一條新的、說清楚的。沒問題的不用列。只輸出 JSON：" + NL
+                    + '{"檢查了幾條":0,"修正":[{"編號":["R3","R7"],"問題":"矛盾／重複／混亂：哪裡衝突","改成":{"類":"準則或互動物或觸碰物或筆記或卡法",'
+                      '"內容":"準則寫 對象｜要…；互動物寫 名稱｜功能:…｜用法:…；不需要新的就寫空字串"}}],"總結":"一句"}')
+            tb = time.time()
+            try:
+                o, raw = self._ask(system, user, effort="中想", max_tokens=8000, deadline=self.MEM_CHECK_DEADLINE)
+            except Exception as e:  # noqa: BLE001
+                o, raw = {}, str(e)
+            if isinstance(o, dict) and o:
+                merged["修正"] += [f for f in (o.get("修正") or []) if isinstance(f, dict)]
+                merged["總結"].append(str(o.get("總結", ""))[:80])
+                try:
+                    merged["檢查了幾條"] += int(o.get("檢查了幾條") or 0)
+                except (TypeError, ValueError):
+                    pass
+                msgs.append(f"第 {bi + 1} 批 {'、'.join(kinds)} {len(part)} 條：{time.time() - tb:.0f} 秒")
+            else:
+                msgs.append(f"第 {bi + 1} 批 {'、'.join(kinds)} {len(part)} 條：{time.time() - tb:.0f} 秒沒解析出來")
+        dt = time.time() - t0
+        st = {"時間": datetime.now().strftime("%m/%d %H:%M"), "時間戳": time.time(), "條數": len(items)}
+        try:
+            json.dump(st, open(os.path.join(self.mdir, "記憶檢查.json"), "w", encoding="utf-8"), ensure_ascii=False)
+        except OSError:
+            pass
+        merged["總結"] = "；".join(x for x in merged["總結"] if x)
+        if not merged["修正"] and all("沒解析出來" in m for m in msgs):
+            self._append("記憶檢查.md", "全部沒解析出來｜" + "；".join(msgs))
+            return f"【記憶檢查】{st['時間']} 沒解析出來（{'；'.join(msgs)}），下次再做"
+        return self._mem_check_apply(merged, items, dt) + NL + "（" + "；".join(msgs) + "）"
+
+    def _mem_check_apply(self, o, items, dt=0.0):
+        by = {c: src for c, _, _, src in items}
+        fixes = [f for f in (o.get("修正") or []) if isinstance(f, dict)][:30]
+        dels = {}
+        adds = []
+        log = []
+        for f in fixes:
+            codes = [str(c).strip().upper() for c in (f.get("編號") or []) if str(c).strip().upper() in by]
+            for c in codes:
+                fn, i = by[c]
+                dels.setdefault(fn, set()).add(i)
+            new = f.get("改成") if isinstance(f.get("改成"), dict) else {}
+            kind, body = str(new.get("類") or "").strip(), str(new.get("內容") or "").strip()
+            if body:
+                adds.append((kind, body))
+            log.append(f"{'、'.join(codes) or '（沒對上編號）'}｜{str(f.get('問題', ''))[:60]}｜→ {(kind + '：' + body)[:80] if body else '刪掉'}")
+        bak = os.path.join(self.mdir, "記憶檢查_備份", datetime.now().strftime("%m%d_%H%M%S"))
+        os.makedirs(bak, exist_ok=True)
+        for fn in ["準則.json"] + [x[1] for x in self.MEM_CHECK_FILES]:
+            p = os.path.join(self.mdir, fn)
+            if os.path.exists(p):
+                shutil.copy2(p, bak)
+        n_del = 0
+        if dels.get("準則"):
+            rules = self._rules_load()
+            keep = [r for i, r in enumerate(rules) if i not in dels["準則"]]
+            n_del += len(rules) - len(keep)
+            self._rules_save(keep)
+        for _, fn, _ in self.MEM_CHECK_FILES:
+            if dels.get(fn):
+                p = os.path.join(self.mdir, fn)
+                raw_lines = [l for l in open(p, encoding="utf-8").read().splitlines() if l.strip()]
+                keep = [l for i, l in enumerate(raw_lines) if i not in dels[fn]]
+                n_del += len(raw_lines) - len(keep)
+                open(p, "w", encoding="utf-8").write(NL.join(keep) + (NL if keep else ""))
+        now = datetime.now().strftime("%m/%d %H:%M")
+        for kind, body in adds:
+            if kind == "準則" or (not kind and "｜" in body and not body.startswith(("功能", "用法"))):
+                obj, _, rule = body.partition("｜")
+                rules = self._rules_load()
+                rules.append({"對象": obj.strip()[:30], "準則": (rule or body).strip()[:200], "時間": now, "次數": 1, "來源": "記憶檢查"})
+                self._rules_save(rules)
+            else:
+                fn = {"互動物": "互動物.md", "觸碰物": "觸碰物.md", "筆記": "筆記.md", "卡法": "卡法.md"}.get(kind, "筆記.md")
+                self._append(fn, body)
+        self._append("記憶檢查.md", f"檢查 {len(items)} 條（他說看了 {o.get('檢查了幾條', '?')}）、修正 {len(fixes)} 組、刪 {n_del} 條、新增 {len(adds)} 條、{dt:.0f} 秒｜"
+                     + str(o.get("總結", ""))[:100] + NL + NL.join("  - " + x for x in log))
+        return (f"【記憶檢查】{now} 你把 {len(items)} 條記憶全部檢查過：修正 {len(fixes)} 組、刪掉 {n_del} 條、新增 {len(adds)} 條"
+                f"（改之前的備份在 記憶檢查_備份/）。" + (NL + NL.join("・" + x for x in log[:8]) if log else "（你沒有找到要修的）")
+                + NL + "總結：" + str(o.get("總結", ""))[:120])
+
     def mem_touch(self, 名稱="", 功能="", 用法=""):
         return self._append("觸碰物.md", f"{名稱}｜站上去:{功能}｜{用法}")
 

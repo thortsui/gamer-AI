@@ -5562,6 +5562,7 @@ def main():
     # 10/28 01:1x 使用者實驗「context 順序差異：重要的事情在頭／中／尾，看哪個任務成功率最高」
     ap.add_argument("--ctx-order", default="頭", choices=["頭", "中", "尾"], help="面板裡最重要那塊（大任務／小任務／任務字／上一輪結果）放頭、中、尾")
     ap.add_argument("--ctx-rotate", type=int, default=0, help="每 N 分鐘輪流 頭→中→尾（0＝固定用 --ctx-order）；每輪紀錄寫 順序 欄")
+    ap.add_argument("--mem-check", type=int, default=0, help="10/29 16:3x 使用者「定期全部檢查記憶有沒有混亂、互斥，並且修正」：每 N 分鐘程式停下來請他做記憶檢查（0＝不做）")
     ap.add_argument("--slim-system", action="store_true", help="10/29 16:1x 使用者重排 system（只留身分／絕對限制／工具／兩步規劃＋格式；場景切換 自動、研究任務）")
     ap.add_argument("--tool-tree", action="store_true", help="10/29 實驗：工具樹（system 只列第一層，打開(路徑) 一層層往下找）")
     ap.add_argument("--tree-rotate", type=int, default=0, help="10/29 實驗：每 N 分鐘輪流 工具樹→全列（從 --tree-t0 起算，第一段是樹）；jsonl 寫 工具模式")
@@ -5771,6 +5772,13 @@ def main():
             scene_txt = (switch_txt + NL) if switch_txt else ""
         else:
             scene_txt = tools.scene_mem.panel(im, tools.small)
+        mem_txt = ""
+        if args.mem_check > 0:                            # 第 113 輪：定期記憶檢查（程式停下來請他全部檢查、自己修正）
+            tools.MEM_CHECK_MIN = args.mem_check
+            if tools.mem_check_due(rnd):
+                print("   🧹 記憶檢查（全部看過、找混亂／互斥／重複、自己修正）…", flush=True)
+                mem_txt = tools.mem_check()
+                print("   🧹 " + (mem_txt.split(NL)[0][:160] if mem_txt else "沒有記憶可檢查"), flush=True)
         up_reason = "" if args.no_small_update else tools.small_update_reason(events)
         if up_reason:                                     # 10/21：出現變動就重新想任務＋定期小任務更新
             small_up = tools.small_update(up_reason, im, history, task_words)
@@ -5807,6 +5815,7 @@ def main():
         # 10/28 01:1x 使用者實驗：最重要那塊（大任務／小任務／任務字／上一輪結果）放 頭／中／尾，其他段落順序不變
         key_txt = ("【這一輪最重要的：大任務、小任務、任務字、上一輪結果】" + NL
                    + scene_txt
+                   + ((mem_txt + NL) if mem_txt else "")
                    + "【大任務】（一個段落；目標）" + big_txt + NL
                    + "【前面完成的小任務】" + NL + tools.small_lines() + NL
                    + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
@@ -5965,7 +5974,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

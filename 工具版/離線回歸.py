@@ -1260,5 +1260,34 @@ _p = _t112.tree_class_panel()
 check("預先載入：每個子類列工具名＋一句用途、叫他要例子再打開", "移動與視角/走去目標｜走過去＝" in _p and "互動/按鍵｜按＝" in _p and "打開(類/子類)" in _p, _p[:200])
 check("沒寫第一層名稱 → 字面最像的（走路→移動與視角）", _t112.set_tree_class("走路") == ["移動與視角"] and _t112.set_tree_class("xyz") == [])
 check("沒填 → 提示先分類", "上一輪沒填 問題類別" in _t112.tree_class_panel())
+# 第 113 輪：定期記憶檢查（暫存目錄、假大腦）
+_d113 = _tf110.mkdtemp()
+_t113 = T.Tools("動物醫院", _c111, live=False, image_path=None); _t113.mdir = _d113
+_js110.dump([{"對象": "拍照", "準則": "右側拍照字是E提示", "時間": "10/29 04:00", "照做✓": 1, "照做✗": 5},
+             {"對象": "右側拍照字", "準則": "是HUD不要對正", "時間": "10/29 04:10"},
+             {"對象": "門", "準則": "要看到E提示再按", "時間": "10/29 05:00"}], open(os.path.join(_d113, "準則.json"), "w", encoding="utf-8"), ensure_ascii=False)
+open(os.path.join(_d113, "互動物.md"), "w", encoding="utf-8").write("- 10/29 00:53 印表機｜功能:蓋印｜用法:長按E" + chr(10) + "- 10/29 01:00 印表機｜功能:拍照｜用法:長按E" + chr(10))
+open(os.path.join(_d113, "筆記.md"), "w", encoding="utf-8").write("- 10/29 02:00 大廳有四個按鈕" + chr(10))
+check("記憶檢查：還沒做過、第 5 輪起到期", not _t113.mem_check_due(3) and _t113.mem_check_due(5))
+_it = _t113._mem_check_items()
+check("全部編號：準則 R1～R3、互動物 I1～I2、筆記 N1", [c for c, *_ in _it] == ["R1", "R2", "R3", "I1", "I2", "N1"], [c for c, *_ in _it])
+_g = _t113._mem_check_groups(_it)
+check("可疑組：同名互動物、照做多半 ✗", any("印表機" in g and "I1" in g for g in _g) and any("R1 照做多半" in g for g in _g), _g)
+_seen = {}
+def _fake_ask(system, user, **kw):
+    _seen["user"] = _seen.get("user", "") + user
+    if "第 1/" not in user and "第 2/" not in user:
+        return ({}, "")
+    if "第 2/" in user:
+        return ({"檢查了幾條": 2, "修正": [{"編號": ["I2"], "問題": "重複", "改成": {"類": "", "內容": ""}}], "總結": "互動物重複"}, "")
+    return ({"檢查了幾條": 3, "修正": [{"編號": ["R1", "R2"], "問題": "矛盾", "改成": {"類": "準則", "內容": "右側拍照字｜要當 HUD 讀、不對正"}}], "總結": "併了拍照"}, "")
+_t113._ask = _fake_ask
+_r = _t113.mem_check()
+_rules = _t113._rules_load()
+check("照他寫的：刪 R1 R2、加一條新準則、留 R3", [r["對象"] for r in _rules] == ["門", "右側拍照字"] and _rules[-1].get("來源") == "記憶檢查", _rules)
+check("照他寫的：互動物刪 I2 留 I1", open(os.path.join(_d113, "互動物.md"), encoding="utf-8").read().count("印表機") == 1)
+check("改之前有備份、有記憶檢查.md、回傳寫刪幾條加幾條", os.listdir(os.path.join(_d113, "記憶檢查_備份")) and os.path.exists(os.path.join(_d113, "記憶檢查.md")) and "刪掉 3 條、新增 1 條" in _r, _r[:200])
+check("分批：第 3 批沒解析出來也照前兩批改、回傳列每批秒數", "第 3 批" in _r and "沒解析出來" in _r, _r[-200:])
+check("全部記憶都給他看（含編號）、做過之後 2 小時內不到期", "R3 [準則]" in _seen["user"] and "I2 [互動物]" in _seen["user"] and not _t113.mem_check_due(99))
 T.SLIM["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
