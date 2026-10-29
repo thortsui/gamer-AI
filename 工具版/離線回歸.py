@@ -1115,7 +1115,7 @@ check("範例總數（421＋開局測量 4）", len(_ex101) == 425, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
-_imgs102 = [Image.new("RGB", (320, 180), (200, 200, 200)), Image.new("RGB", (320, 180), (10, 10, 10))]
+_imgs102 = [Image.new("RGB", (320, 180), (200, 200, 200)), Image.new("RGB", (320, 180), (40, 40, 40))]
 class _FT102:
     n = 0
     def grab(self):
@@ -1132,6 +1132,10 @@ try:
     _lt102._win_read_once = lambda im: [(None, "輪班 1", 1.0)]
     _w102 = T.ThinkWatch(_FT102()); _w102.start(); _tm.sleep(0.3)
     check("沒有死亡字 → 不記", _w102.stop() == [])
+    _imgs102[:] = [Image.new("RGB", (320, 180), (200, 200, 200)), Image.new("RGB", (320, 180), (2, 2, 2))]
+    _lt102._win_read_once = lambda im: [(None, "在醫院工作直到你發現", 1.0)]
+    _w102 = T.ThinkWatch(_FT102()); _w102.start(); _tm.sleep(0.5); _h109 = _w102.stop()
+    check("第 109 輪：想的時候畫面全黑 → 記一筆全黑（不重複）、面板寫畫面全黑", [h[1] for h in _h109] == [T.ThinkWatch.DARK] and "畫面全黑（可能在載入" in T.ThinkWatch.panel(_h109), _h109)
 finally:
     _lt102._win_read_once = _bak102; T.ThinkWatch.EVERY = 4.0
 # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的（暫存目錄，不碰真的記憶）

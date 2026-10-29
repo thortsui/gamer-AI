@@ -5030,6 +5030,7 @@ class ThinkWatch:
     """第 102 輪（10/29）：他想的那 30～100 秒裡畫面還在跑——10/29 死 3 次只有 1 次看到死亡畫面（另 2 次在想的時候死、
     下一輪直接是大廳）。想的時候背景每 EVERY 秒截一次，畫面跟上一張差很多才整張 OCR，讀到 DEATH_RE 的字就記下，下一輪面板照實寫。"""
     EVERY = 4.0
+    DARK = "全黑畫面"
 
     def __init__(self, tools):
         self.tools, self.hits, self._stop, self._th = tools, [], None, None
@@ -5055,6 +5056,9 @@ class ThinkWatch:
                 if im is None:
                     continue
                 g = np.asarray(im.convert("L").resize((64, 36)), dtype=float)
+                # 第 109 輪：10/29 進局 7 次只有 1 次被當換場景——載入黑畫面（亮度 0～3）多半在他想的時候閃過
+                if float(g.mean()) < 20 and not any(h[1] == self.DARK for h in self.hits):
+                    self.hits.append((datetime.now().strftime("%H:%M:%S"), self.DARK, ""))
                 if last is not None and float(np.abs(g - last).mean()) < 12:
                     continue                                # 畫面沒大變就不讀字
                 last = g
@@ -5071,7 +5075,8 @@ class ThinkWatch:
         if not hits:
             return ""
         return ("【你上一輪在想的時候，畫面出現過】（程式每 4 秒截一次；你上一輪那張截圖看不到）"
-                + "；".join(f"{t} 讀到「{w}」（整句：{s}）" for t, w, s in hits) + NL)
+                + "；".join((f"{t} 畫面全黑（可能在載入、換地方）" if w == ThinkWatch.DARK else f"{t} 讀到「{w}」（整句：{s}）")
+                           for t, w, s in hits) + NL)
 
 
 class SceneMemory:
@@ -5617,8 +5622,11 @@ def main():
             tools.no_small += 1
         small_up = ""
         events = tools.change_events(task_ev, history, im)
-        if think_hits and not any(e.startswith("死亡") for e in events):
-            events.append("死亡：你上一輪在想的時候，畫面出現過「" + think_hits[0][1] + "」")
+        _dead = [h for h in think_hits if h[1] != ThinkWatch.DARK]
+        if _dead and not any(e.startswith("死亡") for e in events):
+            events.append("死亡：你上一輪在想的時候，畫面出現過「" + _dead[0][1] + "」")
+        if any(h[1] == ThinkWatch.DARK for h in think_hits) and not any(e.startswith("換場景") for e in events):
+            events.append("換場景：你上一輪在想的時候畫面全黑過（可能在載入、換地方、重新開局）")   # 第 109 輪
         tools.scene_mem.update(im, events)               # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的
         scene_txt = tools.scene_mem.panel(im, tools.small)
         up_reason = "" if args.no_small_update else tools.small_update_reason(events)
