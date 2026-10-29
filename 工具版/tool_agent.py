@@ -59,6 +59,8 @@ def load_catalog(game=None):
                      "做法": t.get("做法", ""), "自訂": True}
             cat["工具"].append(entry)
             byname[t["名稱"]] = entry
+    if "打開" not in byname:
+        cat["工具"].append(dict(TREE_OPEN_ENTRY))
     for u in cus.get("補用途", []):
         t = byname.get(u.get("工具"))
         if t and u.get("情況"):
@@ -116,6 +118,34 @@ PLAN3_PRE_TOOLS = ("記應該人稱", "回報人稱")   # 10/19 10:4x：校準�
 NO_SMALL_UPDATE = False   # --no-small-update（10/23）
 LIVE = {"輪": 0, "階段": "啟動", "開始": 0.0, "做": []}   # 10/23 直播網站：這一輪在做什麼
 ASK_CLAUDE = True         # 10/23 實驗分枝 exp-ask-claude：問Claude
+# 10/29 使用者實驗：「把工具分成之後再給他，把移動那些分為好幾層工具，讓他一層一層往下找，減少 Context 的使用」
+TOOL_TREE = {"開": False}  # --tool-tree／--tree-rotate：system 只列第一層，他用 打開(路徑) 往下找
+TREE_OPEN_ENTRY = {"名稱": "打開", "類別": "文件", "用途": "工具樹一層一層打開：給第一層名稱就列下一層；打開到最底層就列出那幾個工具的用法和例子（之後幾輪面板會一直列著）",
+                   "用法": "打開(路徑)", "例": "打開(移動與視角)", "參數": {"路徑": "第一層名稱，或 第一層/第二層"},
+                   "回傳": "下一層的名稱與說明；最底層＝那幾個工具的用法、用途、例子", "實作": "tree_open", "隱藏": True,
+                   "例子": ["打開(移動與視角)——要轉頭或走路，先看下一層有哪幾類", "打開(移動與視角/走去目標)——要走到畫面上的東西，列出那幾個工具",
+                          "打開(互動/按鍵)——要按 E 互動，列出按鍵類工具", "打開(走去目標)——直接給第二層名稱也可以"]}
+
+
+def load_tree():
+    try:
+        return json.load(open(os.path.join(HERE, "工具樹.json"), encoding="utf-8"))["樹"]
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def tree_top_text(cat=None):
+    tree = load_tree()
+    lines = ["【工具樹】（這次實驗：工具不一次全列。要用工具先 打開(第一層名稱) 看下一層，再 打開(第一層/第二層) 列出那幾個工具的用法和例子；"
+             "打開過、用過的工具之後 8 輪會列在面板【你打開的工具】。名字知道的工具不用打開也可以直接叫。打開 放「先記」，不佔步數。）"]
+    for k, n in tree.items():
+        sub = "、".join(n.get("子", {}).keys())
+        lines.append(f"  {k}｜{n.get('說明', '')}" + (f"｜下一層：{sub}" if sub else f"｜{len(n.get('工具', []))} 個工具"))
+    mine = [t["名稱"] for t in (cat or {}).get("工具", []) if t.get("自訂")]
+    if mine:
+        lines.append("  你自己定義的｜" + "、".join(mine) + "（直接叫）")
+    lines.append("  例：打開(移動與視角)；打開(移動與視角/走去目標)；打開(互動/按鍵)")
+    return NL.join(lines)
 
 
 def build_system(game, cat, plan3=False):
@@ -165,6 +195,8 @@ def _build_system(game, cat, plan3=False):
     groups = ["校準", "文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "學習", "自訂"]
     tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g))
                        for g in groups if catalog_lines(cat, g))
+    if TOOL_TREE["開"]:
+        tool_txt = tree_top_text(cat)
     # 他自己整理的規則（學習整理）與他自己改的提示（改提示）——都是他的話，每輪帶著
     mine_txt = ""
     for fname, title in (("學習整理.md", "【你自己整理的規則（學習整理）】"), ("我的提示.md", "【你自己寫的提示（改提示）】")):
@@ -605,6 +637,49 @@ class Tools(ExtraTools):
 
     def doc_list(self, 類別=""):
         return NL.join(catalog_lines(self.cat, str(類別).strip() or None)) or "沒有這一類"
+
+    # ---- 10/29 工具樹實驗
+    TREE_KEEP = 8            # 打開過／用過的工具，之後幾輪留在面板
+    tree_recent = {}         # 工具名 → 最後打開或用過的輪
+    tree_round = 0
+
+    def tree_open(self, 路徑=""):
+        tree = load_tree()
+        parts = [p.strip() for p in re.split(r"[/／>＞、,，]", str(路徑)) if p.strip()]
+        if not parts:
+            return "要給路徑。第一層有：" + "、".join(tree)
+        node, trail = None, []
+        if parts[0] in tree:
+            node, trail = tree[parts[0]], [parts[0]]
+            for p in parts[1:]:
+                sub = node.get("子", {})
+                if p not in sub:
+                    return f"「{'/'.join(trail)}」下面沒有「{p}」。有的：" + "、".join(sub) if sub else f"「{'/'.join(trail)}」已經是最底層"
+                node, trail = sub[p], trail + [p]
+        else:                                             # 只給第二層名稱：全樹找
+            for k, n in tree.items():
+                if parts[-1] in n.get("子", {}):
+                    node, trail = n["子"][parts[-1]], [k, parts[-1]]
+                    break
+        if node is None:
+            return f"沒有「{路徑}」。第一層有：" + "、".join(tree)
+        if node.get("子"):
+            return (f"【{'/'.join(trail)}】下一層：" + "；".join(f"{k}｜{n.get('說明', '')}｜{len(n.get('工具', []))} 個工具" for k, n in node["子"].items())
+                    + f"。要哪一類就 打開({'/'.join(trail)}/名稱)")
+        names = node.get("工具", [])
+        for nm in names:
+            self.tree_recent[nm] = self.tree_round
+        byname = {t["名稱"]: t for t in self.cat["工具"]}
+        sub = {"工具": [byname[n] for n in names if n in byname]}
+        return f"【{'/'.join(trail)}】{len(names)} 個工具（之後 {self.TREE_KEEP} 輪會列在面板【你打開的工具】）：" + NL + NL.join(catalog_lines(sub))
+
+    def tree_panel(self):
+        keep = [n for n, r in self.tree_recent.items() if self.tree_round - r <= self.TREE_KEEP]
+        if not keep:
+            return "【你打開的工具】（還沒打開過；要用工具先 打開(第一層名稱)）"
+        byname = {t["名稱"]: t for t in self.cat["工具"]}
+        sub = {"工具": [byname[n] for n in keep if n in byname and n != "打開"]}
+        return f"【你打開的工具】（最近 {self.TREE_KEEP} 輪打開或用過的）" + NL + NL.join("  " + l for l in catalog_lines(sub))
 
     # ---- 看
     def see_text(self):
@@ -4708,6 +4783,8 @@ class Tools(ExtraTools):
         t = next((t for t in self.cat["工具"] if t["名稱"] == name), None)
         if not t:
             return f"沒有「{name}」這個工具"
+        if TOOL_TREE["開"] and name != "打開":
+            self.tree_recent[name] = self.tree_round     # 工具樹實驗：用過的也留在面板
         impl = t["實作"]
         if impl == "組合":
             return self.run_compound(t)
@@ -4925,7 +5002,7 @@ class ThinkWatch:
 class SceneMemory:
     """第 103 輪（10/29 使用者「如果場景有切換任務也要」）：10/29 06:17 死回大廳後他帶著局內的小任務「拍照」在大廳繞 77 分鐘，
     而他自己 00:25 起記過 7 次「站上踏板等倒數＝進場」卻沒翻出來。
-    場景切換（死亡／想的時候讀到死亡字／全黑載入回來／描述畫面類型變了）→ 開一段新場景；面板提醒小任務是換場景前設的、要重新想，
+    場景切換（死亡／想的時候讀到死亡字／全黑載入回來；第 104 輪起不看描述畫面類型）→ 開一段新場景；面板提醒小任務是換場景前設的、要重新想，
     並用顏色分布找以前最像的那段，列他自己在那段時間記的（觸碰物／筆記／互動物／卡法／準則）。只翻他自己寫的，不加遊戲知識。"""
     FILES = ("觸碰物.md", "筆記.md", "互動物.md", "卡法.md")
     SHOW_ROUNDS = 3          # 換場景後提醒幾輪（他 設小任務 就提早收）
@@ -4963,7 +5040,8 @@ class SceneMemory:
     def update(self, im, events, now=None):
         """每輪呼叫。events＝這輪的變動字串；有場景類的就開新一段。"""
         now = now or time.time()
-        scene = [e for e in events if e.startswith(("死亡", "換場景", "畫面變了：畫面類型"))]
+        # 第 104 輪：拿掉「畫面類型變了」——描述員會看錯（10/29 08:54 大廳判成「遊戲中」，他照提醒把「進場進局」換成「局內認路」8 分鐘）
+        scene = [e for e in events if e.startswith(("死亡", "換場景"))]
         if scene or not self.segs:
             self.segs.append({"開始": now, "時間": datetime.fromtimestamp(now).strftime("%m/%d %H:%M"),
                               "原因": "；".join(scene) or "程式啟動", "特徵": [], "輪": 0})
@@ -5279,6 +5357,9 @@ def main():
     # 10/28 01:1x 使用者實驗「context 順序差異：重要的事情在頭／中／尾，看哪個任務成功率最高」
     ap.add_argument("--ctx-order", default="頭", choices=["頭", "中", "尾"], help="面板裡最重要那塊（大任務／小任務／任務字／上一輪結果）放頭、中、尾")
     ap.add_argument("--ctx-rotate", type=int, default=0, help="每 N 分鐘輪流 頭→中→尾（0＝固定用 --ctx-order）；每輪紀錄寫 順序 欄")
+    ap.add_argument("--tool-tree", action="store_true", help="10/29 實驗：工具樹（system 只列第一層，打開(路徑) 一層層往下找）")
+    ap.add_argument("--tree-rotate", type=int, default=0, help="10/29 實驗：每 N 分鐘輪流 工具樹→全列（從 --tree-t0 起算，第一段是樹）；jsonl 寫 工具模式")
+    ap.add_argument("--tree-t0", default="", help="--tree-rotate 起算時刻 HH:MM（重啟沿用時程）")
     ap.add_argument("--ctx-t0", default="", help="輪流的起算時刻 HH:MM（重啟後沿用原本的時程用；不寫＝啟動時刻）")
     # 10/24 使用者：模型比較實驗（haiku／sonnet／sonnet 自由搜尋 各一小時，其他一模一樣）→ claude_brain.py
     ap.add_argument("--brain", default="", help="空＝本地 8888；haiku／sonnet＝每次叫大腦開一個新的 claude -p")
@@ -5295,6 +5376,26 @@ def main():
         except ValueError:
             pass
     _ctx_last = [None]
+    _tree_t0 = time.time()
+    if args.tree_t0:
+        try:
+            _h, _m = [int(x) for x in args.tree_t0.split(":")]
+            _d = datetime.now().replace(hour=_h, minute=_m, second=0, microsecond=0)
+            _tree_t0 = _d.timestamp() if _d.timestamp() <= time.time() else _tree_t0
+        except ValueError:
+            pass
+    _tree_last = [None]
+
+    def tool_mode_now():
+        """10/29 工具樹實驗：--tree-rotate N → 每 N 分鐘 樹／全列 輪流；否則看 --tool-tree。換了就印一行。"""
+        if args.tree_rotate > 0:
+            m = ("樹", "全列")[int((time.time() - _tree_t0) // (args.tree_rotate * 60)) % 2]
+        else:
+            m = "樹" if args.tool_tree else "全列"
+        if m != _tree_last[0]:
+            print(f"   [工具樹實驗] 工具給法「{m}」（{datetime.now().strftime('%H:%M')}）", flush=True)
+            _tree_last[0] = m
+        return m
 
     def ctx_order_now():
         """10/28 實驗：--ctx-rotate N → 每 N 分鐘輪流 頭→中→尾；否則固定 --ctx-order。換了就印一行。"""
@@ -5405,6 +5506,9 @@ def main():
             print("[stop.txt] 結束")
             break
         cat = tools.cat                                   # 他定義的新工具／補用途會讓清單變
+        tool_mode = tool_mode_now()
+        TOOL_TREE["開"] = tool_mode == "樹"
+        tools.tree_round = rnd
         system = build_system(args.game, cat, plan_n)
         if live:
             fg_ok, fg_title = tools.fg_state()
@@ -5480,7 +5584,8 @@ def main():
                    + tw.panel(task_ev, big, acted=_acted_last(history)) + NL
                    + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind
                    + ThinkWatch.panel(think_hits) + NL)
-        rest_a = ("【開工數值】" + tools.startup_text() + NL
+        rest_a = (((tools.tree_panel() + NL) if TOOL_TREE["開"] else "")
+                  + "【開工數值】" + tools.startup_text() + NL
                   + tools.persp_text() + NL
                   + ((tools.workflow_text() + NL) if tools.workflow_text() else "")
                   + plan_txt + watch_txt + NL)
@@ -5627,6 +5732,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
+                                "工具模式": tool_mode, "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

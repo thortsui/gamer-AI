@@ -1157,4 +1157,35 @@ check("他 設小任務 就收掉提醒", _sm.panel(_blue, None) == "")
 _sm.update(_red, ["文字變化：右上角任務字「a」→「b」"], now=_t0 + 4100)
 check("任務字換不算換場景", len(_sm.segs) == 4)
 check("存檔 場景段.json 重開讀得回來", len(T.SceneMemory(_d103).segs) == 4)
+_sm.update(_blue, ["畫面變了：畫面類型從「大廳」變成「遊戲中」"], now=_t0 + 4200)
+check("第 104 輪：描述畫面類型變了 不算換場景（描述員會看錯）", len(_sm.segs) == 4)
+# 10/29 工具樹實驗：system 只列第一層、打開(路徑) 一層層往下、打開過／用過的留在面板 8 輪
+import json as _js105, collections as _co105
+_cat105 = T.load_catalog("動物醫院")
+_tree105 = T.load_tree()
+def _lv105(n):
+    return list(n.get("工具", [])) + [x for c in n.get("子", {}).values() for x in _lv105(c)]
+_all105 = [x for n in _tree105.values() for x in _lv105(n)]
+_vis105 = [t["名稱"] for t in _cat105["工具"] if not t.get("隱藏")]
+check("工具樹涵蓋每個列出的工具、不重複、沒有不存在的名字", set(_all105) == set(_vis105) and len(_all105) == len(set(_all105)), (set(_vis105) - set(_all105), set(_all105) - set(_vis105)))
+check("打開 在目錄裡但隱藏（全列模式不列）", any(t["名稱"] == "打開" and t.get("隱藏") for t in _cat105["工具"]))
+T.TOOL_TREE["開"] = False; _s0 = T.build_system("動物醫院", _cat105, 2)
+T.TOOL_TREE["開"] = True; _s1 = T.build_system("動物醫院", _cat105, 2)
+check("樹模式 system 比全列少一半以上、有【工具樹】", len(_s1) < len(_s0) / 2 and "【工具樹】" in _s1 and "【工具樹】" not in _s0, (len(_s0), len(_s1)))
+_t105 = T.Tools("動物醫院", _cat105, live=False, image_path=None)
+_t105.tree_recent = {}; _t105.tree_round = 5
+_r = _t105.run("打開", {"路徑": "移動與視角"})
+check("打開(第一層) → 列下一層、不列工具", "走去目標" in _r and "走過去(" not in _r, _r[:120])
+_r = _t105.run("打開", {"路徑": "移動與視角／走去目標"})
+check("打開(第一層／第二層) → 列那幾個工具的用法和例子", "走過去(" in _r and "例：" in _r, _r[:120])
+check("只給第二層名稱也找得到", "按(" in _t105.run("打開", {"路徑": "按鍵"}))
+check("亂寫 → 列第一層", "第一層有" in _t105.run("打開", {"路徑": "亂寫"}))
+check("打開 可以放 先記（文件類）", "文件" in T.PLAN3_PRE_GROUPS)
+_t105.tree_round = 13
+check("打開過的 8 輪內留在面板", "走過去(" in _t105.tree_panel())
+_t105.tree_round = 14
+check("超過 8 輪就收掉", "走過去(" not in _t105.tree_panel())
+_t105.run("等", {"秒": "0"}); _t105.tree_round = 15
+check("樹模式下 用過的工具也留在面板", "等(" in _t105.tree_panel(), _t105.tree_panel()[:200])
+T.TOOL_TREE["開"] = False
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
