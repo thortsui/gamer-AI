@@ -5913,7 +5913,7 @@ def main():
         mem_txt = ""
         if args.mem_check > 0:                            # 第 113 輪：定期記憶檢查（程式停下來請他全部檢查、自己修正）
             tools.MEM_CHECK_MIN = args.mem_check
-            if tools.mem_check_due(rnd):
+            if tools.mem_check_due(rnd, after_death=("死亡" in switch_txt.split(NL)[0]) if switch_txt else False):
                 print("   🧹 記憶檢查（全部看過、找混亂／互斥／重複、自己修正）…", flush=True)
                 mem_txt = tools.mem_check()
                 print("   🧹 " + (mem_txt.split(NL)[0][:160] if mem_txt else "沒有記憶可檢查"), flush=True)

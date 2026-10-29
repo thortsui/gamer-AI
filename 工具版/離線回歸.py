@@ -1268,7 +1268,7 @@ _js110.dump([{"對象": "拍照", "準則": "右側拍照字是E提示", "時間
              {"對象": "門", "準則": "要看到E提示再按", "時間": "10/29 05:00"}], open(os.path.join(_d113, "準則.json"), "w", encoding="utf-8"), ensure_ascii=False)
 open(os.path.join(_d113, "互動物.md"), "w", encoding="utf-8").write("- 10/29 00:53 印表機｜功能:蓋印｜用法:長按E" + chr(10) + "- 10/29 01:00 印表機｜功能:拍照｜用法:長按E" + chr(10))
 open(os.path.join(_d113, "筆記.md"), "w", encoding="utf-8").write("- 10/29 02:00 大廳有四個按鈕" + chr(10))
-check("記憶檢查：還沒做過、第 5 輪起到期", not _t113.mem_check_due(3) and _t113.mem_check_due(5))
+check("記憶檢查：還沒做過、第 5 輪起且死亡回大廳那輪才到期", not _t113.mem_check_due(3, True) and not _t113.mem_check_due(5) and _t113.mem_check_due(5, True))
 _it = _t113._mem_check_items()
 check("全部編號：準則 R1～R3、互動物 I1～I2、筆記 N1", [c for c, *_ in _it] == ["R1", "R2", "R3", "I1", "I2", "N1"], [c for c, *_ in _it])
 _g = _t113._mem_check_groups(_it)
@@ -1288,7 +1288,11 @@ check("照他寫的：刪 R1 R2、加一條新準則、留 R3", [r["對象"] for
 check("照他寫的：互動物刪 I2 留 I1", open(os.path.join(_d113, "互動物.md"), encoding="utf-8").read().count("印表機") == 1)
 check("改之前有備份、有記憶檢查.md、回傳寫刪幾條加幾條", os.listdir(os.path.join(_d113, "記憶檢查_備份")) and os.path.exists(os.path.join(_d113, "記憶檢查.md")) and "刪掉 3 條、新增 1 條" in _r, _r[:200])
 check("分批：第 3 批沒解析出來也照前兩批改、回傳列每批秒數", "第 3 批" in _r and "沒解析出來" in _r, _r[-200:])
-check("全部記憶都給他看（含編號）、做過之後 2 小時內不到期", "R3 [準則]" in _seen["user"] and "I2 [互動物]" in _seen["user"] and not _t113.mem_check_due(99))
+check("全部記憶都給他看（含編號）、做過之後 2 小時內不到期", "R3 [準則]" in _seen["user"] and "I2 [互動物]" in _seen["user"] and not _t113.mem_check_due(99, True))
+_js110.dump({"時間戳": _tm.time() - 3 * 3600}, open(os.path.join(_d113, "記憶檢查.json"), "w", encoding="utf-8"))
+check("到期 3 小時：沒死不做、死亡回大廳就做", not _t113.mem_check_due(99) and _t113.mem_check_due(99, True))
+_js110.dump({"時間戳": _tm.time() - 5 * 3600}, open(os.path.join(_d113, "記憶檢查.json"), "w", encoding="utf-8"))
+check("到期兩倍（240 分）還沒死就照做", _t113.mem_check_due(99))
 # 第 114 輪 不合預期：同類動作同地方第 1 次請他再檢查、第 2 次（或互動超過兩次沒有真正的效果）程式自動叫（收小任務、記卡法、請他換任務重新觀察）
 _t114 = T.Tools("動物醫院", _c111, live=False, image_path=None); _t114.mdir = _tf110.mkdtemp(); _t114.inter_log = []
 _a114 = Image.new("RGB", (160, 90), (120, 40, 40)); _b114 = Image.new("RGB", (160, 90), (40, 40, 160))
