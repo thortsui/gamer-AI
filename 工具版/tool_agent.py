@@ -708,7 +708,7 @@ class Tools(ExtraTools):
     def doc_list(self, 類別=""):
         return NL.join(catalog_lines(self.cat, str(類別).strip() or None)) or "沒有這一類"
 
-    # ---- 第 114 輪（10/29 22:3x 使用者）：「互動了卻沒有用或卡住定在原地…同一個地方互動超過兩次卻都沒有真正的效果，
+    # ---- 第 114 輪 不合預期（10/29 22:3x 使用者）：「互動了卻沒有用或卡住定在原地…同一個地方互動超過兩次卻都沒有真正的效果，
     #      就該思考這是不是遊戲的 bug 或其他問題而導致不能用，這個時候就該切換任務再去附近重新看看」
     #      起因：使用者實測大廳「瞬間移動」E 按了真的沒用，他 18:56 後在那裡長按 13 次以上、卡 3 小時。
     INTERACT_NAMES = ("長按", "確認點", "點字", "點")
@@ -802,9 +802,6 @@ class Tools(ExtraTools):
             self.mismatch_log.pop(kind, None)
         return NL.join(out)
 
-    def interact_fail(self, 哪裡="", 做了什麼="", auto=False):
-        """（舊名，第 114 輪 互動沒效果）→ 不合預期"""
-        return self.unexpected(哪裡, 做了什麼, auto)
 
     # ---- 10/29 16:1x 使用者重排：場景切換（預期中的也算；量測不再是他的工具）、研究任務
     switch_pending, switch_wait = "", 0
@@ -5864,7 +5861,7 @@ def main():
         _last = history[-1] if history else {}
         _calls = list(_last.get("用") or [])
         _real = (bool(task_ev) or any(e.startswith(("死亡", "換場景")) for e in events)
-                 or any(str(c).startswith(("設小任務", "場景切換", "互動沒效果", "不合預期")) for c in _calls))
+                 or any(str(c).startswith(("設小任務", "場景切換", "不合預期")) for c in _calls))
         inter_txt = ""
         _flags = list(_last.get("符合") or [])
         _steps = _calls[-len(_flags):] if _flags else []

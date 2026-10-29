@@ -1289,7 +1289,7 @@ check("照他寫的：互動物刪 I2 留 I1", open(os.path.join(_d113, "互動�
 check("改之前有備份、有記憶檢查.md、回傳寫刪幾條加幾條", os.listdir(os.path.join(_d113, "記憶檢查_備份")) and os.path.exists(os.path.join(_d113, "記憶檢查.md")) and "刪掉 3 條、新增 1 條" in _r, _r[:200])
 check("分批：第 3 批沒解析出來也照前兩批改、回傳列每批秒數", "第 3 批" in _r and "沒解析出來" in _r, _r[-200:])
 check("全部記憶都給他看（含編號）、做過之後 2 小時內不到期", "R3 [準則]" in _seen["user"] and "I2 [互動物]" in _seen["user"] and not _t113.mem_check_due(99))
-# 第 114 輪：同一個地方互動超過兩次沒有真正的效果 → 互動沒效果（收小任務、記互動物、請他換任務去附近看）
+# 第 114 輪 不合預期：同類動作同地方第 1 次請他再檢查、第 2 次（或互動超過兩次沒有真正的效果）程式自動叫（收小任務、記卡法、請他換任務重新觀察）
 _t114 = T.Tools("動物醫院", _c111, live=False, image_path=None); _t114.mdir = _tf110.mkdtemp(); _t114.inter_log = []
 _a114 = Image.new("RGB", (160, 90), (120, 40, 40)); _b114 = Image.new("RGB", (160, 90), (40, 40, 160))
 check("互動動作判斷：長按、按(e)、確認點 算；按(1)、走 不算", T.Tools._is_interact("長按(e,1.5)") and T.Tools._is_interact("按(e)") and T.Tools._is_interact("確認點(審核)")
@@ -1317,7 +1317,7 @@ check("換了地方重新數", _tr is None and len(_t114.mismatch_log["移動"])
 _tr, _h = _t114.mismatch_track(["走(0.5)"], [False], _b114, True)
 check("有真正的效果 → 清空", _tr is None and _t114.mismatch_log == {})
 check("按(1)、按(esc) 不算互動類", _t114._kind("按(1)") is None and _t114._kind("按(esc)") is None and _t114._kind("按(e)") == "互動")
-check("不合預期 在目錄與工具樹（互動沒效果 改名）", "不合預期" in T.load_tree()["任務流程"]["子"]["出事"]["工具"]
+check("不合預期 在目錄與工具樹、沒有 互動沒效果 這個工具", "不合預期" in T.load_tree()["任務流程"]["子"]["出事"]["工具"]
       and any(t["名稱"] == "不合預期" and t["實作"] == "unexpected" for t in T.load_catalog("動物醫院")["工具"])
       and not any(t["名稱"] == "互動沒效果" for t in T.load_catalog("動物醫院")["工具"]))
 T.SLIM["開"] = False
