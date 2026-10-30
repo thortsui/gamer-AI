@@ -6113,7 +6113,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "不合預期": inter_txt.split(NL)[0][:40] if inter_txt else "", "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "不合預期": inter_txt.split(NL)[0][:40] if inter_txt else "", "想時畫面": [list(h) for h in (think_hits or [])], "system字": len(system), "面板字": len(panel),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},
