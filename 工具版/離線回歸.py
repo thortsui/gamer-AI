@@ -1292,7 +1292,7 @@ check("全部記憶都給他看（含編號）、做過之後 2 小時內不到�
 _js110.dump({"時間戳": _tm.time() - 3 * 3600}, open(os.path.join(_d113, "記憶檢查.json"), "w", encoding="utf-8"))
 check("到期 3 小時：沒死不做、死亡回大廳就做", not _t113.mem_check_due(99) and _t113.mem_check_due(99, True))
 _js110.dump({"時間戳": _tm.time() - 5 * 3600}, open(os.path.join(_d113, "記憶檢查.json"), "w", encoding="utf-8"))
-check("到期兩倍（240 分）還沒死就照做", _t113.mem_check_due(99))
+check("到期很久（5 小時）沒死也不在局內做，死亡回大廳才做", not _t113.mem_check_due(99) and _t113.mem_check_due(99, True))
 # 第 114 輪 不合預期：同類動作同地方第 1 次請他再檢查、第 2 次（或互動超過兩次沒有真正的效果）程式自動叫（收小任務、記卡法、請他換任務重新觀察）
 _t114 = T.Tools("動物醫院", _c111, live=False, image_path=None); _t114.mdir = _tf110.mkdtemp(); _t114.inter_log = []
 _a114 = Image.new("RGB", (160, 90), (120, 40, 40)); _b114 = Image.new("RGB", (160, 90), (40, 40, 160))

@@ -1183,7 +1183,7 @@ class ExtraTools:
 
     def mem_check_due(self, rnd, after_death=False):
         """10/30 04:0x：記憶檢查會停遊戲 8～12 分鐘，在局內做理智一直掉（23:31、03:47 兩次檢查完他就死了）
-        → 到期後等死亡回大廳那一輪才做；到期兩倍時間還沒死就照做。"""
+        → 到期後等死亡回大廳那一輪才做（10/30 11:3x 拿掉到期兩倍照做）。"""
         try:
             st = json.load(open(os.path.join(self.mdir, "記憶檢查.json"), encoding="utf-8"))
         except (OSError, ValueError):
@@ -1191,7 +1191,8 @@ class ExtraTools:
         if not st:
             return rnd >= 5 and after_death
         age = time.time() - st.get("時間戳", 0)
-        return (age >= self.MEM_CHECK_MIN * 60 and after_death) or age >= 2 * self.MEM_CHECK_MIN * 60
+        # 10/30 11:3x：拿掉「到期兩倍照做」——11:00 在局內照做，8 分鐘理智 42%→28%，第三次同型；他 1～3 小時就會死一次，等死亡回大廳就好
+        return age >= self.MEM_CHECK_MIN * 60 and after_death
 
     def _mem_check_items(self):
         items = []                                   # (編號, 類, 內容, 來源)
