@@ -43,7 +43,7 @@ def stat(rows):
             if name == "長按":
                 hold += 1
                 hold_ok += ("沒變" not in ret and "沒反應" not in ret)
-        bad += sum(1 for x in (r.get("回傳") or []) if "看不懂" in str(x) or "沒有「" in str(x))
+        bad += sum(1 for x in (r.get("回傳") or []) if str(x).startswith("✗") and "看不懂" in str(x)[:40])  # 10/30 只算被退回的，工具說明裡的字不算
     return {"輪": len(rows), "局內": sum(1 for r in rows if "輪班" in str(r.get("看到", ""))), "全符合": (full, n2),
             "長按有反應": (hold_ok, hold), "任務字換": sum(1 for r in rows if r.get("任務字換")),
             "送任務完成": sum(1 for r in rows for x in (r.get("用") or []) if str(x).startswith("任務完成")),

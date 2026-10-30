@@ -82,8 +82,8 @@ def main():
         for ret in r["回傳"]:
             m = re.match(r"● (\S+?)(?:\((.*?)\))? → (.*)", ret, re.S)
             if not m:
-                if ret.startswith("✗"):
-                    fails["看不懂的工具"] += 1
+                if ret.startswith("✗"):  # 10/30 拆開：叫錯工具名 vs 被程式擋下（先記放遊戲動作、格式不對等）
+                    fails["看不懂的工具" if "看不懂" in ret[:40] else "被程式擋下"] += 1
                 continue
             name, arg, body = m.group(1), m.group(2) or "", m.group(3)
             use[name] += 1
