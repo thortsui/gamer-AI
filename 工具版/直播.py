@@ -21,7 +21,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MDIR = os.path.join(os.path.dirname(HERE), "專案", "動物醫院", "記憶", "工具版")
+GAME = os.environ.get("GAMER_GAME") or "動物醫院"   # 11/03 新遊戲：直播看哪隻遊戲（代理用 --game 指定的那隻）
+MDIR = os.path.join(os.path.dirname(HERE), "專案", GAME, "記憶", "工具版")
 TOKEN_PATH = os.path.join(os.path.expanduser("~"), ".gamer_ai_live_token")
 
 
@@ -97,6 +98,8 @@ def tail_rounds(n=12):
 GAME_TASKS = ["蓋印表格", "拍照", "從房間 1 中的病人身上採集樣本", "從房間 2 中的病人身上採集樣本", "從房間 5 中的病人身上採集樣本",
               "在電腦上註冊", "獲取徽章", "列印徽章", "檢查病人的情況", "跟隨病人到他的房間", "分析樣本", "緊急情況"]
 EXTRA = ["走到大廳正前方的配對踏板開始配對"]
+if GAME != "動物醫院":      # 上面兩份是動物醫院的任務名單，別的遊戲不列
+    GAME_TASKS, EXTRA = [], []
 
 
 def task_options():

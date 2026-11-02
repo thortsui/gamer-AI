@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-D = os.path.join(os.path.dirname(HERE), "專案", "動物醫院", "記憶", "工具版")
+D = os.path.join(os.path.dirname(HERE), "專案", os.environ.get("GAMER_GAME") or "動物醫院", "記憶", "工具版")
 
 
 def load(f):
