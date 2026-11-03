@@ -13,9 +13,11 @@ def check(name, cond, info=""):
 check("V_FOV", getattr(t, "V_FOV", None) == 70.0)
 r = t.look_turn(30); check("轉(30)", "轉了 30" in r, r)
 r = t.look_turn(120); check("轉(120) 截 90", "只轉 +90" in r, r)
-r = t.look_at(0.75, 0.45); check("視角移動到", "左右 +34" in r, r)
+r = t.look_at(0.75, 0.45); _im0 = t.grab(); _exp0 = round(math.degrees(math.atan(math.tan(math.radians(35)) * _im0.size[0] / _im0.size[1] * 0.5))); check("視角移動到", f"左右 +{_exp0} " in r, r)   # 11/03：度數跟當下視窗比例算（1920×991＝34、16:9＝32）
 r = t.look_level(); check("修水平 dry-run", "dry-run" in r, r)
 r = t.key_hold("e", 1.5); check("長按", "dry-run" in r or "按" in r, r)
+r = t.mouse_left(); check("左鍵 dry-run", "按了左鍵" in r, r)
+r = t.mouse_right(); check("右鍵 dry-run", "按了右鍵" in r, r)
 r = t.see_around(); check("看四周", "拍了 4 張" in r or "離線" in r, r)
 r = t.fix_panel(); check("關掉", "esc" in r, r)
 check("run 等", "等了" in t.run("等", {"秒": "1"}))
@@ -1111,7 +1113,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4）", len(_ex101) == 437, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4）", len(_ex101) == 441, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102

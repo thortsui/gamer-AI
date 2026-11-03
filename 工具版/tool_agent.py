@@ -4443,6 +4443,36 @@ class Tools(ExtraTools):
         k = str(鍵).strip().lower() or "e"
         return self._move(k, num(秒, 1.5), 0.5, 4.0)
 
+    # 11/03 20:0x 使用者「加左右鍵」：原本要按滑鼠只能 點＋確認點（至少兩輪）；按(right) 是方向鍵不是右鍵。
+    #   不移動游標、不走兩步確認，所以用 點 同一份 TABOO 擋：游標旁邊有付費字就不按（絕對限制不變）。
+    def mouse_button(self, button):
+        name = "左鍵" if button == "left" else "右鍵"
+        before, noise = self._grab_noise()
+        if not self.live:
+            print(f"   [dry-run] 按 {name}")
+            return f"按了{name}一下；" + self._changed(before, noise)
+        import pydirectinput
+        self._fg_ok()
+        bbox = self.win.client_bbox() if self.win else None
+        if not bbox:
+            return "找不到 Roblox 視窗"
+        cx, cy = pydirectinput.position()
+        fx, fy = (cx - bbox["left"]) / max(1, bbox["width"]), (cy - bbox["top"]) / max(1, bbox["height"])
+        near = self._near_text(fx, fy)
+        hit = [w for w in self.TABOO if any(w in n.lower() for n in near)]
+        if hit:
+            return f"沒按{name}：游標 ({fx:.2f},{fy:.2f}) 附近的字 {near} 碰到絕對限制（{'、'.join(hit)}）。"
+        pydirectinput.mouseDown(button=button)
+        time.sleep(0.08)
+        pydirectinput.mouseUp(button=button)
+        return f"按了{name}一下（游標 {fx:.2f},{fy:.2f}）；" + self._changed(before, noise)
+
+    def mouse_left(self):
+        return self.mouse_button("left")
+
+    def mouse_right(self):
+        return self.mouse_button("right")
+
     # ---- 點擊兩步（2026-10-15 01:0x 使用者：點選類的頁面，無論要點什麼都必須再檢查一次才能點，包含絕對禁忌的審核）
     TABOO = ("robux", "buy", "purchase", "$", "購買", "解鎖", "升級", "復活", "付費", "職業", "護士", "醫生", "實習")
     pending_click = None
