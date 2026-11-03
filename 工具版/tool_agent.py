@@ -75,6 +75,13 @@ NEUTRAL_WORDS = [
 ]
 
 
+def load_game_json(game):
+    try:
+        return json.load(open(os.path.join(ROOT, "專案", game, "遊戲.json"), encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def load_catalog(game=None):
     """目錄＋他自己定義的工具（新工具）＋他補的用途（補用途）。
 
@@ -92,6 +99,17 @@ def load_catalog(game=None):
         cat = json.load(open(os.path.join(HERE, "工具目錄.json"), encoding="utf-8"))
     if not game:
         return cat
+    # 11/04 Minecraft：退出重進／回到遊戲 會離開世界還會開 Roblox → 遊戲.json 的 禁用工具 整個拿掉；
+    #   捲 的說明是 Roblox 鏡頭的，換成只講動作（滾輪做什麼他自己試）
+    gj = load_game_json(game)
+    banned = set(gj.get("禁用工具") or [])
+    if banned:
+        cat["工具"] = [t for t in cat["工具"] if t["名稱"] not in banned]
+    if gj.get("滑鼠視角"):
+        for t in cat["工具"]:
+            if t["名稱"] == "捲":
+                t["用途"] = "滾動滑鼠滾輪"
+                t["例子"] = ["捲(1)——滾輪往上一格", "捲(-1)——滾輪往下一格"]
     try:
         cus = json.load(open(custom_path(game), encoding="utf-8"))
     except Exception:  # noqa: BLE001
@@ -260,13 +278,18 @@ def _build_system(game, cat, plan3=False):
     except Exception:  # noqa: BLE001
         gj = {}
     gname = gj.get("全名") or game
+    if gj.get("平台"):          # 11/04 Minecraft：身分檔寫死「正在玩 Roblox」
+        identity = identity.replace("Roblox「", "「")
     goal = read_text(os.path.join(gdir, "記憶", "任務指示.txt")).strip() or "（使用者還沒交代目標）"
     limits = ["不准花任何錢：Robux、金幣、購買、解鎖、升級、付費復活、任何「Buy／Purchase／$」按鈕；看到付費視窗只能用 關掉 工具關掉"]
     if gj.get("禁止換職業"):
         limits.append("不准換職業：不點「職業」按鈕、不點護士／醫生／實習生那類選項")
     if gj.get("禁止上下轉頭"):
         limits.append("不准上下轉頭")
-    limits.append("不准離開這隻遊戲去玩別的；只有卡死才用 退出重進，而且要回到同一隻遊戲")
+    if gj.get("禁用工具"):      # 11/04 Minecraft：沒有 退出重進 這個工具
+        limits.append("不准離開這隻遊戲；不按會離開遊戲的按鈕")
+    else:
+        limits.append("不准離開這隻遊戲去玩別的；只有卡死才用 退出重進，而且要回到同一隻遊戲")
     limits.append("點選類的頁面（選單、按鈕、面板）：**任何點擊都是兩步**——點 或 點字 只是預約，程式不會馬上點；"
                   "下一輪你會拿到放大的目標圖，必須再看一次並審核上面每一條絕對限制，確定才送 確認點(審核)，不對就 取消點。沒有確認就永遠不會點下去")
     rules = ("【絕對限制】（使用者定的，違反就是錯，沒有例外）" + NL
@@ -306,7 +329,7 @@ def _build_system(game, cat, plan3=False):
         goal_s = NL.join(b.strip() for b in blocks if b.strip() and not b.strip().startswith(GOALS_IN_TOOLS)) or "（沒有）"
         fmt = plan_format(int(plan3)) if plan3 else cat["輸出格式"]
         return (f"{identity}" + NL
-                + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
+                + f"遊戲：{gname}（{gj.get('平台') or 'Roblox place ' + str(gj.get('大廳place', '?'))}）。詳細介紹自己叫 遊戲介紹。" + NL
                 + "使用者給你的目標：" + NL + goal_s + NL
                 + "（使用者其他交代已經寫進相關工具的說明與回傳；換了場景就叫 場景切換、不知道現在該做什麼就叫 研究任務）" + NL * 2
                 + rules + NL * 2
@@ -316,7 +339,7 @@ def _build_system(game, cat, plan3=False):
                 + (plan_rule(int(plan3)) + NL * 2 if plan3 else "")
                 + "每一輪只輸出一個 JSON：" + slim_format(fmt))
     return (f"{identity}" + NL
-            + f"遊戲：{gname}（Roblox place {gj.get('大廳place', '?')}）。詳細介紹自己叫 遊戲介紹。" + NL
+            + f"遊戲：{gname}（{gj.get('平台') or 'Roblox place ' + str(gj.get('大廳place', '?'))}）。詳細介紹自己叫 遊戲介紹。" + NL
             + "使用者給你的目標：" + NL + goal + NL * 2
             + rules + NL * 2
             + review_txt
@@ -522,6 +545,13 @@ class Tools(ExtraTools):
         self.image_path = image_path
         self.extra_images = []          # 看四周／迷路 拍的圖，下一輪附上
         self.win = None
+        # 11/04 Minecraft（使用者：不要讓他按離開遊戲以及可能離開遊戲的按鈕）：都在 遊戲.json，沒寫的遊戲行為不變
+        gj = load_game_json(game)
+        self.mouse_look = bool(gj.get("滑鼠視角"))           # 鏡頭跟著滑鼠走，不用壓右鍵（右鍵是遊戲裡的動作）
+        self.world_title = str(gj.get("世界視窗標題") or "")  # 視窗標題沒有這段＝已經不在世界裡 → 一律不送輸入
+        self.leave_words = tuple(str(w).lower() for w in (gj.get("離開字") or []))
+        self.no_keys = set(str(k).lower() for k in (gj.get("不按的鍵") or []))
+        self.TABOO = Tools.TABOO + self.leave_words
         try:
             cal = json.load(open(os.path.join(self.gdir, "記憶", "視角校準.json"), encoding="utf-8"))
             self.dx_deg = float(cal.get("水平", {}).get("每度dx") or 2.5)
@@ -1133,8 +1163,9 @@ class Tools(ExtraTools):
         if not bbox:
             return
         m = self._left_monitor()
-        inside = (bbox["left"] >= m["left"] and bbox["top"] >= m["top"]
-                  and bbox["left"] + bbox["width"] <= m["left"] + m["width"] and bbox["top"] + bbox["height"] <= m["top"] + m["height"])
+        # 11/04：Minecraft 最大化的客戶區是 1921 寬，差 1 像素不算跑出去（否則會被 ShowWindow(9) 搬動、縮小）
+        inside = (bbox["left"] >= m["left"] - 2 and bbox["top"] >= m["top"] - 2
+                  and bbox["left"] + bbox["width"] <= m["left"] + m["width"] + 2 and bbox["top"] + bbox["height"] <= m["top"] + m["height"] + 2)
         if inside:
             return
         if self._user_idle() >= self.FG_IDLE:
@@ -1155,6 +1186,15 @@ class Tools(ExtraTools):
             return
         self._screen_ok()
         ok, title = self.fg_state()
+        if self.world_title:           # 11/04：最後一道：已經不在世界裡（標題畫面等）就什麼都不按，免得再點到關閉遊戲
+            import win32gui
+            now = ""
+            try:
+                now = win32gui.GetWindowText(self.win.hwnd) if self.win and self.win.hwnd else ""
+            except Exception:  # noqa: BLE001
+                pass
+            if self.world_title not in now:
+                raise RuntimeError(f"遊戲視窗標題是「{now}」，不在世界裡，程式不送任何按鍵；這一步沒按")
         if ok:
             return
         idle = self._user_idle()
@@ -1224,7 +1264,22 @@ class Tools(ExtraTools):
         except Exception:  # noqa: BLE001
             return None
 
+    # 11/04 Minecraft：選單能用 Tab 選按鈕、Enter／空白鍵按下去，繞過 點 的檢查 → 畫面上有離開字時不送這幾個鍵
+    CONFIRM_KEYS = ("enter", "return", "space", "numpadenter")
+
+    def _leave_on_screen(self):
+        if not self.leave_words:
+            return []
+        txt = self.see_text().lower()
+        return [w for w in self.leave_words if w in txt]
+
     def _move(self, k, d, lo, hi):
+        if k in self.no_keys:
+            return f"沒按 {k}：這個鍵會跳離遊戲視窗，不能按"
+        if self.live and k in self.CONFIRM_KEYS and self.leave_words:
+            hit = self._leave_on_screen()
+            if hit:
+                return f"沒按 {k}：畫面上有會離開遊戲的字（{'、'.join(hit)}），這時按它可能選到那個按鈕。"
         d = max(lo, min(hi, d))
         noise = None
         if k in ("w", "s", "a", "d", "space"):
@@ -1498,6 +1553,15 @@ class Tools(ExtraTools):
             sy = max(-120, min(120, rest_y))
             rest_x -= sx
             rest_y -= sy
+            if self.mouse_look:       # 11/04 Minecraft：只送相對位移，不壓右鍵（會變成放東西）、不 moveTo（鏡頭會跳）
+                done_x = done_y = 0
+                for i in range(1, 9):
+                    tx, ty = sx * i // 8, sy * i // 8
+                    pydirectinput.moveRel(tx - done_x, ty - done_y, relative=True)
+                    done_x, done_y = tx, ty
+                    time.sleep(0.03)
+                time.sleep(0.05)
+                continue
             pydirectinput.moveTo(cx, cy)
             time.sleep(0.03)
             pydirectinput.mouseDown(button="right")
@@ -1540,10 +1604,11 @@ class Tools(ExtraTools):
         cx = (bbox["left"] + int(bbox["width"] * self.DRAG_FX)) if bbox else int(1920 * self.DRAG_FX)
         cy = (bbox["top"] + int(bbox["height"] * fy)) if bbox else int(1000 * fy)
         total = int(round(dx))
-        pydirectinput.moveTo(cx, cy)
-        time.sleep(0.03)
-        pydirectinput.mouseDown(button="right")
-        time.sleep(0.10)        # 第 52 輪：跟 _drag 一樣，按下後先等鏡頭進入拖曳模式
+        if not self.mouse_look:
+            pydirectinput.moveTo(cx, cy)
+            time.sleep(0.03)
+            pydirectinput.mouseDown(button="right")
+            time.sleep(0.10)        # 第 52 輪：跟 _drag 一樣，按下後先等鏡頭進入拖曳模式
         done = 0
         try:
             for k in range(1, stages + 1):
@@ -1560,8 +1625,9 @@ class Tools(ExtraTools):
                 time.sleep(pause)
                 frames.append(self.grab())
         finally:
-            pydirectinput.mouseUp(button="right")
-            pydirectinput.moveTo(cx, cy)
+            if not self.mouse_look:
+                pydirectinput.mouseUp(button="right")
+                pydirectinput.moveTo(cx, cy)
             time.sleep(0.08)
         if self.dx_deg:
             y = self.yaw_acc + dx / self.dx_deg
@@ -4445,8 +4511,9 @@ class Tools(ExtraTools):
 
     # 11/03 20:0x 使用者「加左右鍵」：原本要按滑鼠只能 點＋確認點（至少兩輪）；按(right) 是方向鍵不是右鍵。
     #   不移動游標、不走兩步確認，所以用 點 同一份 TABOO 擋：游標旁邊有付費字就不按（絕對限制不變）。
-    def mouse_button(self, button):
+    def mouse_button(self, button, 秒=""):
         name = "左鍵" if button == "left" else "右鍵"
+        hold = max(0.08, min(8.0, num(秒, 0.08)))      # 11/04 Minecraft：很多動作要壓住滑鼠鍵，原本只能按一下
         before, noise = self._grab_noise()
         if not self.live:
             print(f"   [dry-run] 按 {name}")
@@ -4463,15 +4530,18 @@ class Tools(ExtraTools):
         if hit:
             return f"沒按{name}：游標 ({fx:.2f},{fy:.2f}) 附近的字 {near} 碰到絕對限制（{'、'.join(hit)}）。"
         pydirectinput.mouseDown(button=button)
-        time.sleep(0.08)
-        pydirectinput.mouseUp(button=button)
-        return f"按了{name}一下（游標 {fx:.2f},{fy:.2f}）；" + self._changed(before, noise)
+        try:
+            time.sleep(hold)
+        finally:
+            pydirectinput.mouseUp(button=button)
+        how = "一下" if hold <= 0.08 else f"壓住 {hold:.1f} 秒"
+        return f"按了{name}{how}（游標 {fx:.2f},{fy:.2f}）；" + self._changed(before, noise)
 
-    def mouse_left(self):
-        return self.mouse_button("left")
+    def mouse_left(self, 秒=""):
+        return self.mouse_button("left", 秒)
 
-    def mouse_right(self):
-        return self.mouse_button("right")
+    def mouse_right(self, 秒=""):
+        return self.mouse_button("right", 秒)
 
     # ---- 點擊兩步（2026-10-15 01:0x 使用者：點選類的頁面，無論要點什麼都必須再檢查一次才能點，包含絕對禁忌的審核）
     TABOO = ("robux", "buy", "purchase", "$", "購買", "解鎖", "升級", "復活", "付費", "職業", "護士", "醫生", "實習")
@@ -4547,6 +4617,11 @@ class Tools(ExtraTools):
             if not bbox:
                 return "找不到 Roblox 視窗"
             self._fg_ok()
+            if self.leave_words:     # 11/04：預約到確認之間畫面可能變了，真的點之前再看一次
+                near = self._near_text(fx, fy)
+                hit = [w for w in self.leave_words if any(w in n.lower() for n in near)]
+                if hit:
+                    return f"**沒點**：({fx:.2f},{fy:.2f}) 附近的字 {near} 會離開遊戲（{'、'.join(hit)}）。"
             tx, ty = int(bbox["left"] + fx * bbox["width"]), int(bbox["top"] + fy * bbox["height"])
             pydirectinput.moveTo(tx, ty)
             time.sleep(0.05)
@@ -4619,6 +4694,8 @@ class Tools(ExtraTools):
                 time.sleep(0.05)
         else:
             print(f"   [dry-run] 捲 {n}")
+        if self.mouse_look:         # 11/04 Minecraft：滾輪不是鏡頭遠近，刻度不失效；不講滾輪做什麼，他自己看
+            return f"捲了 {n} 格（正＝滾輪往上，負＝往下）"
         # 10/18 16:5x 使用者：「減少中鍵用於縮放視角，避免每次都要重新量測」→ 回傳提醒（不擋）
         # 10/19 10:2x：切換第一／第三人稱就是要捲 → 捲過人稱可能變了，先標成要重新回報
         if "人稱" in self.startup:
@@ -4691,6 +4768,8 @@ class Tools(ExtraTools):
 
     def fix_return(self):
         """回到遊戲：用深層連結直接開這隻遊戲（04:0x 他 esc→l→enter 之後掉到 Roblox 平台頁，點封面卡片 6 次都沒進去）。"""
+        if "回到遊戲" in (load_game_json(self.game).get("禁用工具") or []):
+            return "這隻遊戲沒有 回到遊戲 這個工具"
         place = self._place()
         if not place:
             return "遊戲.json 沒有 place，不知道要開哪隻"
@@ -4712,6 +4791,8 @@ class Tools(ExtraTools):
         return f"已用深層連結開 place {place}（等了 40 秒）。下一輪看畫面：應該在這隻遊戲的大廳或進場畫面；不是就再叫一次"
 
     def fix_rejoin(self):
+        if "退出重進" in (load_game_json(self.game).get("禁用工具") or []):
+            return "這隻遊戲沒有 退出重進 這個工具"
         self.key_press("esc", 0.1)
         time.sleep(0.5 if self.live else 0)
         self.key_press("l", 0.1)

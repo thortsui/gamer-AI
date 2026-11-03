@@ -1,0 +1,13 @@
+{
+  "全名": "Minecraft",
+  "平台": "Minecraft Java 版 26.3，單人世界",
+  "模組": {"櫃檯": false, "輪班計畫": false, "報到課程": false, "理智": false, "學習課程": false, "任務樹": false},
+  "禁止上下轉頭": false,
+  "強制腦內地圖": true,
+  "陣列地圖": true,
+  "滑鼠視角": true,
+  "世界視窗標題": "單人遊戲",
+  "禁用工具": ["退出重進", "回到遊戲", "問Claude", "讀文件", "wiki", "看介紹"],
+  "離開字": ["離開", "退出", "標題畫面", "關閉遊戲", "中斷連線", "儲存並", "quit", "disconnect", "title screen", "save and"],
+  "不按的鍵": ["win", "winleft", "winright", "apps", "alt", "altleft", "altright"]
+}

@@ -296,11 +296,25 @@ class RobloxWindow:
         """先用標題找；找不到就用行程名 RobloxPlayerBeta 找（在大廳時視窗標題是空的）。"""
         import win32gui
         found, by_proc = [], []
+        # 11/04 Minecraft：GAMER_WINDOW_PROC 指定行程名（例如 javaw.exe）→ 只認那個行程最大的視窗，Roblox 開著也不會抓錯
+        want_proc = os.environ.get("GAMER_WINDOW_PROC", "").strip().lower()
 
         def cb(h, _):
             if not win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
                 return
             t = win32gui.GetWindowText(h)
+            if want_proc:
+                try:
+                    import win32process
+                    import psutil
+                    _, pid = win32process.GetWindowThreadProcessId(h)
+                    if psutil.Process(pid).name().lower() == want_proc:
+                        l, t2, r, b = win32gui.GetClientRect(h)
+                        if (r - l) > 400 and (b - t2) > 300:
+                            by_proc.append(((r - l) * (b - t2), h))
+                except Exception:  # noqa: BLE001
+                    pass
+                return
             if t == "Roblox" or (t.startswith("Roblox") and "Studio" not in t):
                 found.append(h)
                 return

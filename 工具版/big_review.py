@@ -136,7 +136,7 @@ def main():
     if not o and reason:      # 10/19 05:2x：他把整份 JSON 寫在推理裡、輸出 0 字 → 從推理取出來
         # 13:2x：他把同一份 JSON 重複寫了 4 次、第 5 次寫一半被截斷 → 每一份都解析，挑欄位最多的（同樣多取後面的）
         best = {}
-        for mm in re.finditer(r'\{\s*"今天做了什麼"', reason):
+        for mm in re.finditer(r'\{\s*"(?:今天做了什麼|小任務一次做對)"', reason):
             cand = parse_json_loose(T.repair_json(reason[mm.start():])) or {}
             if len(cand) >= len(best):
                 best = cand
@@ -148,7 +148,7 @@ def main():
     def whole(x):
         return bool(x.get("明天開場要做什麼") and (x.get("要改的習慣") or "記準則" in x))
     if o and not whole(o) and reason:
-        for mm in re.finditer(r'\{\s*"今天做了什麼"', reason):
+        for mm in re.finditer(r'\{\s*"(?:今天做了什麼|小任務一次做對)"', reason):
             cand = parse_json_loose(T.repair_json(reason[mm.start():])) or {}
             if whole(cand):
                 o, from_reason = cand, True
