@@ -31,6 +31,9 @@ TOOLFIX = os.environ.get("GAMER_TOOLFIX") == "1"
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 NL = "\n"
+# 11/03 使用者「亮度拉高」：螢幕亮度不影響截圖，所以調亮他拿到的畫面。GAMER_BRIGHTEN＝gamma（<1 變亮，例 0.5）；沒設＝不動
+_bg = float(os.environ.get("GAMER_BRIGHTEN") or 1.0)
+BRIGHTEN_LUT = [min(255, round(255 * (i / 255) ** _bg)) for i in range(256)] if _bg != 1.0 else None
 
 # ---------------------------------------------------------------- 目錄與 system
 def custom_path(game):
@@ -571,7 +574,8 @@ class Tools(ExtraTools):
                 return None
             with mss.mss() as sct:
                 shot = sct.grab(bbox)
-                return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                im = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                return im.point(BRIGHTEN_LUT * 3) if BRIGHTEN_LUT else im
         except Exception as e:  # noqa: BLE001
             print(f"   抓畫面失敗：{e}")
             return None
