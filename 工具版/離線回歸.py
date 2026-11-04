@@ -1113,7 +1113,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4）", len(_ex101) == 441, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4）", len(_ex101) == 445, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1340,4 +1340,23 @@ check("不合預期 在目錄與工具樹、沒有 互動沒效果 這個工具"
       and any(t["名稱"] == "不合預期" and t["實作"] == "unexpected" for t in T.load_catalog("動物醫院")["工具"])
       and not any(t["名稱"] == "互動沒效果" for t in T.load_catalog("動物醫院")["工具"]))
 T.SLIM["開"] = False
+# 11/04 基礎猜測：照常按、記猜測、列按過的鍵；擋法沿用 _move／mouse_button；不講鍵的功能
+import tempfile as _tf_g
+_tg = T.Tools("動物醫院", cat, live=False, image_path=None); _tg.mdir = _tf_g.mkdtemp(); _tg.extra_images = []
+_n, _p = T.parse_call("基礎猜測(w,會有變化)", cat); _r = _tg.run(_n, _p)
+check("基礎猜測(w,猜)：解析、按下、記鍵與猜測", _n == "基礎猜測" and "dry-run" not in _r.split("你猜")[1] and "你猜：會有變化" in _r and "按過的鍵（1 個）：w" in _r, _r[:160])
+check("基礎猜測：附前後兩張，寫進 基礎猜測.md", len(_tg.extra_images) == 2 and "鍵:w｜猜:會有變化" in open(os.path.join(_tg.mdir, "基礎猜測.md"), encoding="utf-8").read(), len(_tg.extra_images))
+_r = _tg.basic_guess("左鍵", "我猜的結果"); check("基礎猜測(左鍵)", "按了左鍵" in _r and "按過的鍵（2 個）" in _r, _r[:120])
+_r = _tg.basic_guess("中鍵", "我猜的結果"); check("基礎猜測(中鍵)", "按了中鍵" in _r, _r[:120])
+_r = _tg.basic_guess("滾輪上", "我猜的結果"); check("基礎猜測(滾輪上)", "捲" in _r and "按過的鍵（4 個）" in _r, _r[:120])
+_r = _tg.basic_guess("w", "我猜a", "b"); check("猜測有逗號不會被切到秒", "你猜：我猜a，b" in _r, _r[:200])
+_n0 = len(_tg._guess_keys())
+_r = _tg.basic_guess("w", ""); check("沒填猜測就不按", "沒按" in _r and len(_tg._guess_keys()) == _n0, _r)
+_r = _tg.basic_guess("ctrl+w", "我猜的結果"); check("組合鍵／不認得的鍵名不按", "沒按" in _r, _r)
+_tg.no_keys = {"win", "f11"}
+_c0 = open(os.path.join(_tg.mdir, "基礎猜測.md"), encoding="utf-8").read()
+_r = _tg.basic_guess("win", "我猜的結果"); check("不按的鍵照樣擋、不記錄", _r.startswith("沒按") and open(os.path.join(_tg.mdir, "基礎猜測.md"), encoding="utf-8").read() == _c0, _r)
+_ent = next(x for x in cat["工具"] if x["名稱"] == "基礎猜測")
+check("基礎猜測在工具樹 互動/按鍵", "基礎猜測" in T.load_tree()["互動"]["子"]["按鍵"]["工具"])
+check("基礎猜測的說明與例子不講鍵的功能", not _re101.search(r"前進|往前|跳|攻擊|挖|放置|物品欄|背包|蹲|衝刺", _ent["用途"] + "".join(_ent["例子"])), _ent["用途"])
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

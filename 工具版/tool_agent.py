@@ -4512,7 +4512,7 @@ class Tools(ExtraTools):
     # 11/03 20:0x 使用者「加左右鍵」：原本要按滑鼠只能 點＋確認點（至少兩輪）；按(right) 是方向鍵不是右鍵。
     #   不移動游標、不走兩步確認，所以用 點 同一份 TABOO 擋：游標旁邊有付費字就不按（絕對限制不變）。
     def mouse_button(self, button, 秒=""):
-        name = "左鍵" if button == "left" else "右鍵"
+        name = {"left": "左鍵", "right": "右鍵", "middle": "中鍵"}[button]
         hold = max(0.08, min(8.0, num(秒, 0.08)))      # 11/04 Minecraft：很多動作要壓住滑鼠鍵，原本只能按一下
         before, noise = self._grab_noise()
         if not self.live:
@@ -4542,6 +4542,56 @@ class Tools(ExtraTools):
 
     def mouse_right(self, 秒=""):
         return self.mouse_button("right", 秒)
+
+    # 11/04 使用者「製作一個工具叫做基礎猜測 讓他去猜測遊戲常用的按鈕(wasd….)都按按看看看會發生什麼事情」：
+    #   只幫他按、拍前後兩張、記下猜了什麼；回傳不講鍵的功能，也不列還沒按的鍵。按鍵都走 _move／mouse_button／scroll，原本的擋法不變。
+    GUESS_MOUSE = {"左鍵": "left", "滑鼠左鍵": "left", "右鍵": "right", "滑鼠右鍵": "right", "中鍵": "middle", "滑鼠中鍵": "middle"}
+    GUESS_WHEEL = {"滾輪上": 1, "滾輪往上": 1, "滾輪下": -1, "滾輪往下": -1}
+
+    def _guess_keys(self):
+        try:
+            txt = open(os.path.join(self.mdir, "基礎猜測.md"), encoding="utf-8").read()
+        except OSError:
+            return []
+        return list(dict.fromkeys(re.findall(r"鍵:([^｜]+)｜", txt)))
+
+    def basic_guess(self, 鍵="", 猜="", 秒=""):
+        k = str(鍵).strip().lower()
+        guess = str(猜).strip()
+        sec = str(秒).strip()
+        if sec and not re.fullmatch(r"\d+(\.\d+)?", sec):     # 他的猜測裡有逗號時，後半段會被切到 秒
+            guess, sec = f"{guess}，{sec}", ""
+        if not k or not guess:
+            return "要填鍵和你的猜測：基礎猜測(鍵,猜)。這次沒按。"
+        wheel = self.GUESS_WHEEL.get(k)
+        mouse = self.GUESS_MOUSE.get(k)
+        if wheel is None and mouse is None:
+            import pydirectinput
+            if k not in pydirectinput.KEYBOARD_MAPPING:
+                return f"「{k}」不是程式認得的單一鍵名，這次沒按。一次填一個鍵，滑鼠寫 左鍵、右鍵、中鍵、滾輪上、滾輪下。"
+        before = self.grab()
+        if wheel is not None:
+            r = self.scroll(wheel)
+        elif mouse:
+            r = self.mouse_button(mouse, sec or 0.3)
+        else:
+            r = self._move(k, num(sec, 0.3), 0.1, 4.0)
+        if str(r).startswith("沒按"):
+            return r
+        if self.live and not self.image_path:
+            time.sleep(0.3)
+        after = self.grab()
+        dd = self.diff(before, after) if before is not None and after is not None else None
+        if before is not None and after is not None:
+            shots = [(f"按 {k} 之前", before.copy()), (f"按 {k} 之後", after.copy())]
+            for _, im in shots:
+                im.thumbnail((960, 540))
+            self.extra_images = list(getattr(self, "extra_images", None) or []) + shots
+        change = "量不出" if dd is None else f"{dd:.0f}"
+        self._append("基礎猜測.md", f"鍵:{k}｜猜:{guess}｜畫面變化:{change}")
+        tried = self._guess_keys()
+        return (f"{r}\n你猜：{guess}｜前後畫面變化 {change}（下一輪附上按之前、按之後兩張）。"
+                f"\n按過的鍵（{len(tried)} 個）：{'、'.join(tried)}")
 
     # ---- 點擊兩步（2026-10-15 01:0x 使用者：點選類的頁面，無論要點什麼都必須再檢查一次才能點，包含絕對禁忌的審核）
     TABOO = ("robux", "buy", "purchase", "$", "購買", "解鎖", "升級", "復活", "付費", "職業", "護士", "醫生", "實習")
@@ -5265,7 +5315,7 @@ def _acted_last(history, n=2):
     for h in reversed(history[-n:]):
         for u in (h.get("用") or []):
             name = (u if isinstance(u, str) else str(u.get("工具") or u.get("做") or "")).split("(")[0].strip()
-            if name in ("長按", "按", "點", "點字", "確認點", "按住", "雙擊"):
+            if name in ("長按", "按", "點", "點字", "確認點", "按住", "雙擊", "基礎猜測"):
                 return name
     return ""
 

@@ -9,5 +9,5 @@
   "世界視窗標題": "單人遊戲",
   "禁用工具": ["退出重進", "回到遊戲", "問Claude", "讀文件", "wiki", "看介紹"],
   "離開字": ["離開", "退出", "標題畫面", "關閉遊戲", "中斷連線", "儲存並", "quit", "disconnect", "title screen", "save and"],
-  "不按的鍵": ["win", "winleft", "winright", "apps", "alt", "altleft", "altright"]
+  "不按的鍵": ["win", "winleft", "winright", "apps", "alt", "altleft", "altright", "f11"]
 }
