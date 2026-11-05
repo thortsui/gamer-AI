@@ -626,7 +626,139 @@ class Tools(ExtraTools):
             return b1, 0.0
         time.sleep(0.2)
         b2 = self.grab()
+        self._noise_pair = (b1, b2)         # 11/05 小變化：同一格按之前自己就在動的（雨、樹葉、怪）不算
         return b2, self.diff(b1, b2)
+
+    # 11/05 使用者「增加額外工具變化回傳 會自動回傳畫面是否有變化 變化了？什麼？（小的變化才需要回傳」
+    #   第 15、50、53～54 輪壓住左鍵，第二格從 35 變到 40，整張平均只有 1～11，回傳寫「沒變＝可能被擋」，他寫成左鍵無效。
+    #   → 切 64×36 格比對：有變的格少才算小變化，回報位置、顏色、讀到的字，下一輪附放大前後圖。只講看到什麼，不解釋代表什麼。
+    SMALL_GRID = (64, 36)
+    SMALL_CELL_TH = 6.0     # 一格平均亮度差（0～255）
+    SMALL_MAX_RATIO = 0.25  # 超過四分之一的格子在變＝大變化，他自己看整張就好，不回報
+    SMALL_MAX_SPOTS = 12    # 零散超過這麼多塊就不一塊塊列
+
+    @classmethod
+    def _small_diff(cls, before, after, noise_pair=None):
+        """回 ("無"／"大"／"小", 區塊清單)；區塊＝(x0,y0,x1,y1) 畫面比例，由變化量大到小。"""
+        import numpy as np
+        from PIL import Image
+        if before is None or after is None or before.size != after.size:
+            return "無", []
+        def cells(im):
+            return np.asarray(im.convert("L").resize(cls.SMALL_GRID, Image.BOX), dtype=float)
+        d = np.abs(cells(before) - cells(after))
+        hit = d >= cls.SMALL_CELL_TH
+        if noise_pair and all(x is not None and x.size == before.size for x in noise_pair):
+            n = np.abs(cells(noise_pair[0]) - cells(noise_pair[1])) >= cls.SMALL_CELL_TH
+            grown = n.copy()                # 動的東西下一刻會移到隔壁格，連隔壁一起排除
+            grown[1:, :] |= n[:-1, :]; grown[:-1, :] |= n[1:, :]; grown[:, 1:] |= n[:, :-1]; grown[:, :-1] |= n[:, 1:]
+            hit &= ~grown
+        if not hit.any():
+            return "無", []
+        if hit.mean() > cls.SMALL_MAX_RATIO:
+            return "大", []
+        H, W = hit.shape
+        seen = np.zeros_like(hit)
+        spots = []
+        for y, x in zip(*np.nonzero(hit)):
+            if seen[y, x]:
+                continue
+            stack, xs, ys, power = [(y, x)], [], [], 0.0
+            seen[y, x] = True
+            while stack:
+                cy, cx = stack.pop()
+                xs.append(cx); ys.append(cy); power += d[cy, cx]
+                for ny in range(max(0, cy - 2), min(H, cy + 3)):        # 隔一格也算同一塊（字的筆畫常斷開）
+                    for nx in range(max(0, cx - 2), min(W, cx + 3)):
+                        if hit[ny, nx] and not seen[ny, nx]:
+                            seen[ny, nx] = True
+                            stack.append((ny, nx))
+            spots.append((power, (min(xs) / W, min(ys) / H, (max(xs) + 1) / W, (max(ys) + 1) / H)))
+        spots.sort(key=lambda s: -s[0])
+        return "小", [s[1] for s in spots]
+
+    @staticmethod
+    def _color_word(im):
+        """一小塊的主要顏色（只是字面描述）。"""
+        import colorsys
+        r, g, b = im.convert("RGB").resize((1, 1)).getpixel((0, 0))
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        if v < 0.16:
+            return "黑"
+        if s < 0.18:
+            return "白" if v > 0.8 else ("灰" if v > 0.3 else "深灰")
+        h *= 360
+        if h < 15 or h >= 340:
+            name = "紅"
+        elif h < 45:
+            name = "棕" if v < 0.7 else "橘"
+        elif h < 70:
+            name = "黃"
+        elif h < 170:
+            name = "綠"
+        elif h < 200:
+            name = "青"
+        elif h < 260:
+            name = "藍"
+        else:
+            name = "紫"
+        return ("深" + name) if v < 0.35 and name != "棕" else name
+
+    @staticmethod
+    def _crop_words(im):
+        """放大後讀一小塊的字；讀不到回空字串。"""
+        try:
+            import local_text
+            big = im.resize((im.width * 4, im.height * 4))
+            res = local_text._win_read(big)
+            return "".join(str(r[1]).strip() for r in (res or []))
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _small_note(self, before, wait=True):
+        """整張畫面細看：有小變化回「；【小變化】…」並附放大前後圖；沒變回 ；細看…；大變化回空字串。"""
+        pair, self._noise_pair = getattr(self, "_noise_pair", None), None
+        if not self.live or self.image_path or before is None:
+            return ""
+        if wait:
+            time.sleep(0.3)                 # 手臂動作、東西飛進物品欄要一點時間
+        after = self.grab()
+        kind, spots = self._small_diff(before, after, pair)
+        if kind == "大":
+            return ""
+        if kind == "無":
+            return "；細看整張：沒有任何一塊變"
+        if len(spots) > self.SMALL_MAX_SPOTS:
+            self._append("小變化.md", f"零散 {len(spots)} 塊")
+            return f"；【小變化】零散 {len(spots)} 小塊在變，沒有集中在哪裡（沒附圖）"
+        W, H = after.size
+        parts, log = [], []
+        marks = "①②③"
+        for i, (x0, y0, x1, y1) in enumerate(spots[:3]):
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            where = ("上方" if cy < 1 / 3 else ("下方" if cy > 2 / 3 else "中間")) + ("偏左" if cx < 1 / 3 else ("偏右" if cx > 2 / 3 else "中央"))
+            box = (int(W * x0), int(H * y0), max(int(W * x0) + 1, int(W * x1)), max(int(H * y0) + 1, int(H * y1)))
+            a, b = before.crop(box), after.crop(box)
+            ca, cb = self._color_word(a), self._color_word(b)
+            txt = f"{marks[i]}{where} ({cx:.2f},{cy:.2f})，約佔寬 {x1 - x0:.0%}、高 {y1 - y0:.0%}，顏色 {ca}→{cb}" if ca != cb else f"{marks[i]}{where} ({cx:.2f},{cy:.2f})，約佔寬 {x1 - x0:.0%}、高 {y1 - y0:.0%}，顏色都是{ca}"
+            ta, tb = self._crop_words(a), self._crop_words(b)
+            if (ta or tb) and ta != tb:
+                txt += f"，讀到的字「{ta}」→「{tb}」（小字可能讀錯，看放大圖）"
+            parts.append(txt)
+            log.append(txt)
+            if i < 2:                       # 前兩塊附放大圖：左＝之前、右＝之後
+                from PIL import Image
+                px, py = max(int(W * 0.04), box[2] - box[0]), max(int(H * 0.05), box[3] - box[1])
+                wide = (max(0, box[0] - px), max(0, box[1] - py), min(W, box[2] + px), min(H, box[3] + py))
+                ca2, cb2 = before.crop(wide), after.crop(wide)
+                k = max(1, min(6, 300 // max(1, ca2.width)))
+                pair_im = Image.new("RGB", (ca2.width * k * 2 + 12, ca2.height * k), "white")
+                pair_im.paste(ca2.resize((ca2.width * k, ca2.height * k), Image.NEAREST), (0, 0))
+                pair_im.paste(cb2.resize((cb2.width * k, cb2.height * k), Image.NEAREST), (ca2.width * k + 12, 0))
+                self.extra_images = list(getattr(self, "extra_images", None) or []) + [(f"小變化{marks[i]} ({cx:.2f},{cy:.2f}) 左＝之前、右＝之後", pair_im)]
+        self._append("小變化.md", f"{len(spots)} 塊｜" + "｜".join(log))
+        more = f"（另外還有 {len(spots) - 3} 塊）" if len(spots) > 3 else ""
+        return f"；【小變化】{len(spots)} 塊{more}：" + "；".join(parts) + "（下一輪附放大圖）"
 
     def _changed(self, before, noise=None):
         out = self._changed_px(before, noise)
@@ -642,6 +774,12 @@ class Tools(ExtraTools):
                 out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（畫面整體沒變，但底部那一帶變了＝**有反應**）", out)
                 out = out.replace("（兩次都看不出反應）", "（像素整體看不出，但畫面下方那一帶變了，以它為準＝有反應）")
             out += hn
+            sn = self._small_note(before)
+            if "【小變化】" in sn:                  # 有一小塊真的變了，就不能再說「沒變／看不出」
+                out = re.sub(r"（[^）]*(看不出有反應|沒變＝可能被擋)[^）]*）", "（整張平均變化小，看後面的小變化）", out)
+                out = out.replace("（兩次都看不出反應）", "（整張平均都小，看後面的小變化）")
+                out = out.replace("（0.6 秒後又跟按之前差不多＝只閃一下、可能沒真的反應）", "（整張平均又變小，看後面的小變化）")
+            out += sn
         return out
 
     HOTBAR_BOX = (0.30, 0.86, 0.70, 1.0)     # 底部道具欄那一帶（10/18 起道具欄都在這裡）
@@ -1282,6 +1420,7 @@ class Tools(ExtraTools):
                 return f"沒按 {k}：畫面上有會離開遊戲的字（{'、'.join(hit)}），這時按它可能選到那個按鈕。"
         d = max(lo, min(hi, d))
         noise = None
+        self._noise_pair = None
         if k in ("w", "s", "a", "d", "space"):
             before = self.grab()
         else:
@@ -1337,7 +1476,9 @@ class Tools(ExtraTools):
             if _mv and dd > 2:
                 self._last_ok = (datetime.now().strftime("%H:%M"), f"走路 {k}")
             _nm = (self._nomove_note(dd <= 2) if _mv else "")
-            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + ("（沒變＝可能被擋）" if dd < 2 else "") + _nm + z_txt
+            sn = self._small_note(before, wait=False) if self.live else ""
+            blocked = "（沒變＝可能被擋）" if dd < 2 and "【小變化】" not in sn else ""
+            return f"按 {k} {d:.1f} 秒；畫面變化 {dd:.0f}" + blocked + _nm + z_txt + sn
         out = self._changed(before, noise)
         # 第 61 輪；10/27 05:2x 第 65 輪：esc 開 Roblox 選單也算「有反應」，05:20 把「最後一個有反應的動作：長按 e（05:13）」蓋成「按 esc」→ esc／tab 不算
         if not ("沒變" in out or "看不出" in out) and str(k).lower() not in ("esc", "escape", "tab"):
@@ -4788,9 +4929,13 @@ class Tools(ExtraTools):
 
     def wait(self, 秒=""):
         d = max(0.2, min(5.0, num(秒, 1.0)))
+        sn = ""
         if self.live:
+            before = self.grab()
+            self._noise_pair = None
             time.sleep(d)
-        return f"等了 {d:.1f} 秒"
+            sn = self._small_note(before, wait=False)
+        return f"等了 {d:.1f} 秒" + sn
 
     # ---- 意外
     def fix_close(self):

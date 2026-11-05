@@ -1390,4 +1390,32 @@ try:
     check("量一圈：鏡頭沒轉（開著物品欄）只有雜訊 → 不算回到起點", _r is None, _r)
 finally:
     T.time.sleep = _sl0
+# 11/05 小變化回傳：小的才報、大的不報，動作前本來就在動的不算
+from PIL import Image as _Im115, ImageDraw as _Dr115
+_a = _Im115.new("RGB", (960, 540), (40, 60, 40))
+_b = _a.copy(); _Dr115.Draw(_b).rectangle((370, 500, 392, 525), fill=(255, 255, 255))
+_k, _s = T.Tools._small_diff(_a, _a.copy()); check("小變化：完全一樣＝無", _k == "無" and not _s, _k)
+_k, _s = T.Tools._small_diff(_a, _b); check("小變化：物品欄一個數字＝小，位置在下方", _k == "小" and len(_s) == 1 and _s[0][1] > 0.85 and 0.35 < _s[0][0] < 0.42, (_k, _s))
+_c = _a.copy(); _Dr115.Draw(_c).rectangle((0, 0, 600, 400), fill=(200, 30, 30))
+_k, _s = T.Tools._small_diff(_a, _c); check("小變化：整片都變＝大、不列區塊", _k == "大" and not _s, _k)
+_d = _a.copy(); _Dr115.Draw(_d).rectangle((100, 100, 125, 125), fill=(255, 255, 255))
+_n = (_a, _d.copy())
+_k, _s = T.Tools._small_diff(_a, _d, _n); check("小變化：按之前那格本來就在動＝不算", _k == "無", (_k, _s))
+_k, _s = T.Tools._small_diff(_a, _b, _n); check("小變化：別的地方變了照報", _k == "小" and len(_s) == 1, (_k, _s))
+_f = _b.copy(); _Dr115.Draw(_f).rectangle((800, 40, 820, 60), fill=(255, 0, 0))
+_k, _s = T.Tools._small_diff(_a, _f); check("小變化：兩處分開列", _k == "小" and len(_s) == 2, (_k, _s))
+check("小變化：顏色字", T.Tools._color_word(_Im115.new("RGB", (4, 4), (0, 0, 0))) == "黑" and T.Tools._color_word(_Im115.new("RGB", (4, 4), (250, 250, 250))) == "白")
+class _SmallSim(T.Tools):
+    def __init__(self, after):
+        self.live, self.image_path, self.extra_images, self._after, self.logged = True, None, [], after, []
+    def grab(self): return self._after
+    def _append(self, fn, txt): self.logged.append(txt)
+    @staticmethod
+    def _crop_words(im): return ""
+_s = _SmallSim(_b); _r = _s._small_note(_a, wait=False)
+check("小變化：回傳有位置、顏色，附一張放大前後圖、有記錄", "【小變化】1 塊" in _r and "下方" in _r and "顏色" in _r and len(_s.extra_images) == 1 and len(_s.logged) == 1, _r)
+check("小變化：回傳不解釋意思", not _re101.search(r"挖|撿|拿到|物品|反應", _r), _r)
+_s = _SmallSim(_c); check("小變化：大變化不回傳", _s._small_note(_a, wait=False) == "" and not _s.extra_images)
+_s = _SmallSim(_a.copy()); _r = _s._small_note(_a, wait=False); check("小變化：沒變說沒變", "沒有任何一塊變" in _r, _r)
+_s = _SmallSim(_a); _s.live = False; check("小變化：離線不回報", _s._small_note(_a) == "")
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
