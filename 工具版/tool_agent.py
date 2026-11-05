@@ -33,7 +33,12 @@ sys.path.insert(0, ROOT)
 NL = "\n"
 # 11/03 使用者「亮度拉高」：螢幕亮度不影響截圖，所以調亮他拿到的畫面。GAMER_BRIGHTEN＝gamma（<1 變亮，例 0.5）；沒設＝不動
 _bg = float(os.environ.get("GAMER_BRIGHTEN") or 1.0)
-BRIGHTEN_LUT = [min(255, round(255 * (i / 255) ** _bg)) for i in range(256)] if _bg != 1.0 else None
+# 11/06 使用者「給他開亮度調整功能」：他自己用 亮度(值) 調；值＝1／gamma（1＝原本、2＝gamma 0.5）。GAMER_BRIGHTEN 只當沒存過時的起始值
+BRIGHT_MIN, BRIGHT_MAX = 0.5, 4.0
+
+
+def bright_lut(value):
+    return [min(255, round(255 * (i / 255) ** (1 / value))) for i in range(256)] if value != 1.0 else None
 
 # ---------------------------------------------------------------- 目錄與 system
 def custom_path(game):
@@ -569,6 +574,40 @@ class Tools(ExtraTools):
         self.level_meas = None          # 最近一次 修水平 量到的（時間, 結果）
         self.verify2 = False            # 10/18 使用者：「量測都要二次驗證」（--verify2）
         self.effort_locked = False      # 10/18 使用者：「這次挑戰都用高思考」（--lock-effort）
+        self._load_brightness()
+
+    def _load_brightness(self):
+        """亮度 存在 記憶/工具版/亮度.json，重啟不會默默變回去；沒存過才看 GAMER_BRIGHTEN。"""
+        value = round(1 / _bg, 2)
+        try:
+            value = float(json.load(open(os.path.join(self.mdir, "亮度.json"), encoding="utf-8"))["值"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        self.brightness = value if value > 0 else 1.0
+        self.brightness_lut = bright_lut(self.brightness)
+
+    def brightness_set(self, 值=""):
+        v = str(值).strip()
+        if not v:
+            return f"現在亮度 {self.brightness:g}（1＝原本的畫面，數字越大越亮，可調 {BRIGHT_MIN:g}～{BRIGHT_MAX:g}）。"
+        if not re.fullmatch(r"\d+(\.\d+)?", v) or not BRIGHT_MIN <= float(v) <= BRIGHT_MAX:
+            return f"亮度要填 {BRIGHT_MIN:g}～{BRIGHT_MAX:g} 的數字，這次沒調（現在 {self.brightness:g}）。"
+        old = self.brightness
+        before = self.grab()
+        self.brightness = float(v)
+        self.brightness_lut = bright_lut(self.brightness)
+        with open(os.path.join(self.mdir, "亮度.json"), "w", encoding="utf-8") as f:
+            json.dump({"值": self.brightness}, f, ensure_ascii=False)
+        after = self.grab()
+        if before is None or after is None:
+            return f"亮度 {old:g} → {self.brightness:g}。這次抓不到畫面，沒有前後比較。"
+        shots = [(f"亮度 {old:g}", before.copy()), (f"亮度 {self.brightness:g}", after.copy())]
+        for _, im in shots:
+            im.thumbnail((960, 540))
+        self.extra_images = list(getattr(self, "extra_images", None) or []) + shots
+        mean = lambda im: sum(im.convert("L").resize((64, 36)).tobytes()) / (64 * 36)
+        return (f"亮度 {old:g} → {self.brightness:g}：畫面平均亮度 {mean(before):.0f} → {mean(after):.0f}（0～255）。"
+                "只調你拿到的畫面，遊戲本身沒變；之後每張畫面都照這個亮度。下一輪附調之前、調之後兩張。")
 
     def _v2(self, name, v1, v2, ok, unit=""):
         """二次驗證：同一個量測做兩次，回報兩個值、一不一致，記進 二次驗證.md（stats 算一致率）。"""
@@ -592,8 +631,10 @@ class Tools(ExtraTools):
     def grab(self):
         """現在的畫面（PIL）。--image 模式永遠回同一張。"""
         from PIL import Image
+        lut = getattr(self, "brightness_lut", None)
         if self.image_path:
-            return Image.open(self.image_path).convert("RGB")
+            im = Image.open(self.image_path).convert("RGB")
+            return im.point(lut * 3) if lut else im
         try:
             import mss
             from play_agent import RobloxWindow
@@ -605,7 +646,7 @@ class Tools(ExtraTools):
             with mss.mss() as sct:
                 shot = sct.grab(bbox)
                 im = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-                return im.point(BRIGHTEN_LUT * 3) if BRIGHTEN_LUT else im
+                return im.point(lut * 3) if lut else im
         except Exception as e:  # noqa: BLE001
             print(f"   抓畫面失敗：{e}")
             return None

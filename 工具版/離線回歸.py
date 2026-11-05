@@ -1113,7 +1113,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4）", len(_ex101) == 445, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4＋亮度 3）", len(_ex101) == 448, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1359,6 +1359,20 @@ _r = _tg.basic_guess("win", "我猜的結果"); check("不按的鍵照樣擋、�
 _ent = next(x for x in cat["工具"] if x["名稱"] == "基礎猜測")
 check("基礎猜測在工具樹 互動/按鍵", "基礎猜測" in T.load_tree()["互動"]["子"]["按鍵"]["工具"])
 check("基礎猜測的說明與例子不講鍵的功能", not _re101.search(r"前進|往前|跳|攻擊|挖|放置|物品欄|背包|蹲|衝刺", _ent["用途"] + "".join(_ent["例子"])), _ent["用途"])
+# 11/06 亮度：他自己調、之後每張畫面都照這個亮度、重啟不變；範圍外不動
+_b_dir = _tf_g.mkdtemp(); _b_png = os.path.join(_b_dir, "暗.png"); Image.new("RGB", (64, 36), (20, 20, 20)).save(_b_png)
+_tb = T.Tools("動物醫院", cat, live=False, image_path=_b_png); _tb.mdir = _b_dir; _tb._load_brightness(); _tb.extra_images = []
+check("亮度：沒存過＝1、畫面不動", _tb.brightness == 1.0 and _tb.grab().getpixel((0, 0)) == (20, 20, 20), _tb.brightness)
+_n, _p = T.parse_call("亮度", cat); _r = _tb.run(_n, _p); check("亮度：不填＝只看現在的值", "現在亮度 1" in _r and not _tb.extra_images, _r)
+_n, _p = T.parse_call("亮度(2)", cat); _r = _tb.run(_n, _p)
+check("亮度(2)：畫面變亮、回前後平均亮度、附兩張", _tb.grab().getpixel((0, 0))[0] == round(255 * (20 / 255) ** 0.5) and "亮度 1 → 2" in _r and "20 →" in _r and len(_tb.extra_images) == 2, _r)
+_tb2 = T.Tools("動物醫院", cat, live=False, image_path=_b_png); _tb2.mdir = _b_dir; _tb2._load_brightness(); check("亮度：重啟還是同一個值", _tb2.brightness == 2.0, _tb2.brightness)
+for _bad in ("9", "0", "-1", "很亮"):
+    _r = _tb.brightness_set(_bad); check(f"亮度({_bad})：範圍外不調", "沒調" in _r and _tb.brightness == 2.0, _r)
+_tb.brightness_set("1"); check("亮度(1)：回到原本", _tb.brightness_lut is None and _tb.grab().getpixel((0, 0)) == (20, 20, 20))
+check("亮度在工具樹 看與找/看畫面", "亮度" in T.load_tree()["看與找"]["子"]["看畫面"]["工具"])
+_ent = next(x for x in cat["工具"] if x["名稱"] == "亮度")
+check("亮度的說明不講什麼時候該調", not _re101.search(r"夜|晚|暗|洞", _ent["用途"] + "".join(_ent["例子"])), _ent["用途"])
 # 11/05 量一圈沒有像素上限：模擬一圈 2400、半圈 1200 長得像起點
 class _LoopSim(T.Tools):
     LOOP = 2400
