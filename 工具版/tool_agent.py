@@ -3088,8 +3088,8 @@ class Tools(ExtraTools):
         else:
             src = "照你填的"
         total = int(round(total))
-        if not (200 <= abs(total) <= 3000):
-            return f"dx {total} 不合理（一圈通常 500～1500）"
+        if abs(total) < 200:          # 11/05 使用者「不要設上限」：拿掉 3000 上限和「一圈通常 500～1500」（Minecraft 一圈約 2400）
+            return f"dx {total} 太小，轉不到一圈"
         start0 = self.grab()
         if start0 is None:
             return "抓不到畫面"
@@ -3142,8 +3142,8 @@ class Tools(ExtraTools):
 
     def cal_set(self, 每度dx=""):
         v = num(每度dx, None)
-        if v is None or not (0.5 <= v <= 20):
-            return "定刻度 要給每度 dx（0.5～20），例如 定刻度(2.5)"
+        if v is None or v < 0.5:
+            return "定刻度 要給每度 dx（至少 0.5），例如 定刻度(2.5)"
         old = self.dx_deg
         if self.live and not self.image_path and abs(v - old) >= 0.05:
             # 10/25 23:4x 第 25 輪：定刻度 以前不驗就寫（他把大廳量壞的 1300/360＝3.7 寫進去，之後每次轉都過頭 48%）→ 先照新刻度轉一圈驗
@@ -3210,10 +3210,12 @@ class Tools(ExtraTools):
         loop1 = self._loop_once()
         loop_dx = loop1
         v2_note = ""
-        if self.verify2:                          # 10/18 二次驗證：水平一圈再量一次
+        if loop1 is None:
+            v2_note += "水平一圈這次沒找到回到起點的位置（畫面可能太暗或沒特徵），水平不採用；"
+        elif self.verify2:                        # 10/18 二次驗證：水平一圈再量一次
             loop2 = self._loop_once()
-            ok = abs(loop1 - loop2) <= 0.10 * (loop1 + loop2) / 2
-            v2_note += self._v2("量刻度 一圈dx", loop1, loop2, ok) + ("（相差 10% 內，用平均）" if ok else "（相差超過 10%，水平這次不採用）") + "；"
+            ok = loop2 is not None and abs(loop1 - loop2) <= 0.10 * (loop1 + loop2) / 2
+            v2_note += self._v2("量刻度 一圈dx", loop1, loop2 if loop2 is not None else "量不出", ok) + ("（相差 10% 內，用平均）" if ok else "（相差超過 10%，水平這次不採用）") + "；"
             loop_dx = int(round((loop1 + loop2) / 2)) if ok else None
         dx_deg = round(loop_dx / 360.0, 2) if loop_dx else self.dx_deg
         # 垂直：先往上掃到頂（畫面不再變），再往下掃到底，算全程
@@ -3273,9 +3275,11 @@ class Tools(ExtraTools):
         #   → 兩種人稱分開存全程（離極限 15%、回水平都用像素，不靠度數）；每度 dy 只用第三人稱的全程換（第一人稱不改每度 dy）
         first = self.person_hint.startswith("第一人稱")
         mode = "第一人稱" if first else ("第三人稱" if self.person_hint.startswith("第三人稱") else "")
-        dy_from_range = dy_ok and not first
-        dy_deg = round(full_dy / 160.0, 2) if dy_from_range else self.dy_deg
-        if dy_ok and first:
+        # 11/05：遊戲.json 有 上下全程度（Minecraft 180）＝第一人稱全程也能換每度 dy；沒寫的遊戲行為不變
+        vdeg = float(load_game_json(self.game).get("上下全程度") or 0)
+        dy_from_range = dy_ok and (not first or bool(vdeg))
+        dy_deg = round(full_dy / (vdeg or 160.0), 2) if dy_from_range else self.dy_deg
+        if dy_ok and first and not vdeg:
             v2_note += f"第一人稱全程 {full_dy} 像素（跟第三人稱不同，只拿來當極限與回水平，不換每度 dy）；"
         # 使用者規則（09/23 開工順序）：量歪 1.8 倍不採用——跟上一次的刻度差太多就留舊值、只回報
         note = v2_note
@@ -3316,7 +3320,7 @@ class Tools(ExtraTools):
                      "量測每度dx": round(loop_dx / 360.0, 2) if (loop_dx and not dx_rej) else _h.get("量測每度dx")}
         cal["垂直"] = {"全程dy": (full_dy if (dy_from_range and not dy_rej) else _v.get("全程dy")), "每度dy": dy_deg,
                      "方法": "每步 10 像素慢慢找上下極限（工具版 量刻度，10/23；每度 dy 只用第三人稱全程換）", "時間": now,
-                     "量測每度dy": round(full_dy / 160.0, 2) if (dy_from_range and not dy_rej) else _v.get("量測每度dy"),
+                     "量測每度dy": round(full_dy / (vdeg or 160.0), 2) if (dy_from_range and not dy_rej) else _v.get("量測每度dy"),
                      "全程_第一人稱": (full_dy if (dy_ok and mode == "第一人稱") else _v.get("全程_第一人稱")),
                      "全程_第三人稱": (full_dy if (dy_ok and mode == "第三人稱") else _v.get("全程_第三人稱"))}
         cal["視窗"] = {"寬": start.width, "高": start.height, "時間": now}
@@ -3330,22 +3334,45 @@ class Tools(ExtraTools):
                 + ("、上下回到中間。" if dy_ok else "；上下：這次沒找到極限、**鏡頭已原路拉回量之前的位置、不保證水平**（看下一張畫面：滿是天花板／地板就用 仰 自己拉，或到有牆有地的地方 修水平）。")
                 + "接著用 視角右(30) 之類試一次，看回傳的實測跟你預期一不一致")
 
+    LOOP_TIMEOUT = 180       # 秒；量一圈的時間保險，不是轉動上限
+
     def _loop_once(self):
-        """水平轉一圈：每步 dx 60，轉到跟起點最像的位置，回傳一圈 dx（鏡頭停在約起點）。"""
+        """水平轉一圈：每步 dx 60，轉到跟起點最像的位置，回傳一圈 dx（鏡頭停在約起點）；量不出回 None。
+        11/05 使用者「不要設上限」：Minecraft 一圈約 2400，原本轉到 1500 就停，只能挑範圍內最像的（常量成半圈）→ 拿掉像素上限。
+        前幾步用特徵點量每像素幾度，算出一圈大約多少，只在那附近找最像的，不會被長得像的半圈騙；
+        沒有像素上限，只有時間保險（畫面完全沒特徵又回不到起點時，不會永遠轉下去）。"""
         start = self.grab()
         step, total, best, best_total, diffs = 60, 0, None, None, []
-        for i in range(1, 41):
+        prev, rates, expected, i = start, [], None, 0
+        t0 = time.time()
+        while True:
+            i += 1
             self._drag(step, 0)
             total += step
             time.sleep(0.2)
             cur = self.grab()
             d = self.diff(start, cur)
             diffs.append(d)
-            if i >= 6 and (best is None or d < best):
+            if expected is None and i <= 8:
+                yaw, _p, _n, conf, _note = self._feat_deg(prev, cur)
+                if yaw is not None and conf >= 0.5 and abs(yaw) >= 1:
+                    rates.append(abs(yaw) / step)
+                if len(rates) >= 5:
+                    expected = 360.0 / sorted(rates)[len(rates) // 2]
+                    if best_total is not None and abs(best_total - expected) > 0.15 * expected:
+                        best, best_total = None, None
+            prev = cur
+            in_range = expected is None or abs(total - expected) <= 0.15 * expected
+            if in_range and i >= 6 and (best is None or d < best):
                 best, best_total = d, total
-            if i >= 8 and d < 6 and d <= min(diffs[:-1]) * 0.6:
+            # 11/05 實測：開著物品欄時鏡頭根本沒轉，雜訊也會湊出「回到起點」（量出 1160）→ 畫面要真的變過才算
+            if in_range and i >= 8 and d < 6 and d <= min(diffs[:-1]) * 0.6 and max(diffs) >= 8:
                 break
-            if total >= 1500:
+            if expected is not None and total >= expected * 1.15:
+                break
+            if time.time() - t0 >= self.LOOP_TIMEOUT:
+                if best_total is None or expected is None or max(diffs) < 8:
+                    return None             # 沒找到回到起點的位置：不拿半路最像的當一圈
                 break
         loop_dx = best_total or total
         if total > loop_dx:                      # 轉過頭的部分轉回來，第二次量才從起點開始

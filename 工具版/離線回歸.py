@@ -1359,4 +1359,35 @@ _r = _tg.basic_guess("win", "我猜的結果"); check("不按的鍵照樣擋、�
 _ent = next(x for x in cat["工具"] if x["名稱"] == "基礎猜測")
 check("基礎猜測在工具樹 互動/按鍵", "基礎猜測" in T.load_tree()["互動"]["子"]["按鍵"]["工具"])
 check("基礎猜測的說明與例子不講鍵的功能", not _re101.search(r"前進|往前|跳|攻擊|挖|放置|物品欄|背包|蹲|衝刺", _ent["用途"] + "".join(_ent["例子"])), _ent["用途"])
+# 11/05 量一圈沒有像素上限：模擬一圈 2400、半圈 1200 長得像起點
+class _LoopSim(T.Tools):
+    LOOP = 2400
+    def __init__(self, feats=True):
+        self.pos, self.feats, self.verify2 = 0, feats, False
+    def _drag(self, dx, dy, fy=None, fx=None): self.pos += dx
+    def grab(self): return self.pos
+    def diff(self, a, b):
+        p = (b - a) % self.LOOP
+        far = min(p, self.LOOP - p)
+        half = abs(p - self.LOOP / 2)
+        return min(far / 20, 2 + half / 20) if self.feats else 30.0
+    def _feat_deg(self, before, after, want=None):
+        return ((after - before) * 360.0 / self.LOOP, 0, 100, 1.0, "") if self.feats else (None, None, 0, 0.0, "")
+_sl0 = T.time.sleep; T.time.sleep = lambda s: None
+try:
+    _s = _LoopSim(); _r = _s._loop_once()
+    check("量一圈：一圈 2400 量得到、不被半圈騙", _r is not None and abs(_r - 2400) <= 40, _r)
+    _s = _LoopSim(); _s.LOOP = 6000; _r = _s._loop_once()
+    check("量一圈：一圈 6000 也量得到（沒有像素上限）", _r is not None and abs(_r - 6000) <= 60, _r)
+    _s = _LoopSim(False); _s.LOOP_TIMEOUT = 0.05; _r = _s._loop_once()
+    check("量一圈：沒特徵又回不到起點 → 時間到回 None、不亂給", _r is None, _r)
+    class _LoopStill(_LoopSim):
+        _n = 0
+        def diff(self, a, b):
+            self._n += 1
+            return 6.0 / (1 + self._n) if self._n > 7 else 4.0
+    _s = _LoopStill(False); _s.LOOP_TIMEOUT = 0.05; _r = _s._loop_once()
+    check("量一圈：鏡頭沒轉（開著物品欄）只有雜訊 → 不算回到起點", _r is None, _r)
+finally:
+    T.time.sleep = _sl0
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)
