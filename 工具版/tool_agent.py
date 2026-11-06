@@ -315,7 +315,10 @@ def _build_system(game, cat, plan3=False):
     except OSError:
         pass
     groups = ["校準", "文件", "看", "移動", "視角", "互動", "意外", "記憶", "流程", "學習", "自訂"]
-    tool_txt = NL.join(f"【{g}】" + NL + NL.join("  " + l for l in catalog_lines(cat, g))
+    # 11/06 使用者把「卡關後按按看」放在學習工具：全列模式也要看得到（工具樹模式在 認識新東西 的說明裡）
+    learn_note = (load_tree().get("認識新東西") or {}).get("說明", "").split("；認出新東西")[0]
+    tool_txt = NL.join(f"【{g}】" + (f"（{learn_note}）" if g == "學習" and learn_note else "") + NL
+                       + NL.join("  " + l for l in catalog_lines(cat, g))
                        for g in groups if catalog_lines(cat, g))
     if TOOL_TREE["開"]:
         tool_txt = tree_top_text(cat)
