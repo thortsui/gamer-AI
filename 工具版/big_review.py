@@ -60,9 +60,15 @@ def main():
                            capture_output=True, text=True, encoding="utf-8").stdout
     # 工具使用率
     use = Counter()
-    recs = [json.loads(l) for l in open(os.path.join(m, a.date + ".jsonl"), encoding="utf-8")]
+    # 11/09 定時檢討兩次 rc 1：代理還在跑、最後一行寫到一半，json.loads 當掉；跳過壞行
+    recs = []
+    for l in open(os.path.join(m, a.date + ".jsonl"), encoding="utf-8"):
+        try:
+            recs.append(json.loads(l))
+        except ValueError:
+            pass
     for r in recs:
-        for ret in r["回傳"]:
+        for ret in r.get("回傳") or []:
             mm = re.match(r"● (\S+?)(?:\(|\s→)", ret)
             if mm:
                 use[mm.group(1)] += 1
@@ -80,7 +86,7 @@ def main():
     seen_runs = Counter()
     last, run = None, 0
     for r in recs:
-        s = (r["看到"] or "")[:30]
+        s = (r.get("看到") or "")[:30]
         if s == last:
             run += 1
         else:

@@ -35,8 +35,12 @@ def main():
             time.sleep(30)
         d = latest_date(a.game)
         log(a.game, f"開始大檢討 --date {d}")
-        rc = subprocess.call([sys.executable, "-u", os.path.join(ROOT, "工具版", "big_review.py"),
-                              "--game", a.game, "--date", d], cwd=ROOT)
+        # 11/09 兩次 rc 1：nohup 到 /dev/null 時 stdout 不是 utf-8，印中文就當掉；改成寫檔＋指定 utf-8
+        out = os.path.join(ROOT, "專案", a.game, "記憶", "工具版", f"定時檢討_{dt.datetime.now():%m%d_%H%M}.out")
+        with open(out, "w", encoding="utf-8") as fo:
+            rc = subprocess.call([sys.executable, "-u", os.path.join(ROOT, "工具版", "big_review.py"),
+                                  "--game", a.game, "--date", d], cwd=ROOT, stdout=fo, stderr=subprocess.STDOUT,
+                                 env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         log(a.game, f"大檢討結束 rc {rc}")
 
 
