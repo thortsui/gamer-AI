@@ -578,6 +578,8 @@ class Tools(ExtraTools):
         self.verify2 = False            # 10/18 使用者：「量測都要二次驗證」（--verify2）
         self.effort_locked = False      # 10/18 使用者：「這次挑戰都用高思考」（--lock-effort）
         self._load_brightness()
+        from collections import deque as _dq
+        self.think_shots = _dq(maxlen=12)       # 11/10 想的時候畫面大變存的前後圖（ThinkWatch 填、突發狀況 用）
 
     def _load_brightness(self):
         """亮度 存在 記憶/工具版/亮度.json，重啟不會默默變回去；沒存過才看 GAMER_BRIGHTEN。"""
@@ -5695,15 +5697,24 @@ def screen_busy(im):
 class ThinkWatch:
     """第 102 輪（10/29）：他想的那 30～100 秒裡畫面還在跑——10/29 死 3 次只有 1 次看到死亡畫面（另 2 次在想的時候死、
     下一輪直接是大廳）。想的時候背景每 EVERY 秒截一次，畫面跟上一張差很多才整張 OCR，讀到 DEATH_RE 的字就記下，下一輪面板照實寫。"""
-    EVERY = 4.0
+    # 11/10 使用者：「他在思考的過程中也去定期截圖 例如每零點5接一張 如果看到有畫面的大變的話也可以讓他之後事後再去檢討
+    # 那一張圖到底做了什麼發生了什麼事情 合併到突發狀況的工具」→ 每 0.5 秒截一張；跟前一張差很多（BIG）就把前後兩張
+    # 存進 記憶/工具版/思考截圖/，下一輪面板照實寫時間與變化量，突發狀況 會把這些圖帶給他看。讀死亡字仍 4 秒最多一次（OCR 慢）。
+    EVERY = 0.5
+    OCR_EVERY = 4.0
+    BIG = 20.0              # 64×36 灰階平均差（0～255）；轉頭不會發生（想的時候沒在動），載入／死亡畫面 30 以上
+    BIG_GAP = 2.0           # 同一次轉場連續幾張都會大變：前一次大變 2 秒內的不再另存
+    BIG_PER_ROUND = 6
+    KEEP_FILES = 300
     DARK = "全黑畫面"
 
     def __init__(self, tools):
-        self.tools, self.hits, self._stop, self._th = tools, [], None, None
+        self.tools, self.hits, self.bigs, self._stop, self._th = tools, [], [], None, None
+        self.round = 0
 
-    def start(self):
+    def start(self, rnd=0):
         import threading
-        self.hits, self._stop = [], threading.Event()
+        self.hits, self.bigs, self._stop, self.round = [], [], threading.Event(), rnd
         self._th = threading.Thread(target=self._run, daemon=True)
         self._th.start()
 
@@ -5713,9 +5724,38 @@ class ThinkWatch:
             self._th.join(timeout=5)
         return list(self.hits)
 
+    def _save_big(self, prev_im, im, d, b0, b1):
+        from PIL import Image
+        now = datetime.now()
+        if not getattr(self.tools, "mdir", None):
+            return
+        folder = os.path.join(self.tools.mdir, "思考截圖")
+        os.makedirs(folder, exist_ok=True)
+        w = 640
+        a = prev_im.resize((w, max(1, int(prev_im.height * w / prev_im.width))))
+        b = im.resize(a.size)
+        pair = Image.new("RGB", (w * 2 + 8, a.height), (255, 0, 0))
+        pair.paste(a, (0, 0))
+        pair.paste(b, (w + 8, 0))
+        name = f"{now:%m%d_%H%M%S}_{now.microsecond // 100000}_變化{d:.0f}.jpg"
+        pair.save(os.path.join(folder, name), quality=80)
+        steps = [str(x.get("做"))[:40] for x in list(getattr(self.tools, "step_log", []) or [])[-2:]]
+        ev = {"時間": now.strftime("%H:%M:%S"), "日期": now.strftime("%m/%d"), "輪": self.round, "變化": round(d),
+              "亮度": [round(b0), round(b1)], "檔": name, "想之前做的": steps, "看過": False}
+        self.bigs.append(ev)
+        shots = getattr(self.tools, "think_shots", None)
+        if shots is not None:
+            shots.append(ev)
+        try:
+            files = sorted(os.listdir(folder))
+            for f in files[:-self.KEEP_FILES]:
+                os.remove(os.path.join(folder, f))
+        except OSError:
+            pass
+
     def _run(self):
         import numpy as np
-        last = None
+        last_ocr, last_ocr_t, prev_g, prev_im, last_big_t = None, 0.0, None, None, 0.0
         while not self._stop.wait(self.EVERY):
             try:
                 im = self.tools.grab()
@@ -5725,9 +5765,21 @@ class ThinkWatch:
                 # 第 109 輪：10/29 進局 7 次只有 1 次被當換場景——載入黑畫面（亮度 0～3）多半在他想的時候閃過
                 if float(g.mean()) < 20 and not any(h[1] == self.DARK for h in self.hits):
                     self.hits.append((datetime.now().strftime("%H:%M:%S"), self.DARK, ""))
-                if last is not None and float(np.abs(g - last).mean()) < 12:
+                if prev_g is not None:
+                    d = float(np.abs(g - prev_g).mean())
+                    t = time.time()
+                    if d >= self.BIG and t - last_big_t >= self.BIG_GAP and len(self.bigs) < self.BIG_PER_ROUND:
+                        last_big_t = t
+                        try:                                # 存圖失敗不能擋到後面讀死亡字
+                            self._save_big(prev_im, im, d, float(prev_g.mean()), float(g.mean()))
+                        except Exception as e:  # noqa: BLE001
+                            print(f"   想的時候存大變圖失敗：{e}")
+                prev_g, prev_im = g, im
+                if time.time() - last_ocr_t < self.OCR_EVERY:
+                    continue
+                if last_ocr is not None and float(np.abs(g - last_ocr).mean()) < 12:
                     continue                                # 畫面沒大變就不讀字
-                last = g
+                last_ocr, last_ocr_t = g, time.time()
                 import local_text
                 txt = " ".join(str(r[1]) for r in (local_text._win_read_once(im) or []))
                 m = re.search(Tools.DEATH_RE, txt, re.I)
@@ -5737,10 +5789,18 @@ class ThinkWatch:
                 continue
 
     @staticmethod
+    def big_panel(bigs):
+        if not bigs:
+            return ""
+        return ("【你上一輪在想的時候，畫面大變過】（程式每 0.5 秒截一次，前後兩張已存起來）"
+                + "；".join(f"{b['時間']} 變化 {b['變化']}（亮度 {b['亮度'][0]}→{b['亮度'][1]}）" for b in bigs)
+                + "｜不知道發生了什麼、為什麼發生 → 叫 突發狀況，會把這幾張前後圖給你看" + NL)
+
+    @staticmethod
     def panel(hits):
         if not hits:
             return ""
-        return ("【你上一輪在想的時候，畫面出現過】（程式每 4 秒截一次；你上一輪那張截圖看不到）"
+        return ("【你上一輪在想的時候，畫面出現過】（程式在你想的時候一直截圖；你上一輪那張截圖看不到）"
                 + "；".join((f"{t} 畫面全黑（可能在載入、換地方）" if w == ThinkWatch.DARK else f"{t} 讀到「{w}」（整句：{s}）")
                            for t, w, s in hits) + NL)
 
@@ -6248,7 +6308,7 @@ def main():
             os.replace(state_path + ".tmp", state_path)
         except OSError as e:
             print(f"   存檔失敗：{e}")
-    think_watch, think_hits = ThinkWatch(tools), []   # 第 102 輪
+    think_watch, think_hits, think_big = ThinkWatch(tools), [], []   # 第 102 輪；11/10 think_big＝想的時候畫面大變（存了圖）
     tools.scene_mem = SceneMemory(tools.mdir)         # 第 103 輪
     SLIM["開"] = bool(args.slim_system)
     if SLIM["開"] and live:
@@ -6383,7 +6443,7 @@ def main():
                    + "【現在的小任務】（這一輪的目標是它）" + tools.small_now_text() + NL
                    + tw.panel(task_ev, big, acted=_acted_last(history)) + NL
                    + "【上一輪：原因 → 應有的結果 → 實際？】" + NL + prev_txt + NL + remind
-                   + ThinkWatch.panel(think_hits) + NL)
+                   + ThinkWatch.panel(think_hits) + ThinkWatch.big_panel(think_big) + NL)
         rest_a = (((tools.tree_panel(history[-1] if history else None) + NL) if TOOL_TREE["開"] else "")
                   + "【開工數值】" + tools.startup_text() + NL
                   + tools.persp_text() + NL
@@ -6407,11 +6467,12 @@ def main():
         content.append({"type": "text", "text": panel})
         t0 = time.time()
         LIVE.update({"輪": rnd, "階段": "想", "開始": t0, "做": []})
-        think_watch.start()                               # 第 102 輪：想的時候背景看有沒有死亡字
+        think_watch.start(rnd)                            # 第 102 輪：想的時候背景看有沒有死亡字；11/10 起每 0.5 秒、大變存圖
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
                                           time.time() + args.deadline, 0.2, effort=(tools.effort_override or args.effort))
         dt = time.time() - t0
         think_hits = think_watch.stop()
+        think_big = list(think_watch.bigs)
         reason = LAST_REASONING.get("text", "")
         LAST_REASONING["text"] = ""
         o = parse_json_loose(repair_json(raw)) or {}

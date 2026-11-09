@@ -30,12 +30,15 @@ class ExtraTools:
     model = ""
 
     # ---------------- 共用
-    def _ask(self, system, user, effort="慢想", max_tokens=2500, deadline=300, image=None):
+    def _ask(self, system, user, effort="慢想", max_tokens=2500, deadline=300, image=None, images=None):
         from play_agent import stream_json, parse_json_loose, LAST_REASONING
         import tool_agent as T
         content = [{"type": "text", "text": user}]
         if image is not None:                       # 10/19 突發狀況：帶現在的畫面
             content = [{"type": "image_url", "image_url": {"url": T.img_uri(image)}}] + content
+        for tag, im in (images or []):              # 11/10 突發狀況：想的時候畫面大變的前後圖
+            content = content[:-1] + [{"type": "text", "text": tag},
+                                      {"type": "image_url", "image_url": {"url": T.img_uri(im, 1288)}}] + content[-1:]
         raw, trunc, _, _ = stream_json(self.endpoint, self.model or T.detect_model(self.endpoint), system,
                                        content, max_tokens, time.time() + deadline, 0.3, effort=effort)
         reason = LAST_REASONING.get("text", "")
@@ -1691,11 +1694,55 @@ class ExtraTools:
             out += [f"- {p['事項']}（遇到 {p['次數']} 次、連續 {p['連續']}）" for p in sorted(wf["可能事項"], key=lambda p: -p["次數"])[:8]]
         return NL.join(out)
 
-    def learn_surprise(self, 情況="", 預期=""):
-        """突發狀況：看現在的畫面＋最近幾步＋工作流，想這個意外在工作流裡合不合理；合理就進可能事項，連續多次就進工作流。"""
+    # 11/10 使用者：「告訴他 失敗或者死亡後可能會發生的大部分的情況」（通用的，不是這個遊戲的攻略）
+    FAIL_CASES = ("失敗或死亡後常見的情況（各遊戲不一定都有）：畫面變紅／變灰／變暗或模糊；跳出「你死了／倒下／Game Over／失敗」之類的字；"
+                  "出現結算或重生面板（重新開始、復活、剩幾條命、倒數）；鏡頭飛走或改看別人；全黑一下或載入畫面；"
+                  "回到大廳、出生點、存檔點或關卡開頭——常常沒有任何死亡字就直接換地方；血量補滿、身上道具或分數不見；"
+                  "要重新排隊、重新進場；自己倒下還能被救、隊友全倒才結束；時間到、掉下去、被抓到也會失敗")
+    SURPRISE_SHOTS = 3
+
+    def _surprise_shots(self, 時間=""):
+        """想的時候畫面大變存的前後圖：指定時間就找那張（含以前的檔案），沒指定就拿還沒看過的最近幾張。"""
+        from PIL import Image
+        folder = os.path.join(self.mdir, "思考截圖")
+        want = re.sub(r"[^0-9]", "", str(時間))
+        picks = []
+        if want:
+            try:
+                names = sorted(os.listdir(folder))
+            except OSError:
+                names = []
+            hit = [n for n in names if n.split("_")[1].startswith(want[:6])] if len(want) >= 4 else []
+            for n in hit[-self.SURPRISE_SHOTS:]:
+                t = n.split("_")[1]
+                picks.append({"時間": f"{t[:2]}:{t[2:4]}:{t[4:6]}", "檔": n, "變化": n.split("變化")[-1][:-4], "亮度": None, "想之前做的": None})
+        else:
+            shots = [s for s in list(getattr(self, "think_shots", []) or []) if not s.get("看過")]
+            picks = shots[-self.SURPRISE_SHOTS:]
+        out, lines = [], []
+        for i, s in enumerate(picks, 1):
+            try:
+                im = Image.open(os.path.join(folder, s["檔"])).convert("RGB")
+            except OSError:
+                continue
+            s["看過"] = True
+            tag = (f"截圖{i}：{s['時間']}（第 {s.get('輪', '?')} 輪你在想的時候）畫面變化 {s['變化']}"
+                   + (f"、亮度 {s['亮度'][0]}→{s['亮度'][1]}" if s.get("亮度") else "")
+                   + "；左＝變之前、右＝變之後"
+                   + (f"；那之前程式剛做完：{'、'.join(s['想之前做的'])}" if s.get("想之前做的") else ""))
+            out.append((tag, im))
+            lines.append(tag)
+        return out, lines
+
+    def learn_surprise(self, 情況="", 預期="", 時間=""):
+        """突發狀況：看現在的畫面＋最近幾步＋工作流，想這個意外在工作流裡合不合理；合理就進可能事項，連續多次就進工作流。
+        11/10 使用者：「突發狀況的工具是在發生的事情，他卻不知道為什麼發生或者發生了什麼的時候用」→ 帶想的時候畫面大變的前後圖＋失敗／死亡常見情況。"""
         what = str(情況).strip()
+        shots, shot_lines = self._surprise_shots(時間)
         if len(re.sub(r"\W", "", what)) < 3:
-            return "突發狀況 要寫發生了什麼意外，例：突發狀況(長按E後畫面變成攝影機畫面、下方有辦理入住和出口,預期跳登記畫面)"
+            if not shots:
+                return "突發狀況 要寫發生了什麼意外，例：突發狀況(長按E後畫面變成攝影機畫面、下方有辦理入住和出口,預期跳登記畫面)"
+            what = "（說不出來；看想的時候畫面大變的前後圖）"
         im = self.grab() if hasattr(self, "grab") else None
         words = ""
         try:
@@ -1714,11 +1761,14 @@ class ExtraTools:
             + "最後三步：" + NL + steps + NL
             + "最近幾輪：" + NL + self._recent_text(6) + NL
             + "你的工作流：" + NL + (self.workflow_text() or "（還沒有）") + NL * 2
-            + "看附的現在畫面，想：這個意外到底是什麼（是障礙？是要找的目標？是換到新畫面／新模式？是遊戲事件？是你自己的角色？是程式量測的問題？），"
+            + ("你在想的時候畫面大變過，程式存的前後圖（附在後面）：" + NL + NL.join(shot_lines) + NL * 2 if shot_lines else "")
+            + "使用者告訴你的：" + self.FAIL_CASES + NL * 2
+            + "看附的現在畫面" + ("和前後圖" if shot_lines else "") + "，想：這個意外到底是什麼（是障礙？是要找的目標？是換到新畫面／新模式？是失敗或死亡？是遊戲事件？是你自己的角色？是程式量測的問題？），"
               "發生在工作流的哪一步、在工作流裡合不合理（合理＝照工作流做下去本來就可能遇到）。"
-              '只輸出 JSON：{"是什麼":"<=40字","在哪一步":"<=30字","合理":true,"為什麼":"<=80字",'
+              '只輸出 JSON：{"截圖裡發生了什麼":"<=80字：前後圖各看到什麼、變了什麼、那之前做了什麼（沒附圖寫無）",'
+              '"是什麼":"<=40字","在哪一步":"<=30字","合理":true,"為什麼":"<=80字",'
               '"可能事項":"一句：之後遇到這情況要怎麼看待、怎麼做（合理才寫）","下一步":"工具(參數)"}',
-            effort="中想", max_tokens=8000, deadline=240, image=im)
+            effort="中想", max_tokens=8000, deadline=240, image=im, images=shots)
         if not o:
             self._append("突發狀況.md", f"{what}｜（沒解析出來）")
             return "突發狀況沒想出結果（沒解析出來）；先用 檢討 記下這次的意外"
@@ -1728,10 +1778,13 @@ class ExtraTools:
         if not isinstance(ok, bool):                                  # 10/25 審查：沒回答「合理」原本被當成「不合理」
             self._append("突發狀況.md", f"{what}｜（沒回答合不合理）")
             return "突發狀況想了但沒回答合不合理；先用 檢討 記下這次的意外"
-        line = (f"{what}｜是什麼:{o.get('是什麼', '')}｜在哪一步:{o.get('在哪一步', '')}｜合理:{'是' if ok else '否'}"
+        shot_txt = str(o.get("截圖裡發生了什麼") or "").strip() if shot_lines else ""
+        line = (f"{what}｜" + (f"截圖({len(shot_lines)}張):{shot_txt}｜" if shot_lines else "")
+                + f"是什麼:{o.get('是什麼', '')}｜在哪一步:{o.get('在哪一步', '')}｜合理:{'是' if ok else '否'}"
                 f"｜為什麼:{o.get('為什麼', '')}｜可能事項:{o.get('可能事項', '')}｜下一步:{o.get('下一步', '')}")
         self._append("突發狀況.md", line)
-        ret = (f"突發狀況想完：是什麼＝{o.get('是什麼', '')}｜在哪一步＝{o.get('在哪一步', '')}｜合理＝{'是' if ok else '否'}"
+        ret = ((f"看了 {len(shot_lines)} 張想的時候畫面大變的前後圖：{shot_txt}" + NL) if shot_lines else "") + (
+               f"突發狀況想完：是什麼＝{o.get('是什麼', '')}｜在哪一步＝{o.get('在哪一步', '')}｜合理＝{'是' if ok else '否'}"
                f"｜為什麼＝{o.get('為什麼', '')}｜下一步＝{o.get('下一步', '')}")
         item = str(o.get("可能事項") or "").strip()
         if ok and item:

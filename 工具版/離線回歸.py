@@ -1113,7 +1113,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4＋亮度 3）", len(_ex101) == 448, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4＋亮度 3＋突發狀況 2）", len(_ex101) == 450, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1138,8 +1138,26 @@ try:
     _lt102._win_read_once = lambda im: [(None, "在醫院工作直到你發現", 1.0)]
     _w102 = T.ThinkWatch(_FT102()); _w102.start(); _tm.sleep(0.5); _h109 = _w102.stop()
     check("第 109 輪：想的時候畫面全黑 → 記一筆全黑（不重複）、面板寫畫面全黑", [h[1] for h in _h109] == [T.ThinkWatch.DARK] and "畫面全黑（可能在載入" in T.ThinkWatch.panel(_h109), _h109)
+    # 11/10 想的時候每 0.5 秒截圖、大變存前後圖（暫存目錄）→ 面板寫、突發狀況 拿來看
+    import tempfile as _tf110
+    from collections import deque as _dq110
+    class _FT110(_FT102):
+        mdir = _tf110.mkdtemp(); step_log = [{"做": "走(1)"}, {"做": "按(e)"}]; think_shots = _dq110(maxlen=12)
+    _ft110 = _FT110()
+    _w110 = T.ThinkWatch(_ft110); _w110.start(7); _tm.sleep(0.5); _w110.stop()
+    _files110 = os.listdir(os.path.join(_FT110.mdir, "思考截圖"))
+    check("11/10 想的時候畫面大變 → 存前後圖、2 秒內同一次轉場只存一張", len(_w110.bigs) == 1 and len(_files110) == 1 and _w110.bigs[0]["輪"] == 7 and _w110.bigs[0]["想之前做的"] == ["走(1)", "按(e)"], (_w110.bigs, _files110))
+    check("11/10 大變進 tools.think_shots、面板寫時間與變化、指去 突發狀況", len(_ft110.think_shots) == 1 and "畫面大變過" in T.ThinkWatch.big_panel(_w110.bigs) and "突發狀況" in T.ThinkWatch.big_panel(_w110.bigs) and T.ThinkWatch.big_panel([]) == "")
+    _imgs102[:] = [Image.new("RGB", (320, 180), (100, 100, 100))] * 2
+    _w110b = T.ThinkWatch(_ft110); _w110b.start(8); _tm.sleep(0.3); _w110b.stop()
+    check("11/10 畫面沒變 → 不存圖", _w110b.bigs == [] and len(os.listdir(os.path.join(_FT110.mdir, "思考截圖"))) == 1)
+    _ts110 = T.Tools("動物醫院", cat, live=False, image_path=None); _ts110.mdir = _FT110.mdir; _ts110.think_shots = _ft110.think_shots
+    _sh110, _ln110 = _ts110._surprise_shots()
+    check("11/10 突發狀況 拿還沒看過的前後圖（附做了什麼），看過就不再給", len(_sh110) == 1 and "走(1)" in _ln110[0] and "左＝變之前" in _ln110[0] and _ts110._surprise_shots()[0] == [], _ln110)
+    _hh110 = _files110[0].split("_")[1]
+    check("11/10 突發狀況(時間) 回頭找那次存的圖", len(_ts110._surprise_shots(f"{_hh110[:2]}:{_hh110[2:4]}:{_hh110[4:6]}")[0]) == 1 and _ts110._surprise_shots("99:99:99")[0] == [])
 finally:
-    _lt102._win_read_once = _bak102; T.ThinkWatch.EVERY = 4.0
+    _lt102._win_read_once = _bak102; T.ThinkWatch.EVERY = 0.5
 # 第 103 輪：場景切換 → 小任務要重新想＋翻他在很像的畫面記過的（暫存目錄，不碰真的記憶）
 import tempfile as _tf103, json as _js103
 from datetime import datetime as _dt103
@@ -1237,7 +1255,7 @@ T.TOOL_TREE["開"] = False
 _s111f = T.build_system("動物醫院", _c111, 2)
 check("slim system 只留 身分／目標第一段／絕對限制／工具／兩步規劃＋格式", "【絕對限制】" in _s111 and "【兩步規劃】" in _s111 and "從頭重新學一次" in _s111
       and all(x not in _s111 for x in ("【開局測量】", "【每個行為三件事】", "【大任務與小任務】", "【第幾人稱】", "【突發狀況】", "磁磚", "捲鏡頭")), len(_s111))
-check("slim 樹模式 system < 4,000 字、全列 < 18,200 字（11/06 學習段加使用者原話約 120 字）", len(_s111) < 4000 and len(_s111f) < 18200, (len(_s111), len(_s111f)))
+check("slim 樹模式 system < 4,000 字、全列 < 18,800 字（11/06 學習段加使用者原話約 120 字；11/10 突發狀況不再隱藏、帶失敗／死亡常見情況約 630 字）", len(_s111) < 4000 and len(_s111f) < 18800, (len(_s111), len(_s111f)))
 check("slim 樹模式 JSON 先記欄有 打開 提示、全列沒有", "同時 打開(那一步工具所在的那一格)" in _s111 and "同時 打開(" not in _s111f and "找做慢、做白工" in _s111f)
 _by111 = {t["名稱"]: t for t in _c111["工具"]}
 check("使用者目標掛到工具：轉 正負、捲 不切人稱、估距 磁磚、記長相 拍照記點", "鏡頭往右轉" in _by111["轉"]["用途"] and "不要捲來切換人稱" in _by111["捲"]["用途"]
@@ -1373,6 +1391,12 @@ _tb.brightness_set("1"); check("亮度(1)：回到原本", _tb.brightness_lut is
 check("亮度在工具樹 看與找/看畫面", "亮度" in T.load_tree()["看與找"]["子"]["看畫面"]["工具"])
 _ent = next(x for x in cat["工具"] if x["名稱"] == "亮度")
 check("亮度的說明不講什麼時候該調", not _re101.search(r"夜|晚|暗|洞", _ent["用途"] + "".join(_ent["例子"])), _ent["用途"])
+# 11/10 突發狀況：不再隱藏、在 任務流程/出事、用途有使用者原話與失敗／死亡常見情況、參數多 時間
+_ent = next(x for x in cat["工具"] if x["名稱"] == "突發狀況")
+check("11/10 突發狀況 列出來（不隱藏）、在工具樹 任務流程/出事", not _ent.get("隱藏") and "突發狀況" in T.load_tree()["任務流程"]["子"]["出事"]["工具"])
+check("11/10 突發狀況 用途有使用者原話、失敗或死亡後常見的情況、0.5 秒截圖", all(k in _ent["用途"] for k in ("不知道為什麼發生", "失敗或死亡後常見的情況", "回到大廳", "0.5 秒")) and "時間" in _ent["參數"], _ent["用途"])
+_n, _p = T.parse_call("突發狀況(突然回到一開始的地方,,03:15:22)", cat)
+check("11/10 突發狀況(情況,,時間) 參數對得上", _n == "突發狀況" and str(_p.get("時間", "")).strip() == "03:15:22" and "一開始" in str(_p.get("情況", "")), _p)
 # 11/05 量一圈沒有像素上限：模擬一圈 2400、半圈 1200 長得像起點
 class _LoopSim(T.Tools):
     LOOP = 2400
