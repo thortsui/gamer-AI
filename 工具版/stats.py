@@ -154,12 +154,32 @@ def main():
     # 10/16 14:3x：14:09 理智 1%→14:11 直接回大廳、沒看到死亡面板 → 漏算。加：局內（看到有「輪班」）下一筆變大廳、
     # 最後看到的理智 ≤5% 也算死亡（跟面板三分鐘內的算同一次）
     respawn = 0
+    self_death = 0
     last = None
     sanity, in_game = None, False
+    # 11/12 使用者「如果他自己判斷說他死亡了也算是一次死亡」：他自己寫的 看到／想／上一輪實際 裡，
+    # 有一句講到 死亡／倒下／陣亡（而且不是否定、假設、準則、教訓）就算一次；跟其他判斷三分鐘內的算同一次
+    SELF_DW = re.compile(r"死亡|死了|死掉|倒下|倒地|陣亡")
+    SELF_NEG = re.compile(r"不是|不算|沒有|沒死|非死|別|如果|若|可能|或|會不會|避免|以免|免得|準則|教訓|檢查|防|怕|才會|會死|前|\?|？")
+
+    def self_judged(r):
+        for k in ("看到", "想", "上一輪實際"):
+            for seg in re.split(r"[｜|；;。\n]", r.get(k) or ""):
+                if SELF_DW.search(seg) and not SELF_NEG.search(seg):
+                    return True
+        return False
+
     for r in recs:
         sv = r["看到"] or ""
         h, m, s_ = (int(x) for x in r["時間"].split(":"))
         t = h * 3600 + m * 60 + s_
+        if self_judged(r):
+            if last is None or t - last > 180:
+                respawn += 1
+                self_death += 1
+            last = t
+            in_game, sanity = False, None
+            continue
         # 10/27 09:0x：08:59 看到「左海報你死了」（遊戲牆上的海報）被算成死亡 → 海報／招牌／看板／告示 後面接的「你死了」不算
         died = bool(re.search(r"(?<!海報)(?<!招牌)(?<!看板)(?<!告示)(你死了|再玩一次)", sv)) and not re.search(r"(海報|招牌|看板|告示)[^，；。、]{0,4}你死了", sv)
         # 10/26 18:2x：18:18 理智 5%→回大廳漏算——他寫「道具欄5%」、回大廳那輪只寫「商店邀請職業日誌按鈕列」沒寫「大廳」。
@@ -203,7 +223,7 @@ def main():
     print(f"移動有反應率：{rate(move_ok)}｜視角有反應率：{rate(look_ok)}"
           + (f"，實測位移平均 {statistics.mean(shifts):.0f}% 畫面寬" if shifts else ""))
     print(f"按 E 有反應率：{rate(e_ok)}｜點擊：" + "、".join(f"{k} {v}" for k, v in click.items()) + (f"，確認後有反應 {rate(click_ok)}" if click_ok[1] else "") if (e_ok[1] or click) else "按 E／點擊：還沒用過")
-    print(f"大任務：設 {big_set}、完成 {big_done}｜遊戲任務完成：{task_done} 件｜死亡重生：{respawn} 次")
+    print(f"大任務：設 {big_set}、完成 {big_done}｜遊戲任務完成：{task_done} 件｜死亡重生：{respawn} 次（他自己判斷死亡 {self_death}）")
     # 10/16 05:3x：遊戲自己的進度（輪班數、錢）從「看到」字面抓；多人伺服器，不全是他做的
     shifts_seen, money_seen = [], []
     for r in recs:
