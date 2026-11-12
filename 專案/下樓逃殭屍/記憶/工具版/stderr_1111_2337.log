@@ -1,0 +1,16 @@
+D:\Documents\ThorWorkSpace\gamer AI 工具版\工具版\tool_agent.py:651: DeprecationWarning: mss.mss is deprecated and will be removed in a future release; use mss.MSS instead
+  with mss.mss() as sct:
+Traceback (most recent call last):
+  File "D:\Documents\ThorWorkSpace\gamer AI 工具版\工具版\tool_agent.py", line 6610, in <module>
+    main()
+    ~~~~^^
+  File "D:\Documents\ThorWorkSpace\gamer AI 工具版\工具版\tool_agent.py", line 6342, in main
+    switch_txt = tools.scene_switch(tools.switch_pending, auto=True)
+  File "D:\Documents\ThorWorkSpace\gamer AI 工具版\工具版\tool_agent.py", line 1101, in scene_switch
+    out.append("② 你以前在很像的畫面記過的：" + (scm.records_text(im).strip() if im is not None else "（抓不到畫面）"))
+                                                 ~~~~~~~~~~~~~~~~^^^^
+  File "D:\Documents\ThorWorkSpace\gamer AI 工具版\工具版\tool_agent.py", line 5906, in records_text
+    f = self.feat(im)
+  File "D:\Documents\ThorWorkSpace\gamer AI 工具版\工具版\tool_agent.py", line 5828, in feat
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
