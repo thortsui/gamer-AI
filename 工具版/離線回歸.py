@@ -1113,7 +1113,7 @@ _cat101 = _js101.load(open(os.path.join(os.path.dirname(os.path.abspath(T.__file
 _ex101 = [e for t in _cat101["工具"] for e in (t.get("例子") or [])]
 _bad101 = [e for e in _ex101 if _re101.search(r"不要|沒反應|沒用|失敗|量不出|找不到|卡住|卡了|擋路|錯了|記錯|✗", e)]
 check("範例沒有失敗情境字（不要／沒反應／失敗／找不到／✗…）", not _bad101, _bad101[:5])
-check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4＋亮度 3＋突發狀況 2）", len(_ex101) == 450, len(_ex101))
+check("範例總數（421＋開局測量 4＋場景切換 4＋研究任務 4＋不合預期 4＋左右鍵 4＋基礎猜測 4＋亮度 3＋突發狀況 2＋無法解決 1）", len(_ex101) == 451, len(_ex101))
 check("學習整理 的提示以成功做法為主、規則用「要…」", "【成功做法】" in open(os.path.join(os.path.dirname(os.path.abspath(T.__file__)), "tools_extra.py"), encoding="utf-8").read())
 # 第 102 輪：想的時候背景截圖，讀到死亡字下一輪面板寫出來
 import local_text as _lt102, numpy as _np102
@@ -1456,4 +1456,15 @@ check("小變化：回傳不解釋意思", not _re101.search(r"挖|撿|拿到|�
 _s = _SmallSim(_c); check("小變化：大變化不回傳", _s._small_note(_a, wait=False) == "" and not _s.extra_images)
 _s = _SmallSim(_a.copy()); _r = _s._small_note(_a, wait=False); check("小變化：沒變說沒變", "沒有任何一塊變" in _r, _r)
 _s = _SmallSim(_a); _s.live = False; check("小變化：離線不回報", _s._small_note(_a) == "")
+# 11/13 使用者「預設最低的反射思考 額外工具：無法解決 使用後會開更強的思考重新思考」
+_tr = T.Tools("動物醫院", cat, live=False, image_path=None)
+check("無法解決：沒叫之前 rethink 空", _tr.rethink is None)
+_n, _p = T.parse_call("無法解決(找不到往下的路)", cat); _r = _tr.run(_n, _p)
+check("無法解決：記下問題、回傳說下一輪更強思考", _tr.rethink and _tr.rethink["問題"] == "找不到往下的路" and "更強的思考" in _r, _r)
+_tr.effort_locked = True; _n, _p = T.parse_call("無法解決(還是過不去)", cat); _r = _tr.run(_n, _p)
+check("無法解決：鎖定思考強度時也能用", _tr.rethink["問題"] == "還是過不去", _r)
+_r = _tr.run("無法解決", {}); check("無法解決：沒寫問題要求寫", "要寫" in _r, _r)
+check("無法解決 在工具樹 任務流程/出事", "無法解決" in T.load_tree()["任務流程"]["子"]["出事"]["工具"])
+check("重新思考用慢想", T.RETHINK_EFFORT == "慢想")
+import play_agent as _pa; check("反射＝不推理", _pa.THINK_MODES["反射"][0] is False)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

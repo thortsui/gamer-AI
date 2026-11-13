@@ -31,6 +31,7 @@ TOOLFIX = os.environ.get("GAMER_TOOLFIX") == "1"
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 NL = "\n"
+RETHINK_EFFORT = "慢想"   # 11/13 無法解決 之後那一輪用的思考強度
 # 11/03 使用者「亮度拉高」：螢幕亮度不影響截圖，所以調亮他拿到的畫面。GAMER_BRIGHTEN＝gamma（<1 變亮，例 0.5）；沒設＝不動
 _bg = float(os.environ.get("GAMER_BRIGHTEN") or 1.0)
 # 11/06 使用者「給他開亮度調整功能」：他自己用 亮度(值) 調；值＝1／gamma（1＝原本、2＝gamma 0.5）。GAMER_BRIGHTEN 只當沒存過時的起始值
@@ -6464,12 +6465,20 @@ def main():
         panel = ((disp_txt + NL * 2) if disp_txt else "") + ((ask_txt + NL * 2) if ask_txt else "") + body + (
             f"看畫面，規劃接下來{kn}步（程式會一口氣做完、中間不給你看）。只輸出 JSON：" + (slim_format(plan_format(plan_n)) if SLIM["開"] else plan_format(plan_n)) if plan_n else
             "看畫面，決定這一輪要用哪些工具。只輸出 JSON：" + cat["輸出格式"])
+        # 11/13 使用者「預設最低的反射思考 額外工具：無法解決 使用後會開更強的思考重新思考」：叫了 無法解決 的下一輪用慢想（只這一輪）
+        round_effort = tools.effort_override or args.effort
+        rethink = tools.rethink
+        tools.rethink = None
+        if rethink:
+            round_effort = RETHINK_EFFORT
+            panel = (f"【重新思考】你上一輪（{rethink['時間']}）叫了 無法解決：「{rethink['問題']}」。"
+                     f"這一輪用更強的思考（{RETHINK_EFFORT}）重新想；下一輪回到 {tools.effort_override or args.effort}。" + NL * 2 + panel)
         content.append({"type": "text", "text": panel})
         t0 = time.time()
-        LIVE.update({"輪": rnd, "階段": "想", "開始": t0, "做": []})
+        LIVE.update({"輪": rnd, "階段": "想", "開始": t0, "做": [], "思考強度": round_effort})
         think_watch.start(rnd)                            # 第 102 輪：想的時候背景看有沒有死亡字；11/10 起每 0.5 秒、大變存圖
         raw, trunc, ttft, _ = stream_json(args.endpoint, model, system, content, args.max_tokens,
-                                          time.time() + args.deadline, 0.2, effort=(tools.effort_override or args.effort))
+                                          time.time() + args.deadline, 0.2, effort=round_effort)
         dt = time.time() - t0
         think_hits = think_watch.stop()
         think_big = list(think_watch.bigs)
@@ -6597,7 +6606,7 @@ def main():
                                 "看到": seen, "想": think, "用": calls, "回傳": rets, "原文": raw,
                                 "推理": reason, "截斷": trunc, "上一輪實際": actual, "符合": match,
                                 "符合統計": dict(match_stat), "右上字": task_words, "任務字讀法": "裁切1019", "任務字換": task_ev, "順序": (_ctx_last[0] or args.ctx_order),
-                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "不合預期": inter_txt.split(NL)[0][:40] if inter_txt else "", "想時畫面": [list(h) for h in (think_hits or [])], "system字": len(system), "面板字": len(panel),
+                                "工具模式": tool_mode, "system版": ("slim" if SLIM["開"] else "舊"), "問題類別": q_class, "記憶檢查": bool(mem_txt), "不合預期": inter_txt.split(NL)[0][:40] if inter_txt else "", "想時畫面": [list(h) for h in (think_hits or [])], "system字": len(system), "面板字": len(panel), "思考強度": round_effort, "重新思考": (rethink or {}).get("問題", ""),
                                 **({"先記": pre[:2], "步數": plan_n,
                                     "下三步": [{"做": st["做"], "結果應該是": st["結果應該是"], "回傳": str(st.get("回傳", ""))[:300]}
                                               for st in steps]} if plan_n else {})},

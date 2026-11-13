@@ -25,6 +25,7 @@ class ExtraTools:
     rounds = deque(maxlen=60)        # 最近幾輪：{"輪","看到","想","用","回傳"}（死亡檢討／成功回推／錄成程序用）
     watch_labels = []                # 追蹤(標籤)：每輪開頭 YOLO 找一次放進面板
     effort_override = None           # 思考強度(強度)
+    rethink = None                   # 無法解決(問題)：下一輪用 RETHINK_EFFORT 重新想（11/13）
     plan = None                      # 慢想排的大動作序列
     endpoint = "http://192.168.0.126:8888/v1"
     model = ""
@@ -980,6 +981,16 @@ class ExtraTools:
             return f"這次挑戰使用者定了思考強度（{getattr(self, 'effort_fixed', '')}），不能改；照這個繼續"
         self.effort_override = table[v]
         return f"之後每輪用「{v}」（{table[v]}）；想改回來再叫一次"
+
+    def learn_cant_solve(self, 問題=""):
+        """無法解決：11/13 使用者「預設最低的反射思考 額外工具：無法解決 使用後會開更強的思考重新思考」。
+        下一輪（只那一輪）用更強的思考重新想；鎖定思考強度時也照用。"""
+        q = str(問題).strip()
+        if not q:
+            return "無法解決 要寫哪件事解決不了，例如 無法解決(找不到往下的路)"
+        self.rethink = {"問題": q[:120], "時間": datetime.now().strftime("%H:%M:%S")}
+        self.rethink_count = getattr(self, "rethink_count", 0) + 1
+        return f"記下：「{q[:120]}」解決不了。下一輪用更強的思考重新想（只那一輪），之後回到原本的思考強度"
 
     def learn_teach_eyes(self, 看到="", 其實是=""):
         """教眼睛：YOLO 認錯了（看到 X 其實是 Y）→ 記進眼睛更正，收工訓練用。"""

@@ -21,6 +21,7 @@ def main():
     ap.add_argument("--until", required=True)
     ap.add_argument("--game", required=True)
     ap.add_argument("--window", default="")
+    ap.add_argument("--effort", default="慢想")   # 11/13 使用者「預設最低的反射思考」→ 傳 反射
     a = ap.parse_args()
     until = datetime.strptime(a.until, "%Y-%m-%d %H:%M")
     mdir = os.path.join(ROOT, "專案", a.game, "記憶", "工具版")
@@ -40,7 +41,7 @@ def main():
         if a.window:
             env["GAMER_WINDOW_PROC"] = a.window
         cmd = [sys.executable, "-u", os.path.join("工具版", "tool_agent.py"), "--game", a.game, "--live", "--rounds", "5000",
-               "--deadline", "600", "--max-tokens", "8000", "--effort", "慢想", "--lock-effort", "--verify2", "--steps", "2",
+               "--deadline", "600", "--max-tokens", "8000", "--effort", a.effort, "--lock-effort", "--verify2", "--steps", "2",
                "--no-small-update", "--tree-rotate", "30", "--tree-t0", datetime.now().strftime("%H:%M"), "--slim-system", "--mem-check", "120"]
         out = open(os.path.join(mdir, "stdout.log"), "w", encoding="utf-8")
         err = open(os.path.join(mdir, "stderr.log"), "w", encoding="utf-8")
