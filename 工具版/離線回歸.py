@@ -1467,4 +1467,14 @@ _r = _tr.run("無法解決", {}); check("無法解決：沒寫問題要求寫", 
 check("無法解決 在工具樹 任務流程/出事", "無法解決" in T.load_tree()["任務流程"]["子"]["出事"]["工具"])
 check("重新思考用慢想", T.RETHINK_EFFORT == "慢想")
 import play_agent as _pa; check("反射＝不推理", _pa.THINK_MODES["反射"][0] is False)
+# 11/13 使用者「總之讓他只輸出要使用的工具 不要別的 來加速試試看」（--tools-only）
+_s_old = T.build_system("動物醫院", cat, 2)
+T.TOOLS_ONLY["開"] = True
+try:
+    _s_to = T.build_system("動物醫院", cat, 2)
+    check("只輸出工具：system 有【只輸出工具】、格式只有「用」", "【只輸出工具】" in _s_to and T.plan_format(2) == T._TOOLS_ONLY_FORMAT and '"看到"' not in T.plan_format(2), len(_s_to))
+    check("只輸出工具：規則寫遊戲動作最多兩個", "最多兩個" in T.plan_rule(2), T.plan_rule(2)[:80])
+finally:
+    T.TOOLS_ONLY["開"] = False
+check("只輸出工具 關：格式照舊", '"看到"' in T.plan_format(2) and T.build_system("動物醫院", cat, 2) == _s_old)
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

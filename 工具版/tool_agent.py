@@ -173,7 +173,18 @@ _PLAN_FORMAT = ('{"看到":"儀器讀數，把畫面上看得到的東西、字�
                 '"下K步":[EX]}')
 
 
+# 11/13 使用者「總之讓他只輸出要使用的工具 不要別的 來加速試試看」（--tools-only）
+TOOLS_ONLY = {"開": False}
+_TOOLS_ONLY_FORMAT = '{"用":["工具(參數)","工具(參數)",…]}'
+_TOOLS_ONLY_RULE = ("【只輸出工具】（使用者 11/13 定的，這次測試照這個做）每一輪只寫你要用的工具，不寫別的（不寫看到、想、符合、理由）。"
+                    "記錄／檢討／文件／學習類（記筆記、檢討、打開、設小任務…）最多 2 個，不佔步數、先做；"
+                    "遊戲動作（走／轉／按／點字…）最多K個，照順序一口氣做完，中間不停下來給你看，做完才截下一張畫面給你。"
+                    "點擊還是兩步：點 或 點字 只是預約，確認點 要排在下一輪。")
+
+
 def plan_format(n):
+    if TOOLS_ONLY["開"]:
+        return _TOOLS_ONLY_FORMAT
     k = CN_NUM.get(n, str(n))
     ex = ",".join(['{"做":"工具(參數)","結果應該是":"這一步做完應該看到什麼"}'] + ['{"做":"…","結果應該是":"…"}'] * (n - 1))
     return _PLAN_FORMAT.replace("K", k).replace("EX", ex)
@@ -426,6 +437,8 @@ def slim_format(fmt):
 
 
 def plan_rule(n):
+    if TOOLS_ONLY["開"]:
+        return _TOOLS_ONLY_RULE.replace("K", CN_NUM.get(n, str(n)))
     return _PLAN_RULE.replace("K", CN_NUM.get(n, str(n)))
 
 
@@ -6159,6 +6172,7 @@ def main():
     ap.add_argument("--effort", default="快思推理",
                     help="推理強度：快思推理（low）／中想（medium）／慢想（xhigh）。2026-10-15 08:0x 使用者：「拉長他能說的字數、思考強度拉高」")
     # 10/18 使用者：「這次挑戰都用高思考、量測都要二次驗證、他要直接規劃好下三個步驟再直接執行中間不檢查」
+    ap.add_argument("--tools-only", action="store_true", help="11/13 測試：每輪只輸出要用的工具 {\"用\":[…]}，不寫看到／想／符合")
     ap.add_argument("--lock-effort", action="store_true", help="思考強度 工具不能改（全程用 --effort）")
     ap.add_argument("--verify2", action="store_true", help="量測二次驗證：每個量測做兩次、回報兩個值與一不一致")
     ap.add_argument("--plan3", action="store_true", help="三步規劃：每輪排下三步，程式一口氣做完才截下一張圖")
@@ -6262,6 +6276,7 @@ def main():
         threading.Thread(target=_live_writer, daemon=True).start()
     tools.verify2, tools.effort_locked = bool(args.verify2), bool(args.lock_effort)
     tools.effort_fixed = args.effort
+    TOOLS_ONLY["開"] = bool(args.tools_only)
     model = ("claude-" + args.brain + ("+原生" if args.brain_native else "+搜尋" if args.brain_search else "")) if args.brain else detect_model(args.endpoint)
     tools.endpoint, tools.model = args.endpoint, model
     system = build_system(args.game, cat, plan_n)
@@ -6512,7 +6527,17 @@ def main():
                                   "結果應該是": str(st.get("結果應該是") or "")[:80]})
                 elif st:
                     steps.append({"做": st, "結果應該是": ""})
-            if not steps and calls:                       # 他沒照格式、寫了舊的「用」：前 N 個當 N 步
+            if TOOLS_ONLY["開"] and not steps and calls:   # 11/13 只輸出工具：記錄類當先記、其他當 N 步
+                _grp = {t["名稱"]: t["類別"] for t in cat["工具"]}
+                for c in calls:
+                    _nm = parse_call(c, cat)[0]
+                    if _nm == "打開" or _grp.get(_nm) in PLAN3_PRE_GROUPS or _nm in PLAN3_PRE_TOOLS:
+                        pre.append(c)
+                    else:
+                        steps.append({"做": c, "結果應該是": ""})
+                if len(pre) > 2:
+                    plan_notes.append(f"✗ 記錄類一輪最多 2 個，你寫了 {len(pre)} 個，只做前 2 個")
+            if not steps and calls and not TOOLS_ONLY["開"]:   # 他沒照格式、寫了舊的「用」：前 N 個當 N 步
                 steps = [{"做": c, "結果應該是": ""} for c in calls[:plan_n]]
                 plan_notes.append(f"✗ 這次挑戰要寫「下{kn}步」（每步 做＋結果應該是）；你寫了「用」，程式拿前{kn}個當{kn}步做")
             if len(steps) > plan_n:

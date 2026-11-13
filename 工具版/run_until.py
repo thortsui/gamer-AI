@@ -21,6 +21,7 @@ def main():
     ap.add_argument("--until", required=True)
     ap.add_argument("--game", required=True)
     ap.add_argument("--window", default="")
+    ap.add_argument("--tools-only", action="store_true")   # 11/13 只輸出工具
     ap.add_argument("--effort", default="慢想")   # 11/13 使用者「預設最低的反射思考」→ 傳 反射
     a = ap.parse_args()
     until = datetime.strptime(a.until, "%Y-%m-%d %H:%M")
@@ -42,7 +43,7 @@ def main():
             env["GAMER_WINDOW_PROC"] = a.window
         cmd = [sys.executable, "-u", os.path.join("工具版", "tool_agent.py"), "--game", a.game, "--live", "--rounds", "5000",
                "--deadline", "600", "--max-tokens", "8000", "--effort", a.effort, "--lock-effort", "--verify2", "--steps", "2",
-               "--no-small-update", "--tree-rotate", "30", "--tree-t0", datetime.now().strftime("%H:%M"), "--slim-system", "--mem-check", "120"]
+               "--no-small-update", "--tree-rotate", "30", "--tree-t0", datetime.now().strftime("%H:%M"), "--slim-system", "--mem-check", "120"] + (["--tools-only"] if a.tools_only else [])
         out = open(os.path.join(mdir, "stdout.log"), "w", encoding="utf-8")
         err = open(os.path.join(mdir, "stderr.log"), "w", encoding="utf-8")
         proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=out, stderr=err, creationflags=subprocess.CREATE_NO_WINDOW)
