@@ -1477,4 +1477,23 @@ try:
 finally:
     T.TOOLS_ONLY["開"] = False
 check("只輸出工具 關：格式照舊", '"看到"' in T.plan_format(2) and T.build_system("動物醫院", cat, 2) == _s_old)
+# 11/13 22:5x 使用者「額外新增一個文檔叫做他自己的檢討…套用至下一次去進行改正」
+import tempfile, big_review as _BR
+_td = tempfile.mkdtemp()
+_o1 = {"要改的習慣": ["要先對正再走"], "卡最久的三件事": [{"情況": "撞牆", "當時該怎麼做": "退(0.4)→轉(90)"}],
+       "小任務一次做對": [{"小任務": "進場", "一次做對": False, "下次怎麼一次做對": "走0.3"}, {"小任務": "讀字", "一次做對": True, "下次怎麼一次做對": "x"}]}
+check("自己的檢討：沒檔時上一段是空", _BR.last_self_review(_td) == "")
+_BR.write_self_review(_td, "2026-11-13", _o1)
+_b1 = open(os.path.join(_td, _BR.SELF_REVIEW), encoding="utf-8").read()
+check("自己的檢討：抄要改的習慣、當時該怎麼做、沒一次做對的下次做法（做對的不抄）",
+      "要先對正再走" in _b1 and "撞牆→退(0.4)→轉(90)" in _b1 and "進場→走0.3" in _b1 and "讀字→" not in _b1, _b1[-200:])
+_BR.write_self_review(_td, "2026-11-14", {"要改的習慣": ["要讀字"], "上次要改的做到沒": [{"要改": "要先對正再走", "做到沒": True, "證據": "第3輪"}]})
+_b2 = open(os.path.join(_td, _BR.SELF_REVIEW), encoding="utf-8").read()
+check("自己的檢討：累積不覆蓋、標頭只一次、最後一段是最新、有做到沒",
+      _b2.count("# 他自己的檢討") == 1 and "要先對正再走" in _b2 and _BR.last_self_review(_td).startswith("## 2026-11-14") and "✓ 要先對正再走" in _b2, _b2[-200:])
+check("自己的檢討：沒有要改的就不寫", _BR.write_self_review(_td, "x", {}) is None)
+_sd = T.build_system("下樓逃殭屍", cat, 2)
+check("自己的檢討：下樓逃殭屍 system 帶【你自己的檢討】、要改的習慣不再重複帶",
+      "【你自己的檢討" in _sd and "〔要改的習慣〕" not in _sd, len(_sd))
+_r = _tr.run("查準則", {"對象或情況": "自己的檢討"}); check("自己的檢討：查準則(自己的檢討) 叫得出來", _r.startswith("【自己的檢討】"), _r[:80])
 print("ALL PASS" if ok else "SOME FAIL"); sys.exit(0 if ok else 1)

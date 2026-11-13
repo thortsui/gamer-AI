@@ -23,6 +23,53 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 NL = "\n"
 
+# 11/13 22:5x 使用者：「額外新增一個文檔叫做他自己的檢討：他能閱讀到他自己檢討後，他覺得要修改的東西，並且套用至下一次去進行改正」
+SELF_REVIEW = "自己的檢討.md"
+SELF_REVIEW_HEAD = ("# 他自己的檢討" + "\n"
+                    + "（使用者 11/13 交代：大檢討後你覺得要改的東西，下一次照著改正。每次大檢討後程式把你寫的"
+                      "「要改的習慣」「卡最久的三件事→當時該怎麼做」「小任務沒一次做對→下次怎麼一次做對」原話抄進來，最新的在最下面）" + "\n")
+
+
+def self_review_items(o):
+    """從大檢討 JSON 取出他覺得要改的（都是他的原話）"""
+    items = []
+    for x in o.get("要改的習慣") or []:
+        if isinstance(x, str) and x.strip():
+            items.append(x.strip())
+    for x in o.get("卡最久的三件事") or []:
+        if isinstance(x, dict) and str(x.get("當時該怎麼做", "")).strip():
+            items.append(f"{x.get('情況', '')}→{x['當時該怎麼做']}")
+    for x in o.get("小任務一次做對") or []:
+        if isinstance(x, dict) and x.get("一次做對") is not True and str(x.get("下次怎麼一次做對", "")).strip():
+            items.append(f"{x.get('小任務', '')}→{x['下次怎麼一次做對']}")
+    return items
+
+
+def last_self_review(m):
+    """自己的檢討.md 最後一段（上一次大檢討要改的）；沒有就空字串"""
+    body = read(os.path.join(m, SELF_REVIEW))
+    secs = re.split(r"\n(?=## )", body or "")
+    secs = [x for x in secs if x.startswith("## ")]
+    return secs[-1].strip() if secs else ""
+
+
+def write_self_review(m, date, o):
+    items = self_review_items(o)
+    if not items:
+        return None
+    p = os.path.join(m, SELF_REVIEW)
+    new = not os.path.exists(p)
+    out = [f"## {date} 大檢討（{datetime.now().strftime('%m/%d %H:%M')}）"]
+    done = [x for x in o.get("上次要改的做到沒") or [] if isinstance(x, dict)]
+    if done:
+        out.append("### 上次要改的做到沒")
+        out += [f"- {'✓' if x.get('做到沒') is True else '✗'} {x.get('要改', '')}（{x.get('證據', '')}）" for x in done]
+    out.append("### 下一次要改的")
+    out += ["- " + x for x in items]
+    with open(p, "a", encoding="utf-8") as f:
+        f.write((SELF_REVIEW_HEAD if new else "") + "\n" + "\n".join(out) + "\n")
+    return p
+
 
 def read(p, tail=None):
     try:
@@ -103,6 +150,7 @@ def main():
     custom = read(T.custom_path(a.game))
     goal = read(os.path.join(ROOT, "專案", a.game, "記憶", "任務指示.txt"))
     tool_list = NL.join(T.catalog_lines(cat))
+    prev_self = last_self_review(m)
 
     system = (f"你是 gamer AI，正在學 Roblox「{a.game}」。現在遊戲停著，你在做今天的大檢討——不是玩，是回頭看自己一整天。" + NL
               + "使用者給你的目標：" + goal.strip() + NL
@@ -114,6 +162,7 @@ def main():
             + "【你今天寫的檢討】" + NL + rev_txt + NL + NL
             + "【你自己記的東西】" + NL + mine + NL
             + "【你自己定義過的工具】" + NL + (custom or "（沒有）") + NL + NL
+            + ("【你自己的檢討（上次大檢討你覺得要改的；先對照今天的紀錄看做到沒，寫進 上次要改的做到沒）】" + NL + prev_self + NL + NL if prev_self else "")
             + "請做大檢討，只輸出一個 JSON，欄位：" + NL
             + '{"小任務一次做對":[{"小任務":"","一次做對":true,"沒一次做對的原因":"","下次怎麼一次做對":""}],'
               '"今天做了什麼":"<=150字","卡最久的三件事":[{"情況":"","卡了多久或幾次":"","為什麼":"","當時該怎麼做":""}],'
@@ -125,6 +174,7 @@ def main():
               '"記卡法":[{"情況":"","解法":""}],'
               '"記筆記":["一句一條，表格式，確定的事才寫"],'
               '"記準則":[{"對象":"東西或情況","準則":"一句：能不能、怎麼做（你今天自己發現的）"}],'
+              '"上次要改的做到沒":[{"要改":"（上次自己的檢討裡的一條）","做到沒":true,"證據":"今天紀錄裡哪裡看得出來"}],'
               '"要改的習慣":["例如：E 一律先長按 1.5 秒再試短按；右上角黑底白字是任務不是按鈕；填 false 當輪就檢討"]}')
     t0 = time.time()
     if a.reuse:
@@ -194,7 +244,7 @@ def main():
             applied.append("記準則 → " + tools.mem_rule(t.get("對象", ""), t.get("準則", "")))
 
     out = [f"# 大檢討 {a.date}（{datetime.now().strftime('%m/%d %H:%M')}，{a.effort}，{dt:.0f} 秒{'，JSON 從推理取出' if from_reason else ''}）", ""]
-    for k in ("小任務一次做對", "今天做了什麼", "卡最久的三件事", "大任務為什麼沒完成", "卡法歸納", "明天開場要做什麼", "新工具", "補用途", "記卡法", "記筆記", "記準則", "要改的習慣"):
+    for k in ("小任務一次做對", "今天做了什麼", "卡最久的三件事", "大任務為什麼沒完成", "卡法歸納", "明天開場要做什麼", "新工具", "補用途", "記卡法", "記筆記", "記準則", "上次要改的做到沒", "要改的習慣"):
         v = o.get(k)
         if v is None:
             continue
@@ -216,6 +266,8 @@ def main():
     with open(os.path.join(m, f"大檢討_{a.date}.json"), "w", encoding="utf-8") as f:
         json.dump({"輸出": o, "原文": raw, "推理": reason, "秒": dt}, f, ensure_ascii=False, indent=1)
     print(f"[大檢討] 存 {p}")
+    sp = write_self_review(m, a.date, o)
+    print(f"[大檢討] 自己的檢討：{'加進 ' + sp if sp else '這次沒有要改的，沒寫'}")
     print(NL.join(out[:60]))
 
 

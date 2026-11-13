@@ -318,7 +318,7 @@ def _build_system(game, cat, plan3=False):
     try:
         big = open(os.path.join(gdir, "記憶", "工具版", "大檢討.md"), encoding="utf-8").read()
         keep = []
-        for sec in ("明天開場要做什麼", "要改的習慣", "卡法歸納"):
+        for sec in ("明天開場要做什麼", "卡法歸納"):          # 要改的習慣 11/13 起在【你自己的檢討】
             mm = re.search(r"## " + sec + r"\n(.*?)(?=\n## |\Z)", big, flags=re.S)
             if mm:
                 keep.append(f"〔{sec}〕" + NL + mm.group(1).strip()[:900])
@@ -343,7 +343,17 @@ def _build_system(game, cat, plan3=False):
                 mine_txt += title + NL + body[:900] + NL * 2
         except OSError:
             pass
-    review_txt = mine_txt + review_txt
+    # 11/13 22:5x 使用者：「新增一個文檔叫做他自己的檢討：他能閱讀到他自己檢討後，他覺得要修改的東西，並且套用至下一次去進行改正」
+    self_txt = ""
+    try:
+        body = open(os.path.join(gdir, "記憶", "工具版", "自己的檢討.md"), encoding="utf-8").read()
+        secs = [x for x in re.split(r"\n(?=## )", body) if x.startswith("## ")]
+        if secs:
+            self_txt = ("【你自己的檢討（上次大檢討後你覺得要改的，這一次照著改正；全部叫 查準則(自己的檢討)）】" + NL
+                        + secs[-1].strip()[:1200] + NL * 2)
+    except OSError:
+        pass
+    review_txt = mine_txt + self_txt + review_txt
     if SLIM["開"]:
         blocks = re.split(r"\n(?=\[20\d\d-)", goal)
         goal_s = NL.join(b.strip() for b in blocks if b.strip() and not b.strip().startswith(GOALS_IN_TOOLS)) or "（沒有）"
@@ -961,7 +971,8 @@ class Tools(ExtraTools):
                  "死亡": os.path.join("工具版", "死亡檢討.md"), "學習整理": os.path.join("工具版", "學習整理.md"),
                  "慢想": os.path.join("工具版", "慢想.md"), "互動物": os.path.join("工具版", "互動物.md"),
                  "標點": os.path.join("工具版", "標點.md"), "地點": os.path.join("工具版", "地點.md"),
-                 "觸碰物": os.path.join("工具版", "觸碰物.md"), "檢討": os.path.join("工具版", "檢討.md")}   # 10/24 稽核：工具版的檔叫得出來
+                 "觸碰物": os.path.join("工具版", "觸碰物.md"), "檢討": os.path.join("工具版", "檢討.md"),
+                 "自己的檢討": os.path.join("工具版", "自己的檢討.md")}   # 10/24 稽核：工具版的檔叫得出來
         key = str(類別).strip()
         f = next((v for k, v in table.items() if key and key in k), None)
         if not f:
