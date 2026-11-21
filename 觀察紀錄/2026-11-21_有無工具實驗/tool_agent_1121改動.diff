@@ -1,0 +1,125 @@
+--- tool_agent.py（11/21 多嘗試前）
++++ tool_agent.py（11/22）
+@@ -203,6 +203,23 @@
+ # 使用者目標裡已經掛到工具上的段落（slim 時 system 不再列；之後新加的段落照樣列）
+ GOALS_IN_TOOLS = ("[2026-10-18 23:2x", "[2026-10-22 00:4x", "[2026-10-23 12:2x", "[2026-10-26 14:3x", "[2026-10-26 16:5x")
+ TOOL_TREE = {"開": False}  # --tool-tree／--tree-rotate：system 只列第一層，他用 打開(路徑) 往下找
++# 11/21 使用者「讓他優先去進行多嘗試而非畫面的敘述…讓千問這種視覺比較弱的模型也能正常理解畫面」（--try-first）
++#   Haiku＋工具版 1 小時 151 輪：工具 449 次，描述畫面／確認是否是UI／讀字／放大／看四周 共 265 次，真正動手（走／按E／點）十幾次
++#   → 觀察工具每輪最多 1 個、上一輪沒動手這輪 0 個；每輪至少一步動手；靠程式量的「有沒有反應」當眼睛
++TRY_FIRST = {"開": False}
++TRY_LOOK_GROUPS = ("看", "校準")
++TRY_ACT_GROUPS = ("移動", "互動")
++TRY_NOT_ACT = ("等", "捲", "取消點")
++TRY_PAY = ("robux", "buy", "purchase", "$", "購買", "解鎖", "升級", "付費", "復活")
++TRY_RULE = ("【多嘗試優先】（使用者 11/21 交代，這次照這個做）研究遊戲靠動手試，不靠先把畫面看懂。"
++            "①每輪的步數裡至少一步是動手（走、走過去、按 E、長按 E、左鍵、點）。"
++            "②觀察工具（描述畫面、讀字、放大、看四周、確認是否是UI…）一輪最多一個；上一輪沒有動手，這一輪就不能用，程式會擋。"
++            "③看到沒試過的東西就走近、按 E 或長按 E 試；工具回傳的「畫面變化／有沒有反應」就是結果，不用先描述畫面確認。"
++            "④試完有沒有用都用 登記物品 或 記準則 記一句；同一個東西、同一個介面試 3 次沒有新結果就換別的東西、換別的地方。"
++            "⑤只有付費要停：按 E 前程式會讀畫面中間的字，有 購買／Buy／Robux／$ 就不按；點擊照舊兩步確認。"
++            # 11/21 晚 使用者「用鼓勵探索的新版本 盡可能的去鼓勵探索 紀錄越多越好」
++            "⑥盡量探索、紀錄越多越好：優先去沒去過的地方、試沒試過的東西和介面；每發現一個新地方、新東西、新介面、新規則或任務字變了，"
++            "當輪就用 登記物品／記準則／記筆記 記下來（先記一輪最多 2 個，每輪都可以記）。沒有新發現的那輪也記一句「試了什麼、沒反應」。")
+ TREE_OPEN_ENTRY = {"名稱": "打開", "類別": "文件", "用途": "工具樹一層一層打開：給第一層名稱就列下一層；打開到最底層就列出那幾個工具的用法和例子（之後 8 輪面板會一直列著）。做新的事之前、上一步沒照預期、換場景或換小任務、不知道用哪個工具時都先打開那一類；放先記、不佔步數、不動遊戲",
+                    "用法": "打開(路徑)", "例": "打開(移動與視角)", "參數": {"路徑": "第一層名稱，或 第一層/第二層"},
+                    "回傳": "下一層的名稱與說明；最底層＝那幾個工具的用法、用途、例子", "實作": "tree_open", "隱藏": True,
+@@ -312,7 +329,8 @@
+     rules = ("【絕對限制】（使用者定的，違反就是錯，沒有例外）" + NL
+              + NL.join(f"{i + 1}. {l}" for i, l in enumerate(limits)) + NL
+              + "「看到」只寫畫面上真的看得到的東西：物件、文字、方位、數字；不形容氣氛、不推測；只看這一輪的畫面寫，不要抄前幾輪。" + NL
+-             + "所有文字欄位都是表格式短語（欄:值｜欄:值），不寫連接詞與贅字。")
++             + "所有文字欄位都是表格式短語（欄:值｜欄:值），不寫連接詞與贅字。"
++             + ((NL * 2 + TRY_RULE) if TRY_FIRST["開"] else ""))
+     # 2026-10-15 22:5x 使用者：「讓他自己開始跑大檢討」→ 他寫的大檢討裡「明天開場要做什麼」「要改的習慣」每次開機帶進來（他自己的話）
+     review_txt = ""
+     try:
+@@ -436,7 +454,7 @@
+ 
+ def slim_format(fmt):
+     """slim／工具樹：JSON「先記」欄是他寫答案前最後讀到的（有 false 叫 檢討 66% 照做），把 打開 和 找錯 也放在這裡。"""
+-    add = "；符合時也可以找做慢、做白工的地方檢討"
++    add = "" if TRY_FIRST["開"] else "；符合時也可以找做慢、做白工的地方檢討"   # 11/21 多嘗試：只有 false 才檢討
+     if TOOL_TREE["開"]:
+         add += "；有 false 時同時 打開(那一步工具所在的那一格) 看同一格有沒有更合適的工具"
+     out = fmt.replace("有 false 就在這裡叫 檢討(…)", "有 false 就在這裡叫 檢討(…)" + add)
+@@ -1489,6 +1507,16 @@
+             hit = self._leave_on_screen()
+             if hit:
+                 return f"沒按 {k}：畫面上有會離開遊戲的字（{'、'.join(hit)}），這時按它可能選到那個按鈕。"
++        if self.live and TRY_FIRST["開"] and k == "e":   # 11/21 多嘗試：E 變多，按之前讀畫面中間的字擋付費
++            try:
++                txt = self.see_text()
++                mid = [m.group(1) for m in re.finditer(r"「([^」]*)」\(([\d.]+),([\d.]+)\)", txt)
++                       if 0.2 <= float(m.group(2)) <= 0.8 and 0.2 <= float(m.group(3)) <= 0.85]
++                hit = [w for w in TRY_PAY if any(w in s.lower() for s in mid)]
++            except Exception:  # noqa: BLE001
++                mid, hit = [], []
++            if hit:
++                return f"沒按 E：畫面中間的字 {mid[:6]} 有付費字（{'、'.join(hit)}），這個東西要花錢，換別的東西試"
+         d = max(lo, min(hi, d))
+         noise = None
+         self._noise_pair = None
+@@ -6204,7 +6232,11 @@
+     ap.add_argument("--brain-search", action="store_true", help="--brain 時多給 WebSearch／WebFetch")
+     ap.add_argument("--brain-native", action="store_true",
+                     help="10/24 使用者「原生的Claude 不要洗掉」：保留 Claude Code 原本 system＋原生工具、整段同一個 session")
++    ap.add_argument("--try-first", action="store_true",
++                    help="11/21 使用者「優先多嘗試而非畫面敘述」：觀察工具每輪最多 1 個、上一輪沒動手這輪 0 個；按 E 前擋付費字")
+     args = ap.parse_args()
++    TRY_FIRST["開"] = bool(args.try_first)
++    _try_acted = [True]          # 上一輪有沒有動手（第一輪當有）
+     _ctx_t0 = time.time()
+     if args.ctx_t0:
+         try:
+@@ -6352,6 +6384,17 @@
+         TOOL_TREE["開"] = tool_mode == "樹"
+         tools.tree_round = rnd
+         system = build_system(args.game, cat, plan_n)
++        # 11/21 晚 使用者「不能有隊友…幫她按 ESC 檢查團隊裡面是否只有他一人」→ SOLO_GUARD=1 時程式每輪開頭查（模型不知道）
++        if live and os.environ.get("SOLO_GUARD") == "1" and os.environ.get("SOLO_GUARD_DIR"):
++            try:
++                if os.environ["SOLO_GUARD_DIR"] not in sys.path:
++                    sys.path.insert(0, os.environ["SOLO_GUARD_DIR"])
++                import 隊友檢查
++                _g = 隊友檢查.guard(tools, "工具版")
++                if _g:
++                    print(f"   [隊友檢查] {_g}")
++            except Exception as _e:  # noqa: BLE001
++                print(f"   [隊友檢查] 失敗 {_e}")
+         if live:
+             fg_ok, fg_title = tools.fg_state()
+             if not fg_ok:
+@@ -6610,12 +6653,32 @@
+                     rets.append(f"✗ 先記 只放 記錄／檢討／文件／學習類；「{name}」是遊戲動作，要排進 下{kn}步（這次沒做）")
+                     continue
+                 do(item, "先記 ")
++            look_left = (1 if _try_acted[0] else 0)
++            acted_now = False
+             for i, st in enumerate(steps):           # N 步一口氣做完，中間不回大腦
+                 LIVE["_預計"] = str(st.get("結果應該是") or "")
++                if TRY_FIRST["開"]:                  # 11/21 多嘗試：觀察工具限量
++                    nm = parse_call(st["做"], cat)[0]
++                    gp = groups.get(nm)
++                    if gp in TRY_LOOK_GROUPS:
++                        if look_left <= 0:
++                            st["回傳"] = (f"沒做「{nm}」：多嘗試模式，觀察工具一輪最多一個，上一輪沒動手這輪不能用。"
++                                         "直接動手試（走近、按 E、長按 E、點），程式會量有沒有反應")
++                            rets.append(f"✗ 第{i + 1}步 {st['回傳']}")
++                            print(f"   ✋ 第{i + 1}步 擋下觀察 {nm}")
++                            tools.step_log.append({"做": str(st["做"]), "結果應該是": st["結果應該是"], "回傳": st["回傳"], "符合": None})
++                            continue
++                        look_left -= 1
++                    elif gp in TRY_ACT_GROUPS and nm not in TRY_NOT_ACT:
++                        acted_now = True
+                 st["回傳"] = do(st["做"], f"第{i + 1}步 ")
+                 tools.step_log.append({"做": st["做"] if isinstance(st["做"], str) else json.dumps(st["做"], ensure_ascii=False),
+                                        "結果應該是": st["結果應該是"], "回傳": str(st["回傳"]), "符合": None})
+             tools.step_log = tools.step_log[-20:]
++            if TRY_FIRST["開"]:
++                _try_acted[0] = acted_now
++                if not acted_now:
++                    rets.append("⚠ 多嘗試模式：這一輪沒有動手（走／按 E／點），下一輪不能用觀察工具，請直接試")
+         else:
+             for item in list(calls)[:5]:
+                 do(item)

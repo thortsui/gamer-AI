@@ -1,0 +1,120 @@
+"""11/22 01:1x 使用者「至少排到一局，而統計的數量就是從那一局開始到那一局結束作為統計資訊」
+取代 探索.py 剩下的段、探索_重跑.py、探索_haiku.py（那三支已停；探索.py 第 3 段 Sonnet 原生 low 的 raw_agent 讓它跑完）。
+每段：跑到「第一局單人局結束」（隊友檢查.py 放 stop.txt）就結束；最長 CAP_H 小時；統計只算那一局。
+順序：等第 3 段（raw_agent PID 參數）→ 4 Sonnet＋工具 low → 2b Sonnet＋工具 xhigh 重跑 → Haiku 原生 xhigh → Haiku＋工具 xhigh → Haiku 原生 low → Haiku＋工具 low。
+工具版每段記憶清空；全部結束（含中斷）搬回地端記憶、拿掉任務指示探索段。"""
+import os, shutil, subprocess, sys, time
+from datetime import datetime, timedelta
+
+WT = r"D:\Documents\ThorWorkSpace\gamer AI 工具版"
+HERE = os.path.dirname(os.path.abspath(__file__))
+G = os.path.join(WT, "專案", "動物醫院")
+MEM = os.path.join(G, "記憶", "工具版")
+OLD = os.path.join(G, "_舊記憶_1121", "工具版")
+TASK = os.path.join(G, "記憶", "任務指示.txt")
+HEAD = "[2026-11-21 使用者]\n使用工具，盡可能多探索這支遊戲，發現的東西都記錄下來，紀錄越多越好。\n\n"
+STOP = os.path.join(WT, "stop.txt")
+PY = r"C:\Python313\python.exe"
+LOG = os.path.join(HERE, "探索2.log")
+RAW = os.path.join(HERE, "raw_agent.py")
+RUN = os.path.join(HERE, "sonnet_工具版_run.py")
+CAP_H = 2
+
+
+def log(m):
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now():%m/%d %H:%M:%S} {m}\n")
+
+
+def roblox():
+    subprocess.run(["taskkill", "/IM", "RobloxPlayerBeta.exe", "/F"], capture_output=True)
+    time.sleep(5)
+    os.startfile("roblox://placeId=78515283254292")
+    time.sleep(75)
+    log("Roblox 重開回大廳")
+
+
+def run(label, args, env_extra, cwd, out):
+    if os.path.exists(STOP):
+        os.remove(STOP)
+    roblox()
+    until = (datetime.now() + timedelta(hours=CAP_H)).strftime("%Y-%m-%d %H:%M")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", SOLO_GUARD="1", SOLO_GUARD_DIR=HERE, SOLO_STOP_AFTER="1", SOLO_STOP_FILE=STOP, **env_extra)   # 隊友檢查
+    with open(out, "a", encoding="utf-8") as o:
+        p = subprocess.Popen([PY, "-u"] + args + ["--until", until], cwd=cwd, env=env, stdout=o, stderr=subprocess.STDOUT,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+        log(f"{label} 啟動 PID {p.pid} 到 {until}")
+        p.wait()
+    log(f"{label} 結束 rc {p.returncode}")
+    time.sleep(20)
+
+
+def audit(outdir):
+    """原生段跑完稽核：工具使用.jsonl 有沒有連網、搜尋、讀別的專案（使用者：絕對禁止搜尋以及找攻略）。"""
+    import re
+    f = os.path.join(HERE, outdir, "工具使用.jsonl")
+    if not os.path.exists(f):
+        log(f"稽核 {outdir}：沒有 工具使用.jsonl（沒用任何 Claude 工具）"); return
+    pat = re.compile(r"http|www\.|urllib|requests|socket|curl|wget|WebSearch|WebFetch|攻略|wiki|gamer AI|專案[\\/]動物醫院|_舊記憶|Sitcon 2026[\\/](簡報|大綱)", re.I)
+    lines = open(f, encoding="utf-8").read().splitlines()
+    hit = [l[:300] for l in lines if pat.search(l)]
+    log(f"稽核 {outdir}：工具使用 {len(lines)} 次，可疑 {len(hit)} 次")
+    with open(os.path.join(HERE, outdir, "稽核.txt"), "w", encoding="utf-8") as o:
+        o.write("\n".join(hit) or "沒有可疑紀錄")
+
+
+def stash(name):
+    dst = os.path.join(G, f"_{name}_1121")
+    os.makedirs(dst, exist_ok=True)
+    shutil.move(MEM, os.path.join(dst, "工具版"))
+    os.makedirs(MEM, exist_ok=True)
+    log(f"記憶搬到 {dst}")
+
+
+
+WAIT = sys.argv[1]
+log(f"等 第 3 段 raw_agent PID {WAIT}")
+while WAIT in subprocess.run(["tasklist", "/FI", f"PID eq {WAIT}"], capture_output=True, text=True).stdout:
+    time.sleep(20)
+log("第 3 段結束")
+time.sleep(10)
+audit("sonnet_low_探索")
+if not os.path.isdir(OLD):
+    log("⚠ 找不到 _舊記憶_1121/工具版（地端記憶），停下來"); sys.exit(1)
+if os.path.isdir(MEM) and os.listdir(MEM):
+    stash("探索2開始前殘留")
+os.makedirs(MEM, exist_ok=True)
+s = open(TASK, encoding="utf-8").read()
+if not s.startswith(HEAD):
+    open(TASK, "w", encoding="utf-8").write(HEAD + s)
+
+def tool(label, brain, eff, name):
+    run(label, [RUN, "--brain", brain, "--effort", eff, "--try-first"], {}, WT, os.path.join(HERE, f"{name}.out"))
+    stash(name)
+
+def raw(label, model, eff, out):
+    run(label, [RAW, "--effort", eff], {"RAW_MODEL": model, "RAW_OUT": out, "RAW_EXPLORE": "1"}, HERE, os.path.join(HERE, f"{out}.out"))
+    audit(out)
+
+try:
+    tool("4 Sonnet＋工具 low", "sonnet", "快思推理", "sonnet探索low")
+    tool("2b Sonnet＋工具 xhigh 重跑", "sonnet", "慢想", "sonnet探索xhigh重跑")
+    raw("5 Haiku 原生 xhigh", "haiku", "xhigh", "haiku_xhigh_探索")
+    tool("6 Haiku＋工具 xhigh", "haiku", "慢想", "haiku探索xhigh")
+    raw("7 Haiku 原生 low", "haiku", "low", "haiku_low_探索")
+    tool("8 Haiku＋工具 low", "haiku", "快思推理", "haiku探索low")
+finally:
+    if os.path.isdir(OLD):
+        if os.path.isdir(MEM) and os.listdir(MEM):
+            stash("探索2中斷")
+        if os.path.isdir(MEM):
+            os.rmdir(MEM)
+        shutil.move(OLD, MEM)
+        log("地端原本的記憶已搬回 記憶/工具版")
+    s = open(TASK, encoding="utf-8").read()
+    if s.startswith(HEAD):
+        open(TASK, "w", encoding="utf-8").write(s[len(HEAD):])
+        log("任務指示探索那段已拿掉")
+    if os.path.exists(STOP):
+        os.remove(STOP)
+    log("全部結束")
