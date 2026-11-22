@@ -12,7 +12,8 @@ MDIR = os.path.join(ROOT, "專案", GAME, "記憶", "工具版")
 
 ap = argparse.ArgumentParser(); ap.add_argument("--until", required=True)
 ap.add_argument("--effort", default="慢想")
-ap.add_argument("--try-first", action="store_true")   # 11/21 多嘗試
+ap.add_argument("--try-first", action="store_true")
+ap.add_argument("--v3", action="store_true")   # 11/22 第三版工具   # 11/21 多嘗試
 ap.add_argument("--brain", default="sonnet")   # 11/21 弱模型實驗：haiku   # 11/21 接續實驗用 快思推理（=low，最低）
 a = ap.parse_args()
 until = datetime.strptime(a.until, "%Y-%m-%d %H:%M")
@@ -34,7 +35,7 @@ def start():
     cmd = [sys.executable, "-u", os.path.join("工具版", "tool_agent.py"), "--game", GAME, "--live", "--rounds", "5000",
            "--deadline", "600", "--max-tokens", "8000", "--effort", a.effort, "--lock-effort", "--verify2", "--steps", "2",
            "--no-small-update", "--tree-rotate", "30", "--tree-t0", datetime.now().strftime("%H:%M"), "--slim-system",
-           "--mem-check", "120", "--brain", a.brain] + (["--try-first"] if a.try_first else [])
+           "--mem-check", "120", "--brain", a.brain] + (["--try-first"] if a.try_first else []) + (["--v3"] if a.v3 else [])
     out = open(os.path.join(MDIR, "stdout.log"), "w", encoding="utf-8")
     err = open(os.path.join(MDIR, "stderr.log"), "w", encoding="utf-8")
     p = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=out, stderr=err, creationflags=subprocess.CREATE_NO_WINDOW)

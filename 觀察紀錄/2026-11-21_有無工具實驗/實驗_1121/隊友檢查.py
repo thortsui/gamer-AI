@@ -117,12 +117,29 @@ def guard(t, label=""):
         if STATE["嘗試開始"] is None:
             STATE["嘗試開始"] = time.time(); STATE["嘗試次"] += 1
         im_in = in_match(im)
+        # 11/22 15:4x 使用者「單人局死亡才要結束」→ 單人局中看到死亡畫面（再玩一次／讓所有玩家復活）就結束這段；輪班結算、換班都繼續玩
+        if STATE["單人中"] and not STATE["單人局結束"] and not im_in:
+            dw = "".join(w for _, _, w in ocr(im))
+            if "你死了" in dw or "再玩一次" in dw or "所有玩家復活" in dw:   # 死亡畫面固定有「你死了」（Haiku 兩段截圖驗證）
+                STATE["單人中"] = False; STATE["單人局結束"] = True
+                _log({"段": label, "結果": "單人局死亡（死亡畫面），第一局"})
+                sf = os.environ.get("SOLO_STOP_FILE")
+                if os.environ.get("SOLO_STOP_AFTER") == "1" and sf:
+                    open(sf, "w").close()
+                    _log({"段": label, "結果": f"單人局死亡 → 放 {sf}，這段結束"})
+                return "單人局死亡"
         if im_in and not STATE["在局"]:
             STATE["在局"] = True
             _log({"段": label, "結果": "進場", "第幾次嘗試": STATE["嘗試次"], "輪數": STATE["嘗試輪"],
                   "秒": round(time.time() - STATE["嘗試開始"])})
         if not STATE["在局"]:
             STATE["嘗試輪"] += 1
+        if not im_in and STATE["單人中"]:
+            _dw = "".join(w for _, _, w in ocr(im))
+            if "連線中斷" in _dw or "閒置" in _dw:          # 11/22 19:1x：閒置被踢／斷線 → 之後回大廳不算死亡
+                if not STATE.get("斷線"):
+                    _log({"段": label, "結果": "單人局中斷線（連線中斷／閒置），回大廳不算結束"})
+                STATE["斷線"] = True
         if not im_in:
             # 11/21 23:4x：局裡開電腦／表格時上方「輪班」會被蓋住，不能當成回大廳；看到大廳左側按鈕（商店／職業／日誌）才重設
             if in_lobby(im):
@@ -132,10 +149,18 @@ def guard(t, label=""):
                 if STATE["單人中"]:
                     STATE["單人中"] = False
                     first = not STATE["單人局結束"]
-                    STATE["單人局結束"] = True
+                    if not STATE.get("斷線"):              # 斷線回大廳不算第一局結束（下一局單人局死亡才結束）
+                        STATE["單人局結束"] = True
                     _log({"段": label, "結果": "單人局結束（回到大廳）" + ("，第一局" if first else "")})
                     sf = os.environ.get("SOLO_STOP_FILE")
-                    if first and os.environ.get("SOLO_STOP_AFTER") == "1" and sf:
+                    # 11/22 15:3x 使用者「排到單人局後不要退出就正常玩」→ 不再放 stop.txt；單人局結束只記下時間（統計仍可取第一局），繼續玩到時間上限
+                    # 11/22 17:1x：L3 單人局是「閒置 20 分鐘連線中斷(278)」回大廳、不是死亡，卻被這裡當結束 → 只有死亡畫面才結束，回大廳不結束
+                    # 11/22 19:1x：工具版死亡後會卡在等畫面（L4 18:54 你死了→19:06 才下一輪），守門員看不到死亡畫面 →
+                    #   單人局後回大廳、而且沒看到斷線 ＝ 當作死亡結束；看到斷線就不結束、繼續玩
+                    _dc = STATE.pop("斷線", False)
+                    if _dc:
+                        _log({"段": label, "結果": "斷線後回大廳，不算結束，繼續"})
+                    if (not _dc) and first and os.environ.get("SOLO_STOP_AFTER") == "1" and sf:
                         open(sf, "w").close()
                         _log({"段": label, "結果": f"第一局單人局結束 → 放 {sf}，這段結束"})
                         return "單人局結束"
@@ -180,3 +205,16 @@ def guard(t, label=""):
     except Exception as e:  # noqa: BLE001
         _log({"段": label, "結果": f"檢查失敗 {e}"})
         return ""
+
+
+def on_death(label=""):
+    """11/22 20:2x：工具版自己偵測到死亡（events 有「死亡…」）時呼叫；單人局中第一次死亡 → 記下並放 stop.txt。"""
+    if not STATE["單人中"] or STATE["單人局結束"]:
+        return ""
+    STATE["單人中"] = False; STATE["單人局結束"] = True
+    _log({"段": label, "結果": "單人局死亡（工具版偵測），第一局"})
+    sf = os.environ.get("SOLO_STOP_FILE")
+    if os.environ.get("SOLO_STOP_AFTER") == "1" and sf:
+        open(sf, "w").close()
+        _log({"段": label, "結果": f"單人局死亡 → 放 {sf}，這段結束"})
+    return "單人局死亡"
