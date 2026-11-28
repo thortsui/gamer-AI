@@ -1,0 +1,32 @@
+{
+  "全名": "[🧑‍🍳] Giant Fish Chef",
+  "作者": "ambr games | Studio CHIZU",
+  "places": {
+    "132508477538687": "主場"
+  },
+  "大廳place": 132508477538687,
+  "詞彙": [
+    "wall",
+    "door",
+    "window",
+    "table",
+    "chair",
+    "box",
+    "shelf",
+    "person",
+    "sign",
+    "stairs",
+    "button"
+  ],
+  "模組": {
+    "櫃檯": false,
+    "輪班計畫": false,
+    "報到課程": false,
+    "理智": false,
+    "學習課程": false,
+    "任務樹": false
+  },
+  "禁止上下轉頭": false,
+  "強制腦內地圖": true,
+  "陣列地圖": true
+}
