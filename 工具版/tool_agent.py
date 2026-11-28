@@ -1449,9 +1449,16 @@ class Tools(ExtraTools):
     def _key(self, k, d):
         import pydirectinput
         self._fg_ok()
-        pydirectinput.keyDown(k)
-        time.sleep(d)
-        pydirectinput.keyUp(k)
+        keys = [x for x in str(k).split("+") if x] or [k]     # 11/28 使用者「同時按下多顆按鈕」：shift+w＝依序壓下、一起放開
+        pressed = []
+        try:
+            for x in keys:
+                pydirectinput.keyDown(x)
+                pressed.append(x)
+            time.sleep(d)
+        finally:
+            for x in reversed(pressed):
+                pydirectinput.keyUp(x)
 
     def _walk_zoom(self, before, after, d, dd):
         """走路放大倍數量測鏈：中央 → 挖掉自己 → 中央以外鎖定的東西取中位 → (倍數或 None, 說明)。第一次與二次驗證都用同一條。"""
@@ -1516,13 +1523,25 @@ class Tools(ExtraTools):
         return [w for w in self.leave_words if w in txt]
 
     def _move(self, k, d, lo, hi):
-        if k in self.no_keys:
-            return f"沒按 {k}：這個鍵會跳離遊戲視窗，不能按"
-        if self.live and k in self.CONFIRM_KEYS and self.leave_words:
+        k = re.sub(r"\s*\+\s*", "+", str(k).strip())
+        parts = [x for x in k.split("+") if x] or [k]
+        # 11/28 使用者「檢查工具是否可以讓他同時按下多顆按鈕」：原本 shift+w 整串當一個鍵名，pydirectinput 認不得就靜默不按
+        #   → 用 + 連起來＝同時按（依序壓下、一起放開）；下面每項限制對每一顆都查
+        if len(parts) > 1:
+            import pydirectinput
+            bad = [x for x in parts if x not in pydirectinput.KEYBOARD_MAPPING]
+            if bad:
+                return f"沒按 {k}：認不得的鍵名 {'、'.join(bad)}（同時按多顆用 + 連起來，例 shift+w、w+space）"
+            if len(parts) > 4:
+                return f"沒按 {k}：一次最多同時按 4 顆"
+        hit = [x for x in parts if x in self.no_keys]
+        if hit:
+            return f"沒按 {k}：{'、'.join(hit)} 會跳離遊戲視窗，不能按"
+        if self.live and any(x in self.CONFIRM_KEYS for x in parts) and self.leave_words:
             hit = self._leave_on_screen()
             if hit:
                 return f"沒按 {k}：畫面上有會離開遊戲的字（{'、'.join(hit)}），這時按它可能選到那個按鈕。"
-        if self.live and TRY_FIRST["開"] and k == "e":   # 11/21 多嘗試：E 變多，按之前讀畫面中間的字擋付費
+        if self.live and TRY_FIRST["開"] and "e" in parts:   # 11/21 多嘗試：E 變多，按之前讀畫面中間的字擋付費
             try:
                 txt = self.see_text()
                 mid = [m.group(1) for m in re.finditer(r"「([^」]*)」\(([\d.]+),([\d.]+)\)", txt)
@@ -1532,6 +1551,15 @@ class Tools(ExtraTools):
                 mid, hit = [], []
             if hit:
                 return f"沒按 E：畫面中間的字 {mid[:6]} 有付費字（{'、'.join(hit)}），這個東西要花錢，換別的東西試"
+        if len(parts) > 1:
+            d = max(lo, min(hi, d))
+            self._noise_pair = None
+            before, noise = self._grab_noise()
+            if self.live:
+                self._key(k, d)
+            else:
+                print(f"   [dry-run] 同時按 {k} {d:.1f}s")
+            return f"同時按了 {k}（壓 {d:.2f} 秒、一起放開）；" + self._changed(before, noise)
         d = max(lo, min(hi, d))
         noise = None
         self._noise_pair = None

@@ -595,6 +595,33 @@ class ExtraTools:
                 f"之後 找長相({name})、走過去({name})、追蹤({name}) 都會拿最近 {self.LOOK_REFS} 張框好的圖去找（約 1～5 秒）"
                 + ("；只記 1 張比較不準（實驗 89%），再從別的角度記 1～3 張最準（95～97%）" if n == 1 else "；記 2～4 張不同角度最準"))
 
+    def screenshot_save(self, 名稱="", 為什麼="", 框=""):
+        """11/28 使用者「給他一個額外的工具是讓他可以去對於畫面進行截圖紀錄（例如 某個按鍵按下去後會跳出UI這樣它可以截圖那個UI
+        或者看他想截圖什麼都可以 他覺得要截圖紀錄的」：叫的當下存整張畫面（給 框 就只存那一塊），寫一行到 截圖紀錄.md。"""
+        name = re.sub(r"[\/:*?\"<>|\s]+", "", str(名稱))[:30]
+        if not name:
+            return "截圖 要給名稱，例：截圖(按Tab跳出的清單,按了tab之後跳出來的UI)；只要一塊就加框 x1,y1,x2,y2（0～1）"
+        if not self.live and not self.image_path and not getattr(self, "_test_image", None):
+            return "離線／dry-run 不能截圖"
+        im = getattr(self, "_test_image", None) or self.grab()
+        if im is None:
+            return "抓不到畫面"
+        im = im.convert("RGB")
+        nums = [float(n) for n in re.findall(r"[01]?\.\d+|[01]", str(框))]
+        where = "整張畫面"
+        if len(nums) >= 4 and nums[0] < nums[2] and nums[1] < nums[3]:
+            W, H = im.size
+            im = im.crop((int(nums[0] * W), int(nums[1] * H), int(nums[2] * W), int(nums[3] * H)))
+            where = f"框 ({nums[0]:.2f},{nums[1]:.2f})～({nums[2]:.2f},{nums[3]:.2f})"
+        d = os.path.join(self.mdir, "截圖")
+        os.makedirs(d, exist_ok=True)
+        fn = datetime.now().strftime("%m%d_%H%M%S") + "_" + name + ".png"
+        im.save(os.path.join(d, fn))
+        why = str(為什麼).strip()
+        self._append("截圖紀錄.md", f"「{name}」{where}｜{why or '（沒寫為什麼）'}｜截圖/{fn}")
+        n = len([x for x in os.listdir(d) if x.endswith(".png")])
+        return f"截圖存好了：「{name}」（{where}）→ 記憶/工具版/截圖/{fn}，也寫進 截圖紀錄.md（目前共 {n} 張）"
+
     def see_look(self, 名稱=""):
         q = str(名稱).strip()
         names = [self._look_name(q)] if q else self._look_names()[:6]
